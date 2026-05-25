@@ -1,0 +1,75 @@
+# Secrets and environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.token
+
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+venv/
+.venv/
+env/
+
+# Node / frontend
+node_modules/
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.env
+dashboard/.env.*
+!dashboard/.env.example
+
+# Runtime data and local source-of-truth files
+prospects.csv
+results.csv
+linkedin_session.json
+sessions/
+*.log
+agent.log
+logs/
+
+# LinkedFlow local agent/runtime/browser data
+LinkedFlowAgent/
+bundled_browsers/
+installer_payload/
+D_LinkedFlowAgent/
+
+# Playwright/browser profiles and artifacts
+ms-playwright/
+.auth/
+playwright-report/
+test-results/
+storage_state*.json
+profile_*/
+profiles/
+
+# Build artifacts
+build/
+dist/
+installer_build/
+installer_dist/
+*.spec
+*.exe
+*.msi
+*.zip
+
+# Debug screenshots generated during LinkedIn automation testing
+after_connect.png
+dropdown.png
+screenshot.png
+screenshot_after_connect.png
+screenshot_dialog.png
+send_dialog.png
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
