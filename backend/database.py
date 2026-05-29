@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import date, datetime, timedelta, timezone
 
 from dotenv import load_dotenv
@@ -51,13 +52,31 @@ def db_get_all_campaigns() -> list[dict]:
             .execute()
         )
         c["prospect_count"] = cnt.count or 0
+        if c.get("template_id"):
+            tmpl = (
+                supabase.table("campaign_templates")
+                .select("id, key, name, status")
+                .eq("id", c["template_id"])
+                .limit(1)
+                .execute()
+            )
+            c["template"] = tmpl.data[0] if tmpl.data else None
     return campaigns
 
 
-def db_create_campaign(name: str) -> dict | None:
+def db_create_campaign(name: str, status: str = "draft", template_id: str | None = None,
+                       sequence_config: dict | None = None) -> dict | None:
+    payload = {
+        "name": name,
+        "status": status or "draft",
+    }
+    if template_id:
+        payload["template_id"] = template_id
+    if sequence_config:
+        payload["sequence_config"] = sequence_config
     result = (
         supabase.table("campaigns")
-        .insert({"name": name, "status": "active"})
+        .insert(payload)
         .execute()
     )
     return result.data[0] if result.data else None
@@ -134,6 +153,11 @@ def db_create_or_update_prospect(data: dict) -> tuple[str, dict | None]:
     initial = (data.get("initial_message") or "").strip()
     if existing:
         clean = {k: v for k, v in data.items() if v not in (None, "")}
+        if data.get("custom_fields"):
+            clean["custom_fields"] = {
+                **(existing.get("custom_fields") or {}),
+                **(data.get("custom_fields") or {}),
+            }
         if initial and existing.get("status") in ("Needs Personalization", "Connection Accepted", None, ""):
             clean["status"] = "Ready to Send"
         updated = db_update_prospect(existing["id"], clean)
@@ -143,6 +167,41 @@ def db_create_or_update_prospect(data: dict) -> tuple[str, dict | None]:
         data["status"] = "Ready to Send"
     created = db_create_prospect(data)
     return "created", created
+
+
+STANDARD_VARIABLE_FIELDS = {
+    "first_name": "first_name",
+    "last_name": "last_name",
+    "company": "company",
+    "title": "job_title",
+    "job_title": "job_title",
+    "industry": "industry",
+    "location": "location",
+}
+
+
+def db_render_message_template(template: str, prospect: dict | None) -> str:
+    """Render {{variables}} from standard prospect fields plus custom_fields."""
+    if not template:
+        return ""
+    prospect = prospect or {}
+    custom = prospect.get("custom_fields") or {}
+    values = {}
+    for var, field in STANDARD_VARIABLE_FIELDS.items():
+        values[var] = prospect.get(field) or custom.get(var) or ""
+    values.update({str(k): "" if v is None else str(v) for k, v in custom.items()})
+
+    def replace(match):
+        key = match.group(1).strip()
+        return str(values.get(key, ""))
+
+    return re.sub(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}", replace, template).strip()
+
+
+def db_extract_variables(text: str) -> list[str]:
+    if not text:
+        return []
+    return sorted(set(re.findall(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}", text)))
 
 
 def db_bulk_create_prospects(rows: list[dict]) -> int:
@@ -527,8 +586,8 @@ def db_mark_prospect_connected(prospect_id: str, details: str = "") -> dict:
         updated.get("next_steps"),
     )
 
-    queued_job = None
-    if next_status == "Ready to Send":
+    queued_job = db_advance_connected_campaign_enrollments(prospect_id)
+    if next_status == "Ready to Send" and not queued_job:
         queued_job = db_create_initial_message_job_if_ready(updated, reason="already_connected")
         if queued_job:
             db_log_activity(
@@ -547,6 +606,337 @@ def db_mark_prospect_connected(prospect_id: str, details: str = "") -> dict:
         )
 
     return {"prospect": updated, "queued_job": queued_job, "status": next_status}
+
+
+def db_get_campaign_templates(include_coming_soon: bool = True) -> list[dict]:
+    query = supabase.table("campaign_templates").select("*").order("category").order("name")
+    if not include_coming_soon:
+        query = query.eq("status", "active")
+    templates = query.execute().data or []
+    for template in templates:
+        template["steps"] = db_get_campaign_template_steps(template["id"])
+    return templates
+
+
+def db_get_campaign_template(template_id: str) -> dict | None:
+    result = (
+        supabase.table("campaign_templates")
+        .select("*")
+        .eq("id", template_id)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        return None
+    template = result.data[0]
+    template["steps"] = db_get_campaign_template_steps(template_id)
+    return template
+
+
+def db_get_campaign_template_steps(template_id: str) -> list[dict]:
+    return (
+        supabase.table("campaign_template_steps")
+        .select("*")
+        .eq("template_id", template_id)
+        .eq("is_enabled", True)
+        .order("step_order")
+        .execute()
+        .data or []
+    )
+
+
+def db_create_campaign_template(data: dict) -> dict | None:
+    steps = data.pop("steps", [])
+    result = supabase.table("campaign_templates").upsert(data, on_conflict="key").execute()
+    if not result.data:
+        return None
+    template = result.data[0]
+    if steps:
+        payload = []
+        for idx, step in enumerate(steps, start=1):
+            payload.append({
+                "template_id": template["id"],
+                "step_order": step.get("step_order", idx),
+                "action_type": step["action_type"],
+                "label": step.get("label") or step["action_type"],
+                "config": step.get("config") or {},
+                "is_enabled": step.get("is_enabled", True),
+            })
+        supabase.table("campaign_template_steps").upsert(
+            payload,
+            on_conflict="template_id,step_order",
+        ).execute()
+    return db_get_campaign_template(template["id"])
+
+
+def db_get_campaign_enrollments(campaign_id: str) -> list[dict]:
+    return (
+        supabase.table("campaign_enrollments")
+        .select("*")
+        .eq("campaign_id", campaign_id)
+        .order("created_at")
+        .execute()
+        .data or []
+    )
+
+
+def db_get_active_enrollments_for_prospect(prospect_id: str) -> list[dict]:
+    return (
+        supabase.table("campaign_enrollments")
+        .select("*")
+        .eq("prospect_id", prospect_id)
+        .eq("status", "active")
+        .execute()
+        .data or []
+    )
+
+
+def db_upsert_enrollment(campaign: dict, prospect: dict) -> dict | None:
+    payload = {
+        "campaign_id": campaign["id"],
+        "prospect_id": prospect["id"],
+        "template_id": campaign.get("template_id"),
+        "status": "active",
+        "updated_at": _utc_now(),
+    }
+    result = (
+        supabase.table("campaign_enrollments")
+        .upsert(payload, on_conflict="campaign_id,prospect_id")
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
+def db_create_prospect_list(name: str, description: str | None = None) -> dict | None:
+    result = supabase.table("prospect_lists").insert({
+        "name": name,
+        "description": description,
+    }).execute()
+    return result.data[0] if result.data else None
+
+
+def db_get_prospect_lists() -> list[dict]:
+    lists = supabase.table("prospect_lists").select("*").order("created_at", desc=True).execute().data or []
+    for item in lists:
+        count = (
+            supabase.table("prospect_list_members")
+            .select("prospect_id", count="exact")
+            .eq("list_id", item["id"])
+            .execute()
+        )
+        item["prospect_count"] = count.count or 0
+    return lists
+
+
+def db_add_prospects_to_list(list_id: str, prospect_ids: list[str]) -> int:
+    payload = [{"list_id": list_id, "prospect_id": pid} for pid in prospect_ids]
+    if not payload:
+        return 0
+    result = supabase.table("prospect_list_members").upsert(
+        payload,
+        on_conflict="list_id,prospect_id",
+    ).execute()
+    return len(result.data or [])
+
+
+def db_get_list_prospect_ids(list_ids: list[str]) -> list[str]:
+    if not list_ids:
+        return []
+    rows = (
+        supabase.table("prospect_list_members")
+        .select("prospect_id")
+        .in_("list_id", list_ids)
+        .execute()
+        .data or []
+    )
+    return sorted({r["prospect_id"] for r in rows if r.get("prospect_id")})
+
+
+def _step_wait_delta(config: dict) -> timedelta:
+    if config.get("working_days"):
+        target = add_working_days(date.today(), int(config.get("working_days") or 0))
+        return datetime.combine(target, datetime.min.time()).replace(tzinfo=timezone.utc) - datetime.now(timezone.utc)
+    return timedelta(days=int(config.get("days") or 0), hours=int(config.get("hours") or 0))
+
+
+def _message_for_step(step: dict, prospect: dict, campaign: dict) -> tuple[str, str]:
+    config = step.get("config") or {}
+    overrides = (campaign.get("sequence_config") or {}).get("messages") or {}
+    field = config.get("message_field")
+    message_type = config.get("message_type") or "initial"
+    raw = overrides.get(str(step.get("step_order"))) or config.get("message") or ""
+    if not raw and field:
+        raw = prospect.get(field) or ""
+    return db_render_message_template(raw, prospect), message_type
+
+
+def db_queue_next_campaign_step(campaign_id: str, prospect_id: str, after_step_order: int = 0,
+                                base_time: datetime | None = None) -> dict | None:
+    campaign, _ = db_get_campaign(campaign_id)
+    prospect, _ = db_get_prospect(prospect_id)
+    if not campaign or not prospect or not campaign.get("template_id"):
+        return None
+    if campaign.get("status") != "running":
+        logger.info("Campaign %s is %s; not queueing next step", campaign_id, campaign.get("status"))
+        return None
+
+    steps = db_get_campaign_template_steps(campaign["template_id"])
+    scheduled_for = base_time or datetime.now(timezone.utc)
+    for step in steps:
+        order = int(step.get("step_order") or 0)
+        if order <= after_step_order:
+            continue
+        action = step.get("action_type")
+        config = step.get("config") or {}
+
+        if action == "wait":
+            delay_override = ((campaign.get("sequence_config") or {}).get("delays") or {}).get(str(order))
+            if isinstance(delay_override, dict):
+                config = {**config, **delay_override}
+            if config.get("until") == "connected":
+                if prospect.get("status") not in (
+                    "Ready to Send", "Needs Personalization", "Initial Message Sent", "Following Up", "Replied", "No Response"
+                ):
+                    _update_enrollment_next(campaign_id, prospect_id, order, scheduled_for, None)
+                    return None
+                continue
+            scheduled_for = scheduled_for + _step_wait_delta(config)
+            continue
+
+        if action == "already connected detection":
+            continue
+
+        if action == "invitation":
+            job_type = "send_connections"
+            note_field = config.get("note_field") or "inmail_message"
+            note = db_render_message_template(config.get("note") or prospect.get(note_field) or "", prospect)[:300]
+            payload = {
+                "linkedin_url": prospect.get("linkedin_url", ""),
+                "note": note,
+                "campaign_step_order": order,
+                "action_type": action,
+            }
+        elif action in ("message", "follow-up message"):
+            message, message_type = _message_for_step(step, prospect, campaign)
+            if not message:
+                db_log_activity(prospect_id, "campaign_step", "skipped", f"Missing message for step {order}")
+                _update_enrollment_next(campaign_id, prospect_id, order, scheduled_for, None)
+                continue
+            if message_type == "initial" and prospect.get("status") not in (
+                "Ready to Send", "Initial Message Sent", "Following Up", "Replied", "No Response"
+            ):
+                db_log_activity(prospect_id, "campaign_step", "blocked", "Initial message blocked until prospect is connected and ready")
+                _update_enrollment_next(campaign_id, prospect_id, order, scheduled_for, None)
+                return None
+            job_type = "send_messages"
+            payload = {
+                "linkedin_url": prospect.get("linkedin_url", ""),
+                "message": message,
+                "message_type": message_type,
+                "campaign_step_order": order,
+                "action_type": action,
+            }
+        else:
+            db_log_activity(prospect_id, "campaign_step", "coming_soon", f"Action not implemented: {action}")
+            _update_enrollment_next(campaign_id, prospect_id, order, scheduled_for, None)
+            continue
+
+        if db_has_active_job_for_prospect(job_type, prospect_id):
+            logger.info("Active %s job already exists for prospect %s", job_type, prospect_id)
+            return None
+
+        job = db_create_job({
+            "job_type": job_type,
+            "profile_key": prospect.get("assigned_account") or "profile_1",
+            "campaign_id": campaign_id,
+            "prospect_id": prospect_id,
+            "scheduled_for": scheduled_for.isoformat(),
+            "payload": payload,
+        })
+        _update_enrollment_next(campaign_id, prospect_id, order, scheduled_for, job)
+        if job:
+            db_log_activity(prospect_id, "campaign_step", "queued", f"Queued {action} step {order}")
+        return job
+
+    supabase.table("campaign_enrollments").update({
+        "status": "completed",
+        "current_step_order": after_step_order,
+        "updated_at": _utc_now(),
+    }).eq("campaign_id", campaign_id).eq("prospect_id", prospect_id).execute()
+    return None
+
+
+def _update_enrollment_next(campaign_id: str, prospect_id: str, step_order: int,
+                            scheduled_for: datetime, job: dict | None):
+    updates = {
+        "current_step_order": step_order,
+        "next_step_at": scheduled_for.isoformat(),
+        "last_job_id": (job or {}).get("id"),
+        "updated_at": _utc_now(),
+    }
+    supabase.table("campaign_enrollments").update(updates).eq("campaign_id", campaign_id).eq("prospect_id", prospect_id).execute()
+
+
+def db_launch_campaign(campaign_id: str, prospect_ids: list[str] | None = None,
+                       list_ids: list[str] | None = None) -> dict:
+    campaign, _ = db_get_campaign(campaign_id)
+    if not campaign:
+        return {"error": "campaign_not_found", "queued": 0, "enrolled": 0}
+    if not campaign.get("template_id"):
+        return {"error": "template_required", "queued": 0, "enrolled": 0}
+
+    if list_ids:
+        prospect_ids = sorted(set((prospect_ids or []) + db_get_list_prospect_ids(list_ids)))
+
+    if prospect_ids:
+        prospects = []
+        for pid in prospect_ids:
+            prospect, _ = db_get_prospect(pid)
+            if prospect:
+                prospects.append(prospect)
+    else:
+        prospects = supabase.table("prospects").select("*").eq("campaign_id", campaign_id).execute().data or []
+
+    supabase.table("campaigns").update({
+        "status": "running",
+        "launched_at": _utc_now(),
+    }).eq("id", campaign_id).execute()
+    campaign["status"] = "running"
+
+    enrolled = 0
+    queued = 0
+    for prospect in prospects:
+        enrollment = db_upsert_enrollment(campaign, prospect)
+        if enrollment:
+            enrolled += 1
+            if db_queue_next_campaign_step(campaign_id, prospect["id"], 0):
+                queued += 1
+    return {"campaign_id": campaign_id, "enrolled": enrolled, "queued": queued}
+
+
+def db_update_campaign_status(campaign_id: str, status: str) -> dict | None:
+    now = _utc_now()
+    payload = {"status": status}
+    if status == "running":
+        payload["launched_at"] = now
+    elif status == "paused":
+        payload["paused_at"] = now
+    elif status == "archived":
+        payload["archived_at"] = now
+    result = supabase.table("campaigns").update(payload).eq("id", campaign_id).execute()
+    return result.data[0] if result.data else None
+
+
+def db_advance_connected_campaign_enrollments(prospect_id: str) -> dict | None:
+    queued = None
+    for enrollment in db_get_active_enrollments_for_prospect(prospect_id):
+        job = db_queue_next_campaign_step(
+            enrollment["campaign_id"],
+            prospect_id,
+            int(enrollment.get("current_step_order") or 0),
+        )
+        queued = queued or job
+    return queued
 
 
 def db_get_jobs(
@@ -649,6 +1039,13 @@ def db_apply_completed_job_result(job: dict, result: dict) -> None:
             "message_sent_date": today,
             "next_steps": f"Follow-up 1 on {(date.today() + timedelta(days=2)).isoformat()}",
         })
+        step_order = int((job.get("payload") or {}).get("campaign_step_order") or 0)
+        if job.get("campaign_id") and step_order:
+            db_queue_next_campaign_step(job["campaign_id"], prospect_id, step_order)
+    elif task_type == "send_message" and status == "message_sent":
+        step_order = int((job.get("payload") or {}).get("campaign_step_order") or 0)
+        if job.get("campaign_id") and step_order:
+            db_queue_next_campaign_step(job["campaign_id"], prospect_id, step_order)
 
 
 def db_fail_job(job_id: str, error_message: str, result: dict | None = None) -> dict | None:
@@ -712,7 +1109,13 @@ def db_get_dashboard_stats() -> dict:
     )
     messages_today       = _count("prospects", message_sent_date=today)
     replies_today        = _count("prospects", reply_date=today)
-    active_campaigns     = _count("campaigns", status="active")
+    active_campaigns     = (
+        supabase.table("campaigns")
+        .select("id", count="exact")
+        .in_("status", ["active", "running"])
+        .execute()
+        .count or 0
+    )
     needs_personalization = _count("prospects", status="Needs Personalization")
     pending_jobs = _count("jobs", status="pending")
     failed_jobs = _count("jobs", status="failed")

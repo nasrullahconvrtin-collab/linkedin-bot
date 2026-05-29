@@ -8,6 +8,14 @@ export default function CampaignCard({ campaign, onDelete }) {
   const accepted = campaign.accepted || 0;
   const replied  = campaign.replied  || 0;
   const pct      = total ? Math.round((replied / total) * 100) : 0;
+  const status = campaign.status || 'draft';
+  const statusClass = {
+    running: 'bg-green-500/10 text-green-400 border border-green-500/20',
+    active: 'bg-green-500/10 text-green-400 border border-green-500/20',
+    draft: 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20',
+    paused: 'bg-orange-500/10 text-orange-400 border border-orange-500/20',
+    archived: 'bg-[#2a2a2a] text-[#9ca3af] border border-[#2a2a2a]',
+  }[status] || 'bg-[#2a2a2a] text-[#9ca3af] border border-[#2a2a2a]';
 
   return (
     <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5 hover:border-[#3a3a3a] transition-colors flex flex-col gap-4">
@@ -19,14 +27,13 @@ export default function CampaignCard({ campaign, onDelete }) {
             Created {new Date(campaign.created_at).toLocaleDateString()}
           </p>
         </div>
-        <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${
-          campaign.status === 'active'
-            ? 'bg-green-500/10 text-green-400 border border-green-500/20'
-            : 'bg-[#2a2a2a] text-[#9ca3af]'
-        }`}>
-          {campaign.status || 'active'}
+        <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${statusClass}`}>
+          {status}
         </span>
       </div>
+      {campaign.template?.name && (
+        <p className="text-[#9ca3af] text-xs -mt-2">Template: {campaign.template.name}</p>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-2">

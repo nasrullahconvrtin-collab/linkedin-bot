@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Plus, X, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
@@ -7,6 +8,7 @@ import { useApp } from '../context/AppContext';
 import { createCampaign, deleteCampaign } from '../services/api';
 
 export default function Campaigns() {
+  const nav = useNavigate();
   const { campaigns, fetchCampaigns } = useApp();
   const [modal,   setModal]   = useState(false);
   const [name,    setName]    = useState('');
@@ -48,12 +50,20 @@ export default function Campaigns() {
           <h1 className="text-white text-2xl font-bold">Campaigns</h1>
           <p className="text-[#6b7280] text-sm mt-1">{campaigns.length} campaign{campaigns.length !== 1 ? 's' : ''}</p>
         </div>
-        <button
-          onClick={() => setModal(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-xl font-medium text-sm transition-colors shadow-lg shadow-indigo-500/20"
-        >
-          <Plus size={16} /> New Campaign
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => nav('/campaign-wizard')}
+            className="flex items-center gap-2 px-4 py-2.5 bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-xl font-medium text-sm transition-colors shadow-lg shadow-indigo-500/20"
+          >
+            <Plus size={16} /> Campaign Wizard
+          </button>
+          <button
+            onClick={() => setModal(true)}
+            className="flex items-center gap-2 px-4 py-2.5 border border-[#2a2a2a] text-[#9ca3af] hover:text-white rounded-xl font-medium text-sm transition-colors"
+          >
+            Quick Draft
+          </button>
+        </div>
       </div>
 
       {/* Grid */}

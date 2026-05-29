@@ -13,6 +13,9 @@ from pydantic import BaseModel
 
 class CampaignCreate(BaseModel):
     name: str
+    status: Optional[str] = "draft"
+    template_id: Optional[str] = None
+    sequence_config: Optional[dict] = None
 
 
 class CampaignResponse(BaseModel):
@@ -60,6 +63,8 @@ class ProspectCreate(BaseModel):
     growth_goals: Optional[str] = None
     tailored_offer: Optional[str] = None
     notes: Optional[str] = None
+    custom_fields: Optional[dict] = None
+    source_list: Optional[str] = None
 
 
 class ProspectUpdate(BaseModel):
@@ -93,6 +98,8 @@ class ProspectUpdate(BaseModel):
     hubspot_deal_id: Optional[str] = None
     pushed_to_hubspot: Optional[bool] = None
     hubspot_push_date: Optional[str] = None
+    custom_fields: Optional[dict] = None
+    source_list: Optional[str] = None
 
 
 class ProspectsListResponse(BaseModel):
@@ -210,6 +217,45 @@ class MessageTemplateUpsert(BaseModel):
     body: str
     message_type: str = "initial"
     active: bool = True
+
+
+# Campaign Wizard / template engine
+
+class CampaignTemplateCreate(BaseModel):
+    key: str
+    name: str
+    description: Optional[str] = None
+    category: str = "outreach"
+    status: str = "active"
+    supported_actions: List[str] = []
+    variables: List[str] = []
+    default_config: dict = {}
+    steps: List[dict] = []
+
+
+class CampaignFromTemplateCreate(BaseModel):
+    name: str
+    template_id: str
+    status: str = "draft"
+    sequence_config: dict = {}
+
+
+class CampaignLaunchRequest(BaseModel):
+    prospect_ids: Optional[List[str]] = None
+    list_ids: Optional[List[str]] = None
+
+
+class CampaignStatusUpdate(BaseModel):
+    status: str
+
+
+class ProspectListCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
+class ProspectListMembersUpdate(BaseModel):
+    prospect_ids: List[str]
 
 
 # ── HubSpot ───────────────────────────────────────────────────────────────────

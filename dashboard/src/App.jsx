@@ -56,6 +56,7 @@ class ErrorBoundary extends React.Component {
 import Login          from './pages/Login';
 import Dashboard      from './pages/Dashboard';
 import Campaigns      from './pages/Campaigns';
+import CampaignWizard from './pages/CampaignWizard';
 import CampaignDetail from './pages/CampaignDetail';
 import Prospects      from './pages/Prospects';
 import NeedsPersonalization from './pages/NeedsPersonalization';
@@ -98,6 +99,7 @@ export default function App() {
               <AppProvider>
                 <Routes>
                   <Route path="/"               element={<Dashboard />} />
+                  <Route path="/campaign-wizard" element={<CampaignWizard />} />
                   <Route path="/campaigns"      element={<Campaigns />} />
                   <Route path="/campaigns/:id"  element={<CampaignDetail />} />
                   <Route path="/prospects"      element={<Prospects />} />

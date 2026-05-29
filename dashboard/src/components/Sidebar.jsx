@@ -1,9 +1,10 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Megaphone, Users, MessageSquare, UserCheck, Settings, Zap, Sparkles } from 'lucide-react';
+import { LayoutDashboard, Megaphone, Users, MessageSquare, UserCheck, Settings, Zap, Sparkles, Wand2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 const NAV = [
   { to: '/',          label: 'Dashboard', icon: LayoutDashboard, end: true },
+  { to: '/campaign-wizard', label: 'Campaign Wizard', icon: Wand2 },
   { to: '/campaigns', label: 'Campaigns', icon: Megaphone },
   { to: '/prospects', label: 'Prospects', icon: Users },
   { to: '/needs-personalization', label: 'Needs Personalization', icon: Sparkles },

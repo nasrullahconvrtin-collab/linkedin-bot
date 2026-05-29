@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Upload, FileText, X, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Upload, FileText, X, Loader2, CheckCircle, AlertCircle, Rocket, Pause, Archive } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
 import ProspectTable from '../components/ProspectTable';
 import StatusBadge from '../components/StatusBadge';
-import { getCampaign, bulkImportProspects } from '../services/api';
+import { getCampaign, bulkImportProspects, getCampaignSequence, launchCampaign, updateCampaignStatus } from '../services/api';
 
 const REQUIRED_FIELDS = [
   { key: 'first_name',    label: 'First Name' },
@@ -75,6 +75,8 @@ export default function CampaignDetail() {
   const [importResult, setImportResult] = useState(null);
   const [dragging,   setDragging]   = useState(false);
   const [importMode, setImportMode] = useState('create_or_update');
+  const [sequence, setSequence] = useState(null);
+  const [actioning, setActioning] = useState(false);
 
   useEffect(() => {
     getCampaign(id)
@@ -82,6 +84,43 @@ export default function CampaignDetail() {
       .catch(() => toast.error('Campaign not found'))
       .finally(() => setLoading(false));
   }, [id]);
+
+  useEffect(() => {
+    if (tab === 'sequence') {
+      getCampaignSequence(id).then(setSequence).catch(() => setSequence(null));
+    }
+  }, [tab, id]);
+
+  const refreshCampaign = () => {
+    getCampaign(id).then(d => { setCampaign(d.campaign); setStats(d); }).catch(() => {});
+    if (tab === 'sequence') getCampaignSequence(id).then(setSequence).catch(() => {});
+  };
+
+  const setStatus = async (status) => {
+    setActioning(true);
+    try {
+      await updateCampaignStatus(id, { status });
+      toast.success(`Campaign ${status}`);
+      refreshCampaign();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setActioning(false);
+    }
+  };
+
+  const launch = async () => {
+    setActioning(true);
+    try {
+      const result = await launchCampaign(id, {});
+      toast.success(`Launched: ${result.queued || 0} job(s) queued`);
+      refreshCampaign();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setActioning(false);
+    }
+  };
 
   const handleFile = (file) => {
     if (!file?.name.endsWith('.csv')) { toast.error('Please select a CSV file'); return; }
@@ -154,6 +193,23 @@ export default function CampaignDetail() {
             Created {new Date(campaign.created_at).toLocaleDateString()}
           </p>
         </div>
+        <div className="flex gap-2">
+          {campaign.template_id && campaign.status !== 'running' && campaign.status !== 'archived' && (
+            <button disabled={actioning} onClick={launch} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#22c55e] text-white text-sm disabled:opacity-50">
+              <Rocket size={15} /> Launch
+            </button>
+          )}
+          {campaign.status === 'running' && (
+            <button disabled={actioning} onClick={() => setStatus('paused')} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] text-sm disabled:opacity-50">
+              <Pause size={15} /> Pause
+            </button>
+          )}
+          {campaign.status !== 'archived' && (
+            <button disabled={actioning} onClick={() => setStatus('archived')} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] text-sm disabled:opacity-50">
+              <Archive size={15} /> Archive
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Stats row */}
@@ -168,7 +224,7 @@ export default function CampaignDetail() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-5 bg-[#111111] rounded-xl p-1 w-fit border border-[#2a2a2a]">
-        {['prospects', 'import', 'analytics'].map(t => (
+        {['prospects', 'import', 'sequence', 'analytics'].map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -309,6 +365,42 @@ export default function CampaignDetail() {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {tab === 'sequence' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
+            <h3 className="text-white font-semibold mb-4">Template Steps</h3>
+            {!sequence?.template ? (
+              <p className="text-[#6b7280] text-sm">This campaign was not created from a template.</p>
+            ) : (
+              <div className="space-y-3">
+                {sequence.template.steps?.map(step => (
+                  <div key={step.id} className="rounded-lg bg-[#111111] border border-[#2a2a2a] p-3">
+                    <p className="text-white text-sm font-medium">{step.step_order}. {step.label}</p>
+                    <p className="text-[#6b7280] text-xs mt-1">{step.action_type}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
+            <h3 className="text-white font-semibold mb-4">Prospect Progress</h3>
+            <div className="space-y-2 max-h-[420px] overflow-y-auto">
+              {(sequence?.enrollments || []).length === 0 ? (
+                <p className="text-[#6b7280] text-sm">No enrolled prospects yet.</p>
+              ) : sequence.enrollments.map(row => (
+                <div key={row.id} className="rounded-lg bg-[#111111] border border-[#2a2a2a] p-3">
+                  <div className="flex justify-between gap-3">
+                    <p className="text-white text-sm">Step {row.current_step_order}</p>
+                    <span className="text-xs text-[#9ca3af]">{row.status}</span>
+                  </div>
+                  <p className="text-[#6b7280] text-xs mt-1">Next: {row.next_step_at ? new Date(row.next_step_at).toLocaleString() : '-'}</p>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 

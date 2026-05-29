@@ -24,6 +24,16 @@ export const getCampaigns      = ()         => api.get('/campaigns');
 export const createCampaign    = (data)     => api.post('/campaigns', data);
 export const getCampaign       = (id)       => api.get(`/campaigns/${id}`);
 export const deleteCampaign    = (id)       => api.delete(`/campaigns/${id}`);
+export const getCampaignTemplates = (params) => api.get('/campaign-templates', { params });
+export const getCampaignTemplate  = (id)     => api.get(`/campaign-templates/${id}`);
+export const createCampaignFromTemplate = (data) => api.post('/campaigns/from-template', data);
+export const launchCampaign    = (id, data) => api.post(`/campaigns/${id}/launch`, data || {});
+export const updateCampaignStatus = (id, data) => api.put(`/campaigns/${id}/status`, data);
+export const getCampaignSequence = (id) => api.get(`/campaigns/${id}/sequence`);
+export const getCampaignVariables = () => api.get('/campaign-variables');
+export const getProspectLists = () => api.get('/prospect-lists');
+export const createProspectList = (data) => api.post('/prospect-lists', data);
+export const addProspectsToList = (id, prospect_ids) => api.post(`/prospect-lists/${id}/members`, { prospect_ids });
 
 // ── Prospects ────────────────────────────────────────────────
 export const getProspects      = (params)   => api.get('/prospects', { params });

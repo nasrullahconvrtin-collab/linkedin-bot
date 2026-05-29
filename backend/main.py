@@ -27,6 +27,10 @@ from models import (
     ActivityLogCreate,
     BulkImportResponse,
     CampaignCreate,
+    CampaignFromTemplateCreate,
+    CampaignLaunchRequest,
+    CampaignStatusUpdate,
+    CampaignTemplateCreate,
     DashboardStats,
     HubSpotSync,
     JobCreate,
@@ -35,6 +39,8 @@ from models import (
     LinkedInProfileUpdate,
     MessageTemplateUpsert,
     ProspectCreate,
+    ProspectListCreate,
+    ProspectListMembersUpdate,
     ProspectsListResponse,
     ProspectUpdate,
     SchedulerResponse,
@@ -133,10 +139,16 @@ _CSV_MAP: dict[str, str] = {
 def _map_csv_row(raw_row: dict, campaign_id: str | None) -> dict | None:
     """Map a raw CSV row to a DB-ready dict. Returns None if linkedin_url missing."""
     mapped: dict = {}
+    custom_fields: dict = {}
     for key, value in raw_row.items():
-        db_key = _CSV_MAP.get(key.strip().lower().replace("  ", " "))
-        if db_key and value and value.strip():
-            mapped[db_key] = value.strip()
+        clean_key = key.strip()
+        clean_value = value.strip() if isinstance(value, str) else value
+        db_key = _CSV_MAP.get(clean_key.lower().replace("  ", " "))
+        if db_key and clean_value:
+            mapped[db_key] = clean_value
+        elif clean_key and clean_value:
+            custom_key = clean_key.strip().lower().replace(" ", "_").replace("-", "_")
+            custom_fields[custom_key] = clean_value
 
     if not mapped.get("linkedin_url"):
         return None
@@ -148,6 +160,8 @@ def _map_csv_row(raw_row: dict, campaign_id: str | None) -> dict | None:
     # Defaults
     mapped.setdefault("assigned_account", "profile_1")
     mapped.setdefault("status", "")
+    if custom_fields:
+        mapped["custom_fields"] = custom_fields
     return mapped
 
 
@@ -166,7 +180,7 @@ def _campaign_is_active(campaign_id: str | None) -> bool:
     if not campaign_id:
         return True
     campaign, _ = db.db_get_campaign(campaign_id)
-    return bool(campaign and campaign.get("status", "active") == "active")
+    return bool(campaign and campaign.get("status", "running") in ("active", "running"))
 
 
 def _inside_sending_window() -> bool:
@@ -229,7 +243,12 @@ async def list_campaigns():
 async def create_campaign(body: CampaignCreate):
     """Create a new campaign."""
     try:
-        campaign = db.db_create_campaign(body.name)
+        campaign = db.db_create_campaign(
+            body.name,
+            status=body.status or "draft",
+            template_id=body.template_id,
+            sequence_config=body.sequence_config,
+        )
         if not campaign:
             raise HTTPException(500, "Failed to create campaign")
         return campaign
@@ -268,6 +287,161 @@ async def delete_campaign(campaign_id: str):
         raise
     except Exception as e:
         logger.error(f"delete_campaign: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.get("/campaign-templates", tags=["Campaign Wizard"])
+async def list_campaign_templates(include_coming_soon: bool = Query(True)):
+    try:
+        return {"templates": db.db_get_campaign_templates(include_coming_soon)}
+    except Exception as e:
+        logger.error(f"list_campaign_templates: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.get("/campaign-templates/{template_id}", tags=["Campaign Wizard"])
+async def get_campaign_template(template_id: str):
+    try:
+        template = db.db_get_campaign_template(template_id)
+        if not template:
+            raise HTTPException(404, "Campaign template not found")
+        return template
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"get_campaign_template: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.post("/campaign-templates", tags=["Campaign Wizard"], status_code=201)
+async def create_campaign_template(body: CampaignTemplateCreate):
+    try:
+        template = db.db_create_campaign_template(body.model_dump())
+        if not template:
+            raise HTTPException(500, "Failed to save campaign template")
+        return template
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"create_campaign_template: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.get("/campaign-variables", tags=["Campaign Wizard"])
+async def campaign_variables():
+    return {
+        "standard": ["first_name", "last_name", "company", "title", "industry", "location"],
+        "syntax": "{{variable_name}}",
+        "custom_fields": "Any extra CSV column is stored on prospect.custom_fields and can be used as {{column_name}}.",
+    }
+
+
+@app.post("/campaigns/from-template", tags=["Campaign Wizard"], status_code=201)
+async def create_campaign_from_template(body: CampaignFromTemplateCreate):
+    try:
+        template = db.db_get_campaign_template(body.template_id)
+        if not template:
+            raise HTTPException(404, "Campaign template not found")
+        if template.get("status") != "active":
+            raise HTTPException(400, "Template is not active yet")
+        campaign = db.db_create_campaign(
+            body.name,
+            status=body.status or "draft",
+            template_id=body.template_id,
+            sequence_config=body.sequence_config,
+        )
+        if not campaign:
+            raise HTTPException(500, "Failed to create campaign")
+        return campaign
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"create_campaign_from_template: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.post("/campaigns/{campaign_id}/launch", tags=["Campaign Wizard"])
+async def launch_campaign(campaign_id: str, body: CampaignLaunchRequest | None = None):
+    try:
+        payload = body or CampaignLaunchRequest()
+        result = db.db_launch_campaign(
+            campaign_id,
+            prospect_ids=payload.prospect_ids,
+            list_ids=payload.list_ids,
+        )
+        if result.get("error") == "campaign_not_found":
+            raise HTTPException(404, "Campaign not found")
+        if result.get("error") == "template_required":
+            raise HTTPException(400, "Campaign requires a template before launch")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"launch_campaign: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.put("/campaigns/{campaign_id}/status", tags=["Campaign Wizard"])
+async def update_campaign_status(campaign_id: str, body: CampaignStatusUpdate):
+    try:
+        if body.status not in ("draft", "running", "paused", "archived"):
+            raise HTTPException(400, "Invalid campaign status")
+        updated = db.db_update_campaign_status(campaign_id, body.status)
+        if not updated:
+            raise HTTPException(404, "Campaign not found")
+        return updated
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"update_campaign_status: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.get("/campaigns/{campaign_id}/sequence", tags=["Campaign Wizard"])
+async def get_campaign_sequence(campaign_id: str):
+    try:
+        campaign, _ = db.db_get_campaign(campaign_id)
+        if not campaign:
+            raise HTTPException(404, "Campaign not found")
+        template = db.db_get_campaign_template(campaign.get("template_id")) if campaign.get("template_id") else None
+        enrollments = db.db_get_campaign_enrollments(campaign_id)
+        return {"campaign": campaign, "template": template, "enrollments": enrollments}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"get_campaign_sequence: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.get("/prospect-lists", tags=["Prospect Lists"])
+async def list_prospect_lists():
+    try:
+        return {"lists": db.db_get_prospect_lists()}
+    except Exception as e:
+        logger.error(f"list_prospect_lists: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.post("/prospect-lists", tags=["Prospect Lists"], status_code=201)
+async def create_prospect_list(body: ProspectListCreate):
+    try:
+        row = db.db_create_prospect_list(body.name, body.description)
+        if not row:
+            raise HTTPException(500, "Failed to create prospect list")
+        return row
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"create_prospect_list: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.post("/prospect-lists/{list_id}/members", tags=["Prospect Lists"])
+async def add_prospect_list_members(list_id: str, body: ProspectListMembersUpdate):
+    try:
+        return {"added": db.db_add_prospects_to_list(list_id, body.prospect_ids)}
+    except Exception as e:
+        logger.error(f"add_prospect_list_members: {e}")
         raise HTTPException(500, str(e))
 
 
@@ -408,7 +582,9 @@ async def update_prospect(prospect_id: str, body: ProspectUpdate):
                 "status": "Ready to Send",
                 "next_steps": "Ready for initial message",
             }) or updated
-            db.db_create_initial_message_job_if_ready(updated, reason="message_personalized")
+            queued = db.db_advance_connected_campaign_enrollments(prospect_id)
+            if not queued:
+                db.db_create_initial_message_job_if_ready(updated, reason="message_personalized")
         return updated
     except HTTPException:
         raise
