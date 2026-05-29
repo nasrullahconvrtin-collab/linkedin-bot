@@ -32,6 +32,10 @@ def resource_path(name: str) -> Path:
     return base / name
 
 
+def ps_quote(value: Path | str) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
 def is_admin() -> bool:
     try:
         return bool(ctypes.windll.shell32.IsUserAnAdmin())
@@ -46,26 +50,55 @@ def elevate_if_needed():
 
 
 def create_shortcut(shortcut_path: Path, target: Path, working_dir: Path):
+    if not target.exists():
+        log(f"Shortcut skipped, target does not exist: {target}")
+        return False
     ps = f"""
 $WScriptShell = New-Object -ComObject WScript.Shell
-$Shortcut = $WScriptShell.CreateShortcut('{shortcut_path}')
-$Shortcut.TargetPath = '{target}'
-$Shortcut.WorkingDirectory = '{working_dir}'
-$Shortcut.IconLocation = '{target},0'
+$Shortcut = $WScriptShell.CreateShortcut({ps_quote(shortcut_path)})
+$Shortcut.TargetPath = {ps_quote(target)}
+$Shortcut.WorkingDirectory = {ps_quote(working_dir)}
+$Shortcut.IconLocation = {ps_quote(str(target) + ',0')}
 $Shortcut.Save()
 """
-    subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], check=True)
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.stdout:
+        log(f"Shortcut stdout ({shortcut_path}): {result.stdout.strip()}")
+    if result.stderr:
+        log(f"Shortcut stderr ({shortcut_path}): {result.stderr.strip()}")
+    if result.returncode != 0:
+        log(f"Shortcut failed ({shortcut_path}) returncode={result.returncode}")
+        return False
+    log(f"Shortcut created: {shortcut_path}")
+    return True
 
 
 def register_startup(exe: Path):
-    subprocess.run([
+    if not exe.exists():
+        log(f"Startup registration skipped, target does not exist: {exe}")
+        return False
+    result = subprocess.run([
         "schtasks", "/Create",
         "/TN", TASK_NAME,
         "/TR", f'"{exe}"',
         "/SC", "ONLOGON",
         "/RL", "LIMITED",
         "/F",
-    ], check=True)
+    ], capture_output=True, text=True, check=False)
+    if result.stdout:
+        log(f"Startup stdout: {result.stdout.strip()}")
+    if result.stderr:
+        log(f"Startup stderr: {result.stderr.strip()}")
+    if result.returncode != 0:
+        log(f"Startup registration failed returncode={result.returncode}")
+        return False
+    log("Windows login auto-start registered.")
+    return True
 
 
 def main():
@@ -95,14 +128,14 @@ def main():
         if not browsers_dst.exists():
             raise FileNotFoundError(f"Bundled Playwright browsers missing: {browsers_dst}")
 
-        create_shortcut(START_MENU_DIR / "LinkedFlow Agent.lnk", exe_dst, INSTALL_DIR)
-        create_shortcut(DESKTOP / "LinkedFlow Agent.lnk", exe_dst, INSTALL_DIR)
-        register_startup(exe_dst)
+        start_shortcut = create_shortcut(START_MENU_DIR / "LinkedFlow Agent.lnk", exe_dst, INSTALL_DIR)
+        desktop_shortcut = create_shortcut(DESKTOP / "LinkedFlow Agent.lnk", exe_dst, INSTALL_DIR)
+        startup = register_startup(exe_dst)
 
         log(f"Installed LinkedFlow Agent to {INSTALL_DIR}")
-        log("Start Menu shortcut created.")
-        log("Desktop shortcut created.")
-        log("Windows login auto-start registered.")
+        log(f"Start Menu shortcut ok: {start_shortcut}")
+        log(f"Desktop shortcut ok: {desktop_shortcut}")
+        log(f"Windows login auto-start ok: {startup}")
     except Exception as exc:
         log(f"ERROR: {exc!r}")
         try:

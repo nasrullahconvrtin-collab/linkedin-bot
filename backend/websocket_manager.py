@@ -169,12 +169,17 @@ class WebSocketManager:
                 db.db_log_activity(prospect_id, "send_connection", "pending", message)
 
             elif status == "connected":
-                prospect, _ = db.db_get_prospect(prospect_id)
-                next_status = "Ready to Send" if (prospect or {}).get("initial_message") else "Needs Personalization"
-                db.db_update_prospect(prospect_id, {
-                    "status":     next_status,
-                    "next_steps": "Ready for initial message" if next_status == "Ready to Send" else "Team: Write personalized initial message",
-                })
+                transition = db.db_mark_prospect_connected(
+                    prospect_id,
+                    message or "Already connected",
+                )
+                queued_job = transition.get("queued_job")
+                if queued_job:
+                    logger.info(
+                        "[WS] Queued initial message job %s after already-connected result for %s",
+                        queued_job.get("id"),
+                        prospect_id,
+                    )
                 db.db_log_activity(prospect_id, "send_connection", "already_connected", message)
 
             elif status == "limit_reached":
@@ -267,16 +272,17 @@ class WebSocketManager:
         for p in sent_prospects:
             p_url = (p.get("linkedin_url") or "").strip().rstrip("/").lower()
             if p_url in accepted_set:
-                next_status = "Ready to Send" if (p.get("initial_message") or "").strip() else "Needs Personalization"
-                next_steps = (
-                    "Ready for initial message"
-                    if next_status == "Ready to Send"
-                    else "Team: Write personalized initial message"
+                transition = db.db_mark_prospect_connected(
+                    p["id"],
+                    f"Connection accepted - {p.get('first_name')} {p.get('last_name')}",
                 )
-                db.db_update_prospect(p["id"], {
-                    "status":     next_status,
-                    "next_steps": next_steps,
-                })
+                queued_job = transition.get("queued_job")
+                if queued_job:
+                    logger.info(
+                        "[WS] Queued initial message job %s after acceptance for %s",
+                        queued_job.get("id"),
+                        p["id"],
+                    )
                 db.db_log_activity(
                     p["id"],
                     "check_acceptances",

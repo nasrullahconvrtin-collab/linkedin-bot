@@ -6,7 +6,7 @@ import shutil
 import zipfile
 
 
-ROOT = Path(r"D:\linkedin-bot")
+ROOT = Path(__file__).resolve().parent
 PAYLOAD = ROOT / "installer_payload"
 
 

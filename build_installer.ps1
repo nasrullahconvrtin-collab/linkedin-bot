@@ -1,9 +1,9 @@
 $ErrorActionPreference = "Stop"
 
-Set-Location "D:\linkedin-bot"
+Set-Location $PSScriptRoot
 
 if (!(Test-Path "dist\LinkedFlowAgent\LinkedFlowAgent.exe")) {
-  throw "Build LinkedFlowAgent.exe first by running D:\linkedin-bot\package_agent.ps1"
+  throw "Build LinkedFlowAgent.exe first by running package_agent.ps1"
 }
 
 py installer_builder.py
@@ -22,4 +22,4 @@ py -m PyInstaller `
   --add-data "installer_payload\app_payload.zip;." `
   linkedflow_installer.py
 
-Write-Host "Installer complete: D:\linkedin-bot\installer_dist\LinkedFlow-Agent-Setup.exe"
+Write-Host "Installer complete: $PSScriptRoot\installer_dist\LinkedFlow-Agent-Setup.exe"

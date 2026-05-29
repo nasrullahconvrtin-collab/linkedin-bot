@@ -184,7 +184,12 @@ class LinkedFlowAgent:
             await self.api("POST", f"/jobs/{job_id}/start")
             try:
                 status = await self.handle_task(ws, task)
-                result = {"task_type": task.get("type"), "status": status}
+                result = {
+                    "task_type": task.get("type"),
+                    "status": status,
+                    "prospect_id": task.get("prospect_id"),
+                    "message_type": task.get("message_type"),
+                }
                 if status in ("error", "session_expired", "restricted", "limit_reached"):
                     await self.api("POST", f"/jobs/{job_id}/fail", {"error_message": status, "result": result})
                 else:

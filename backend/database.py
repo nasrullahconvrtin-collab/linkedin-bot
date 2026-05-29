@@ -403,6 +403,152 @@ def db_create_job(data: dict) -> dict | None:
     return result.data[0] if result.data else None
 
 
+def db_has_active_job_for_prospect(job_type: str, prospect_id: str) -> bool:
+    """Return true when a non-terminal job already exists for this prospect."""
+    if not prospect_id:
+        return False
+    result = (
+        supabase.table("jobs")
+        .select("id")
+        .eq("job_type", job_type)
+        .eq("prospect_id", prospect_id)
+        .in_("status", ["pending", "retrying", "claimed", "running"])
+        .limit(1)
+        .execute()
+    )
+    return bool(result.data)
+
+
+def db_create_initial_message_job_if_ready(prospect: dict, reason: str = "") -> dict | None:
+    """
+    Queue the first-message job exactly once for a connected prospect.
+    This is intentionally conservative: no message text means no job.
+    """
+    if not prospect:
+        return None
+
+    prospect_id = prospect.get("id")
+    initial_message = (prospect.get("initial_message") or "").strip()
+    if not prospect_id or not initial_message:
+        return None
+
+    if prospect.get("message_sent_date"):
+        logger.info("Initial message already sent for prospect %s", prospect_id)
+        return None
+
+    if prospect.get("status") in ("Initial Message Sent", "Following Up", "Replied", "No Response"):
+        logger.info(
+            "Prospect %s is past initial-message stage (%s); not queueing",
+            prospect_id,
+            prospect.get("status"),
+        )
+        return None
+
+    if db_has_active_job_for_prospect("send_messages", prospect_id):
+        logger.info("Initial message job already active for prospect %s", prospect_id)
+        return None
+
+    campaign_id = prospect.get("campaign_id")
+    if campaign_id:
+        campaign, _ = db_get_campaign(campaign_id)
+        if campaign and campaign.get("status", "active") != "active":
+            logger.info("Campaign %s is not active; not queueing message for %s", campaign_id, prospect_id)
+            return None
+
+    profile_key = prospect.get("assigned_account") or "profile_1"
+    profile = db_get_profile(profile_key)
+    if profile:
+        if profile.get("enabled") is False:
+            logger.info("Profile %s is disabled; not queueing message for %s", profile_key, prospect_id)
+            return None
+        if int(profile.get("daily_sent") or 0) >= 25:
+            logger.info("Profile %s hit daily limit; not queueing message for %s", profile_key, prospect_id)
+            return None
+
+    job = db_create_job({
+        "job_type": "send_messages",
+        "profile_key": profile_key,
+        "campaign_id": campaign_id,
+        "prospect_id": prospect_id,
+        "payload": {
+            "linkedin_url": prospect.get("linkedin_url", ""),
+            "message": initial_message,
+            "message_type": "initial",
+            "reason": reason or "connected",
+        },
+    })
+    if job:
+        logger.info("Queued initial message job %s for prospect %s", job.get("id"), prospect_id)
+    return job
+
+
+def db_mark_prospect_connected(prospect_id: str, details: str = "") -> dict:
+    """
+    Treat already-connected and newly accepted prospects the same.
+    Returns the updated prospect and any queued initial-message job.
+    """
+    prospect, _ = db_get_prospect(prospect_id)
+    if not prospect:
+        return {"prospect": None, "queued_job": None, "status": "not_found"}
+
+    before_status = prospect.get("status") or ""
+    initial_message = (prospect.get("initial_message") or "").strip()
+    advanced_statuses = {"Initial Message Sent", "Following Up", "Replied", "No Response"}
+
+    if before_status in advanced_statuses or prospect.get("message_sent_date"):
+        logger.info(
+            "Already-connected result for prospect %s ignored because it is already past connection stage: %s",
+            prospect_id,
+            before_status,
+        )
+        return {"prospect": prospect, "queued_job": None, "status": before_status}
+
+    next_status = "Ready to Send" if initial_message else "Needs Personalization"
+    next_steps = (
+        "Ready for initial message"
+        if next_status == "Ready to Send"
+        else "Team: Write personalized initial message"
+    )
+
+    logger.info(
+        "Prospect %s connected transition: before_status=%r initial_message=%s",
+        prospect_id,
+        before_status,
+        bool(initial_message),
+    )
+    updated = db_update_prospect(prospect_id, {
+        "status": next_status,
+        "next_steps": next_steps,
+    }) or prospect
+    logger.info(
+        "Prospect %s connected transition: after_status=%r next_steps=%r",
+        prospect_id,
+        updated.get("status"),
+        updated.get("next_steps"),
+    )
+
+    queued_job = None
+    if next_status == "Ready to Send":
+        queued_job = db_create_initial_message_job_if_ready(updated, reason="already_connected")
+        if queued_job:
+            db_log_activity(
+                prospect_id,
+                "queue_initial_message",
+                "queued",
+                f"Queued after connected detection: {queued_job.get('id')}",
+            )
+
+    if before_status != next_status or queued_job:
+        db_log_activity(
+            prospect_id,
+            "connection_progression",
+            "connected",
+            details or f"Moved from {before_status or 'Not Contacted'} to {next_status}",
+        )
+
+    return {"prospect": updated, "queued_job": queued_job, "status": next_status}
+
+
 def db_get_jobs(
     status: str | None = None,
     profile_key: str | None = None,
@@ -464,11 +610,45 @@ def db_start_job(job_id: str) -> dict | None:
 
 
 def db_complete_job(job_id: str, result: dict | None = None) -> dict | None:
-    return db_update_job(job_id, {
+    fetched = supabase.table("jobs").select("*").eq("id", job_id).limit(1).execute()
+    job_before = fetched.data[0] if fetched.data else None
+    completed = db_update_job(job_id, {
         "status": "completed",
         "completed_at": _utc_now(),
         "result": result or {},
     })
+    if job_before and result:
+        db_apply_completed_job_result(job_before, result)
+    return completed
+
+
+def db_apply_completed_job_result(job: dict, result: dict) -> None:
+    """Apply critical prospect transitions from REST job completion as a fallback."""
+    prospect_id = job.get("prospect_id")
+    if not prospect_id:
+        return
+
+    task_type = result.get("task_type") or result.get("action") or ""
+    status = result.get("status") or ""
+    message_type = result.get("message_type") or result.get("msg_type") or (
+        (job.get("payload") or {}).get("message_type")
+    )
+    today = date.today().isoformat()
+
+    if task_type == "send_connection" and status == "connected":
+        db_mark_prospect_connected(prospect_id, "Already connected detected during connection job completion")
+    elif task_type == "send_connection" and status == "sent":
+        db_update_prospect(prospect_id, {
+            "status": "Connection Request Sent",
+            "connection_sent_date": today,
+            "next_steps": "Check acceptance in My Network",
+        })
+    elif task_type == "send_message" and status == "message_sent" and message_type == "initial":
+        db_update_prospect(prospect_id, {
+            "status": "Initial Message Sent",
+            "message_sent_date": today,
+            "next_steps": f"Follow-up 1 on {(date.today() + timedelta(days=2)).isoformat()}",
+        })
 
 
 def db_fail_job(job_id: str, error_message: str, result: dict | None = None) -> dict | None:

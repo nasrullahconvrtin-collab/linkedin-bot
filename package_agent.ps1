@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-Set-Location "D:\linkedin-bot"
+Set-Location $PSScriptRoot
 py -m pip install -r requirements.txt --quiet
 py -m pip install pyinstaller --quiet
 $browserCache = Join-Path $env:LOCALAPPDATA "ms-playwright"
@@ -14,7 +14,7 @@ if (!(Test-Path $browserCache)) {
 if (!(Test-Path $browserCache)) {
   $browserCache = Join-Path $env:LOCALAPPDATA "ms-playwright"
 }
-$bundledRoot = "D:\linkedin-bot\bundled_browsers"
+$bundledRoot = Join-Path $PSScriptRoot "bundled_browsers"
 $bundledCache = Join-Path $bundledRoot "ms-playwright"
 if (!(Test-Path $browserCache)) {
   throw "Playwright browser cache not found at $browserCache"
@@ -49,5 +49,5 @@ py -m PyInstaller `
 
 Copy-Item "bundled_browsers" "dist\LinkedFlowAgent\bundled_browsers" -Recurse -Force
 
-Write-Host "Build complete: D:\linkedin-bot\dist\LinkedFlowAgent\LinkedFlowAgent.exe"
-Write-Host "Bundled Chromium cache: D:\linkedin-bot\bundled_browsers\ms-playwright"
+Write-Host "Build complete: $PSScriptRoot\dist\LinkedFlowAgent\LinkedFlowAgent.exe"
+Write-Host "Bundled Chromium cache: $PSScriptRoot\bundled_browsers\ms-playwright"

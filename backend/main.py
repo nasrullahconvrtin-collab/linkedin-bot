@@ -178,6 +178,9 @@ def _inside_sending_window() -> bool:
 
 def _queue_job_for_prospect(job_type: str, prospect: dict, payload: dict | None = None) -> dict | None:
     profile_key = prospect.get("assigned_account") or "profile_1"
+    if db.db_has_active_job_for_prospect(job_type, prospect.get("id")):
+        logger.info("Skipping duplicate active %s job for prospect %s", job_type, prospect.get("id"))
+        return None
     if not _inside_sending_window():
         logger.info("Skipping job outside allowed sending window")
         return None
@@ -396,6 +399,16 @@ async def update_prospect(prospect_id: str, body: ProspectUpdate):
         updated = db.db_update_prospect(prospect_id, data)
         if not updated:
             raise HTTPException(404, "Prospect not found or no changes")
+        if (
+            (data.get("initial_message") or "").strip()
+            and updated.get("status") in ("Needs Personalization", "Connection Accepted")
+            and not updated.get("message_sent_date")
+        ):
+            updated = db.db_update_prospect(prospect_id, {
+                "status": "Ready to Send",
+                "next_steps": "Ready for initial message",
+            }) or updated
+            db.db_create_initial_message_job_if_ready(updated, reason="message_personalized")
         return updated
     except HTTPException:
         raise
