@@ -147,6 +147,18 @@ class LinkedFlowAgent:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }))
 
+    async def safe_send_result(self, ws, task, status, message):
+        try:
+            await self.send_result(ws, task, status, message)
+        except Exception as exc:
+            logger.warning("Could not send WebSocket result update: %s", exc)
+
+    async def safe_send_heartbeat(self, ws, session_active=True):
+        try:
+            await self.send_heartbeat(ws, session_active=session_active)
+        except Exception as exc:
+            logger.warning("Could not send WebSocket heartbeat update: %s", exc)
+
     def _api(self, method, path, body=None):
         data = None if body is None else json.dumps(body).encode("utf-8")
         req = urllib.request.Request(
@@ -260,8 +272,8 @@ class LinkedFlowAgent:
         if status == "sent":
             self.daily_sent += 1
 
-        await self.send_result(ws, task, status, message)
-        await self.send_heartbeat(ws, session_active=status not in ("session_expired", "restricted"))
+        await self.safe_send_result(ws, task, status, message)
+        await self.safe_send_heartbeat(ws, session_active=status not in ("session_expired", "restricted"))
         return status
 
     async def handle_send_message(self, ws, task):
@@ -281,8 +293,8 @@ class LinkedFlowAgent:
         if status == "error":
             logger.warning("send_message failed for %s: %s", url, message)
 
-        await self.send_result(ws, task, status, message)
-        await self.send_heartbeat(ws, session_active=status not in ("session_expired", "restricted"))
+        await self.safe_send_result(ws, task, status, message)
+        await self.safe_send_heartbeat(ws, session_active=status not in ("session_expired", "restricted"))
         return status
 
     async def handle_check_acceptances(self, ws, task):
