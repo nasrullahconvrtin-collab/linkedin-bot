@@ -1062,10 +1062,22 @@ def db_get_list_prospect_ids(list_ids: list[str]) -> list[str]:
 
 
 def _step_wait_delta(config: dict) -> timedelta:
-    if config.get("working_days"):
+    if config.get("working_days") not in (None, "", 0, "0"):
         target = add_working_days(date.today(), int(config.get("working_days") or 0))
         return datetime.combine(target, datetime.min.time()).replace(tzinfo=timezone.utc) - datetime.now(timezone.utc)
     return timedelta(days=int(config.get("days") or 0), hours=int(config.get("hours") or 0))
+
+
+def _merge_wait_config(config: dict, override: dict | None) -> dict:
+    merged = {**(config or {})}
+    if not isinstance(override, dict):
+        return merged
+    merged.update(override)
+    if "days" in override and "working_days" not in override:
+        # Campaign editor day overrides must beat template working-day defaults.
+        # Otherwise a template with {"working_days": 5} would ignore {"days": 0}.
+        merged["working_days"] = 0
+    return merged
 
 
 def _message_for_step(step: dict, prospect: dict, campaign: dict) -> tuple[str, str]:
@@ -1116,8 +1128,7 @@ def db_queue_next_campaign_step(campaign_id: str, prospect_id: str, after_step_o
 
         if action == "wait":
             delay_override = ((campaign.get("sequence_config") or {}).get("delays") or {}).get(str(order))
-            if isinstance(delay_override, dict):
-                config = {**config, **delay_override}
+            config = _merge_wait_config(config, delay_override)
             if config.get("until") == "connected":
                 if not is_connected_for_profile and prospect.get("status") not in (
                     "Ready to Send", "Needs Personalization", "Initial Message Sent", "Following Up", "Replied", "No Response"

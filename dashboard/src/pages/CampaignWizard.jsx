@@ -384,7 +384,10 @@ export default function CampaignWizard({ onClose, onCreated }) {
                                 type="number"
                                 min="0"
                                 value={delayOverrides[String(s.step_order)]?.days ?? s.config?.days ?? 0}
-                                onChange={e => setDelayOverrides(d => ({ ...d, [String(s.step_order)]: { days: Number(e.target.value) } }))}
+                                onChange={e => setDelayOverrides(d => ({
+                                  ...d,
+                                  [String(s.step_order)]: { days: Number(e.target.value), working_days: 0 },
+                                }))}
                                 className="w-28 bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm"
                               />
                               <span className="text-sm text-[#9ca3af]">day(s)</span>
