@@ -60,6 +60,7 @@ export default function Dashboard() {
     { title: 'Reply Rate',             value: stats ? `${stats.reply_rate}%`: '—', icon: TrendingUp, color: '#ec4899',
       sub: `Acceptance: ${stats?.acceptance_rate ?? 0}%` },
     { title: 'Needs Personalization',  value: stats?.needs_personalization,  icon: Sparkles,      color: '#06b6d4' },
+    { title: 'Ready For Message',      value: stats?.ready_for_message,      icon: MessageSquare, color: '#f59e0b' },
     { title: 'Pending Jobs',           value: stats?.pending_jobs,           icon: Briefcase,     color: '#6366f1' },
     { title: 'Online Agents',          value: stats?.online_agents,          icon: Wifi,          color: '#22c55e' },
     { title: 'Failed Jobs',            value: stats?.failed_jobs,            icon: AlertTriangle, color: '#ef4444' },

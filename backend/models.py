@@ -16,6 +16,17 @@ class CampaignCreate(BaseModel):
     status: Optional[str] = "draft"
     template_id: Optional[str] = None
     sequence_config: Optional[dict] = None
+    schedule_config: Optional[dict] = None
+    settings: Optional[dict] = None
+
+
+class CampaignUpdate(BaseModel):
+    name: Optional[str] = None
+    status: Optional[str] = None
+    template_id: Optional[str] = None
+    sequence_config: Optional[dict] = None
+    schedule_config: Optional[dict] = None
+    settings: Optional[dict] = None
 
 
 class CampaignResponse(BaseModel):
@@ -43,8 +54,9 @@ class ProspectCreate(BaseModel):
     campaign_id: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    linkedin_url: str
+    linkedin_url: Optional[str] = None
     company: Optional[str] = None
+    email: Optional[str] = None
     job_title: Optional[str] = None
     occupation: Optional[str] = None
     location: Optional[str] = None
@@ -65,6 +77,9 @@ class ProspectCreate(BaseModel):
     notes: Optional[str] = None
     custom_fields: Optional[dict] = None
     source_list: Optional[str] = None
+    tags: Optional[List[str]] = None
+    state: Optional[str] = None
+    connection_status: Optional[str] = None
 
 
 class ProspectUpdate(BaseModel):
@@ -73,6 +88,7 @@ class ProspectUpdate(BaseModel):
     last_name: Optional[str] = None
     linkedin_url: Optional[str] = None
     company: Optional[str] = None
+    email: Optional[str] = None
     job_title: Optional[str] = None
     occupation: Optional[str] = None
     location: Optional[str] = None
@@ -100,6 +116,14 @@ class ProspectUpdate(BaseModel):
     hubspot_push_date: Optional[str] = None
     custom_fields: Optional[dict] = None
     source_list: Optional[str] = None
+    tags: Optional[List[str]] = None
+    state: Optional[str] = None
+    connection_status: Optional[str] = None
+    connected_at: Optional[str] = None
+    accepted_at: Optional[str] = None
+    last_action_at: Optional[str] = None
+    initial_message_sent_at: Optional[str] = None
+    next_action_at: Optional[str] = None
 
 
 class ProspectsListResponse(BaseModel):
@@ -171,6 +195,7 @@ class DashboardStats(BaseModel):
     reply_rate: float = 0.0
     acceptance_rate: float = 0.0
     needs_personalization: int = 0
+    ready_for_message: int = 0
     pending_jobs: int = 0
     failed_jobs: int = 0
     online_agents: int = 0
@@ -238,6 +263,8 @@ class CampaignFromTemplateCreate(BaseModel):
     template_id: str
     status: str = "draft"
     sequence_config: dict = {}
+    schedule_config: dict = {}
+    settings: dict = {}
 
 
 class CampaignLaunchRequest(BaseModel):
@@ -252,6 +279,13 @@ class CampaignStatusUpdate(BaseModel):
 class ProspectListCreate(BaseModel):
     name: str
     description: Optional[str] = None
+    sort_order: int = 0
+
+
+class ProspectListUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    sort_order: Optional[int] = None
 
 
 class ProspectListMembersUpdate(BaseModel):

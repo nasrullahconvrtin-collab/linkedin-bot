@@ -41,6 +41,7 @@ def test_already_connected_with_initial_message_becomes_ready_and_queues_once(mo
     monkeypatch.setattr(database, "db_has_active_job_for_prospect", lambda job_type, prospect_id: False)
     monkeypatch.setattr(database, "db_create_job", lambda data: {"id": "job-1", **data})
     monkeypatch.setattr(database, "db_log_activity", lambda *args: logs.append(args))
+    monkeypatch.setattr(database, "db_upsert_profile_connection_state", lambda *args, **kwargs: {"connection_status": "connected"})
 
     result = database.db_mark_prospect_connected("prospect-1", "Already connected")
 
@@ -67,6 +68,7 @@ def test_already_connected_without_initial_message_needs_personalization(monkeyp
     monkeypatch.setattr(database, "db_update_prospect", lambda prospect_id, data: {**prospect, **data})
     monkeypatch.setattr(database, "db_create_job", lambda data: jobs.append(data))
     monkeypatch.setattr(database, "db_log_activity", lambda *args: None)
+    monkeypatch.setattr(database, "db_upsert_profile_connection_state", lambda *args, **kwargs: {"connection_status": "connected"})
 
     result = database.db_mark_prospect_connected("prospect-1", "Already connected")
 

@@ -13,6 +13,11 @@ const STATUS_STYLES = {
   'running':                 { label: 'Running',                cls: 'bg-green-500/10 text-green-400 border border-green-500/20' },
   'paused':                  { label: 'Paused',                 cls: 'bg-orange-500/10 text-orange-400 border border-orange-500/20' },
   'archived':                { label: 'Archived',               cls: 'bg-[#1a1a1a] text-[#6b7280] border border-[#2a2a2a]' },
+  'pending':                 { label: 'Pending',                cls: 'bg-blue-500/10 text-blue-400 border border-blue-500/20' },
+  'claimed':                 { label: 'Claimed',                cls: 'bg-indigo-500/10 text-indigo-300 border border-indigo-500/20' },
+  'retrying':                { label: 'Retrying',               cls: 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20' },
+  'completed':               { label: 'Completed',              cls: 'bg-green-500/10 text-green-400 border border-green-500/20' },
+  'failed':                  { label: 'Failed',                 cls: 'bg-red-500/10 text-red-400 border border-red-500/20' },
 };
 
 export default function StatusBadge({ status = '' }) {

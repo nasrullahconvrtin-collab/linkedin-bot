@@ -65,7 +65,9 @@ def db_get_all_campaigns() -> list[dict]:
 
 
 def db_create_campaign(name: str, status: str = "draft", template_id: str | None = None,
-                       sequence_config: dict | None = None) -> dict | None:
+                       sequence_config: dict | None = None,
+                       schedule_config: dict | None = None,
+                       settings: dict | None = None) -> dict | None:
     payload = {
         "name": name,
         "status": status or "draft",
@@ -74,11 +76,27 @@ def db_create_campaign(name: str, status: str = "draft", template_id: str | None
         payload["template_id"] = template_id
     if sequence_config:
         payload["sequence_config"] = sequence_config
+    if schedule_config:
+        payload["schedule_config"] = schedule_config
+    if settings:
+        payload["settings"] = settings
     result = (
         supabase.table("campaigns")
         .insert(payload)
         .execute()
     )
+    return result.data[0] if result.data else None
+
+
+def db_update_campaign(campaign_id: str, data: dict) -> dict | None:
+    allowed = {
+        "name", "status", "template_id", "sequence_config",
+        "schedule_config", "settings",
+    }
+    clean = {k: v for k, v in data.items() if k in allowed and v is not None}
+    if not clean:
+        return None
+    result = supabase.table("campaigns").update(clean).eq("id", campaign_id).execute()
     return result.data[0] if result.data else None
 
 
@@ -90,21 +108,39 @@ def db_get_campaign(campaign_id: str) -> tuple[dict | None, dict | None]:
         return None, None
 
     campaign = result.data[0]
-    prospects_res = (
-        supabase.table("prospects")
-        .select("status")
+    enrollments = (
+        supabase.table("campaign_enrollments")
+        .select("*, prospects(status, connection_sent_date, message_sent_date)")
         .eq("campaign_id", campaign_id)
         .execute()
+        .data or []
     )
-    rows = prospects_res.data or []
+    if enrollments:
+        rows = []
+        for item in enrollments:
+            p = item.get("prospects") or {}
+            rows.append({**item, "prospect_status": p.get("status"), **{f"prospect_{k}": v for k, v in p.items()}})
+    else:
+        prospects_res = (
+            supabase.table("prospects")
+            .select("status, connection_sent_date, message_sent_date")
+            .eq("campaign_id", campaign_id)
+            .execute()
+        )
+        rows = prospects_res.data or []
     stats = {
         "total":        len(rows),
-        "sent":         sum(1 for r in rows if r["status"] == "Connection Request Sent"),
-        "accepted":     sum(1 for r in rows if r["status"] == "Connection Accepted"),
-        "messaged":     sum(1 for r in rows if r["status"] == "Initial Message Sent"),
-        "following_up": sum(1 for r in rows if r["status"] == "Following Up"),
-        "replied":      sum(1 for r in rows if r["status"] == "Replied"),
-        "no_response":  sum(1 for r in rows if r["status"] == "No Response"),
+        "sent":         sum(1 for r in rows if (r.get("prospect_status") or r.get("status")) == "Connection Request Sent"),
+        "accepted":     sum(1 for r in rows if (r.get("prospect_status") or r.get("status")) == "Connection Accepted"),
+        "already_connected": sum(1 for r in rows if (r.get("connection_status") or r.get("prospect_connection_status")) == "connected"),
+        "ready_for_message": sum(1 for r in rows if (r.get("prospect_status") or r.get("status")) == "Ready to Send"),
+        "messaged":     sum(1 for r in rows if (r.get("prospect_status") or r.get("status")) == "Initial Message Sent"),
+        "following_up": sum(1 for r in rows if (r.get("prospect_status") or r.get("status")) == "Following Up"),
+        "followup_due": sum(1 for r in rows if (r.get("prospect_status") or r.get("status")) == "Following Up"),
+        "completed":    sum(1 for r in rows if (r.get("prospect_status") or r.get("status")) in ("Replied", "No Response") or r.get("status") == "completed"),
+        "failed":       sum(1 for r in rows if r.get("status") in ("failed", "error")),
+        "replied":      sum(1 for r in rows if (r.get("prospect_status") or r.get("status")) == "Replied"),
+        "no_response":  sum(1 for r in rows if (r.get("prospect_status") or r.get("status")) == "No Response"),
     }
     return campaign, stats
 
@@ -120,16 +156,48 @@ def db_get_prospects(
     campaign_id: str | None = None,
     status: str | None = None,
     assigned_account: str | None = None,
+    list_id: str | None = None,
+    search: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[dict], int]:
+    if list_id:
+        member_rows = (
+            supabase.table("prospect_list_members")
+            .select("prospect_id")
+            .eq("list_id", list_id)
+            .execute()
+            .data or []
+        )
+        ids = [r["prospect_id"] for r in member_rows if r.get("prospect_id")]
+        if not ids:
+            return [], 0
+    else:
+        ids = None
+
     query = supabase.table("prospects").select("*", count="exact")
     if campaign_id:
-        query = query.eq("campaign_id", campaign_id)
+        enrollment_rows = (
+            supabase.table("campaign_enrollments")
+            .select("prospect_id")
+            .eq("campaign_id", campaign_id)
+            .execute()
+            .data or []
+        )
+        campaign_ids = [r["prospect_id"] for r in enrollment_rows if r.get("prospect_id")]
+        if campaign_ids:
+            ids = sorted(set(ids).intersection(campaign_ids)) if ids else campaign_ids
+        else:
+            query = query.eq("campaign_id", campaign_id)
     if status is not None:
         query = query.eq("status", status)
     if assigned_account:
         query = query.eq("assigned_account", assigned_account)
+    if ids is not None:
+        query = query.in_("id", ids)
+    if search:
+        q = f"%{search}%"
+        query = query.or_(f"first_name.ilike.{q},last_name.ilike.{q},company.ilike.{q},linkedin_url.ilike.{q},email.ilike.{q}")
     result = (
         query.order("created_at", desc=True)
         .range(offset, offset + limit - 1)
@@ -144,12 +212,15 @@ def db_create_prospect(data: dict) -> dict | None:
 
 
 def db_create_or_update_prospect(data: dict) -> tuple[str, dict | None]:
-    """Create/update by linkedin_url. Returns ('created'|'updated'|'skipped', row)."""
+    """Create/update by linkedin_url, then email. Returns ('created'|'updated'|'skipped', row)."""
     linkedin_url = (data.get("linkedin_url") or "").strip()
-    if not linkedin_url:
+    email = (data.get("email") or "").strip()
+    if not linkedin_url and not email:
         return "skipped", None
 
-    existing = db_get_prospect_by_linkedin_url(linkedin_url)
+    existing = db_get_prospect_by_linkedin_url(linkedin_url) if linkedin_url else None
+    if not existing and email:
+        existing = db_get_prospect_by_email(email)
     initial = (data.get("initial_message") or "").strip()
     if existing:
         clean = {k: v for k, v in data.items() if v not in (None, "")}
@@ -167,6 +238,20 @@ def db_create_or_update_prospect(data: dict) -> tuple[str, dict | None]:
         data["status"] = "Ready to Send"
     created = db_create_prospect(data)
     return "created", created
+
+
+def db_get_prospect_by_email(email: str) -> dict | None:
+    value = (email or "").strip()
+    if not value:
+        return None
+    result = (
+        supabase.table("prospects")
+        .select("*")
+        .eq("email", value)
+        .limit(1)
+        .execute()
+    )
+    return result.data[0] if result.data else None
 
 
 STANDARD_VARIABLE_FIELDS = {
@@ -338,6 +423,24 @@ def db_get_needs_personalization(limit: int = 500, offset: int = 0) -> tuple[lis
     for row in rows:
         dedup[row["id"]] = row
     return list(dedup.values()), (needs.count or 0) + len(accepted_rows)
+
+
+def db_get_ready_for_message_queue(limit: int = 500, offset: int = 0) -> tuple[list[dict], int]:
+    """Global operational queue for accepted/connected prospects awaiting first message."""
+    result = (
+        supabase.table("prospects")
+        .select("*", count="exact")
+        .eq("status", "Ready to Send")
+        .not_.is_("initial_message", "null")
+        .is_("message_sent_date", "null")
+        .range(offset, offset + limit - 1)
+        .execute()
+    )
+    rows = [
+        r for r in (result.data or [])
+        if (r.get("initial_message") or "").strip()
+    ]
+    return rows, result.count or len(rows)
 
 
 # ── Activity Log ──────────────────────────────────────────────────────────────
@@ -541,7 +644,71 @@ def db_create_initial_message_job_if_ready(prospect: dict, reason: str = "") -> 
     return job
 
 
-def db_mark_prospect_connected(prospect_id: str, details: str = "") -> dict:
+def db_upsert_profile_connection_state(
+    prospect_id: str,
+    profile_key: str,
+    campaign_id: str | None = None,
+    connection_status: str = "connected",
+    detected_by: str | None = None,
+) -> dict | None:
+    now = _utc_now()
+    payload = {
+        "prospect_id": prospect_id,
+        "profile_key": profile_key or "profile_1",
+        "campaign_id": campaign_id,
+        "connection_status": connection_status,
+        "connection_detected_by_profile": detected_by or profile_key or "profile_1",
+        "messaging_profile": profile_key or "profile_1",
+        "last_action_at": now,
+        "updated_at": now,
+    }
+    if connection_status == "connected":
+        payload["connected_at"] = now
+        payload["accepted_at"] = now
+    elif connection_status in ("invitation_sent", "pending"):
+        payload["invitation_sent_at"] = now
+    result = (
+        supabase.table("prospect_profile_states")
+        .upsert(payload, on_conflict="prospect_id,profile_key")
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
+def db_get_profile_connection_state(prospect_id: str, profile_key: str) -> dict | None:
+    result = (
+        supabase.table("prospect_profile_states")
+        .select("*")
+        .eq("prospect_id", prospect_id)
+        .eq("profile_key", profile_key)
+        .limit(1)
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
+def db_mark_invitation_sent(prospect: dict, profile_key: str | None = None, campaign_id: str | None = None) -> None:
+    if not prospect:
+        return
+    pk = profile_key or prospect.get("assigned_account") or "profile_1"
+    cid = campaign_id or prospect.get("campaign_id")
+    db_upsert_profile_connection_state(
+        prospect["id"],
+        pk,
+        campaign_id=cid,
+        connection_status="invitation_sent",
+        detected_by=pk,
+    )
+    if cid:
+        supabase.table("campaign_enrollments").update({
+            "profile_key": pk,
+            "invitation_sent_at": _utc_now(),
+            "updated_at": _utc_now(),
+        }).eq("campaign_id", cid).eq("prospect_id", prospect["id"]).execute()
+
+
+def db_mark_prospect_connected(prospect_id: str, details: str = "", profile_key: str | None = None,
+                               campaign_id: str | None = None) -> dict:
     """
     Treat already-connected and newly accepted prospects the same.
     Returns the updated prospect and any queued initial-message job.
@@ -553,6 +720,25 @@ def db_mark_prospect_connected(prospect_id: str, details: str = "") -> dict:
     before_status = prospect.get("status") or ""
     initial_message = (prospect.get("initial_message") or "").strip()
     advanced_statuses = {"Initial Message Sent", "Following Up", "Replied", "No Response"}
+    profile_key = profile_key or prospect.get("assigned_account") or "profile_1"
+    campaign_id = campaign_id or prospect.get("campaign_id")
+
+    db_upsert_profile_connection_state(
+        prospect_id,
+        profile_key,
+        campaign_id=campaign_id,
+        connection_status="connected",
+        detected_by=profile_key,
+    )
+    if campaign_id:
+        supabase.table("campaign_enrollments").update({
+            "profile_key": profile_key,
+            "messaging_profile": profile_key,
+            "connection_detected_by_profile": profile_key,
+            "accepted_at": _utc_now(),
+            "connected_at": _utc_now(),
+            "updated_at": _utc_now(),
+        }).eq("campaign_id", campaign_id).eq("prospect_id", prospect_id).execute()
 
     if before_status in advanced_statuses or prospect.get("message_sent_date"):
         logger.info(
@@ -578,6 +764,10 @@ def db_mark_prospect_connected(prospect_id: str, details: str = "") -> dict:
     updated = db_update_prospect(prospect_id, {
         "status": next_status,
         "next_steps": next_steps,
+        "connection_status": "connected",
+        "accepted_at": _utc_now(),
+        "connected_at": _utc_now(),
+        "last_action_at": _utc_now(),
     }) or prospect
     logger.info(
         "Prospect %s connected transition: after_status=%r next_steps=%r",
@@ -692,10 +882,13 @@ def db_get_active_enrollments_for_prospect(prospect_id: str) -> list[dict]:
 
 
 def db_upsert_enrollment(campaign: dict, prospect: dict) -> dict | None:
+    profile_key = prospect.get("assigned_account") or "profile_1"
     payload = {
         "campaign_id": campaign["id"],
         "prospect_id": prospect["id"],
         "template_id": campaign.get("template_id"),
+        "profile_key": profile_key,
+        "messaging_profile": profile_key,
         "status": "active",
         "updated_at": _utc_now(),
     }
@@ -707,16 +900,17 @@ def db_upsert_enrollment(campaign: dict, prospect: dict) -> dict | None:
     return result.data[0] if result.data else None
 
 
-def db_create_prospect_list(name: str, description: str | None = None) -> dict | None:
+def db_create_prospect_list(name: str, description: str | None = None, sort_order: int = 0) -> dict | None:
     result = supabase.table("prospect_lists").insert({
         "name": name,
         "description": description,
+        "sort_order": sort_order,
     }).execute()
     return result.data[0] if result.data else None
 
 
 def db_get_prospect_lists() -> list[dict]:
-    lists = supabase.table("prospect_lists").select("*").order("created_at", desc=True).execute().data or []
+    lists = supabase.table("prospect_lists").select("*").order("sort_order").order("created_at", desc=True).execute().data or []
     for item in lists:
         count = (
             supabase.table("prospect_list_members")
@@ -728,6 +922,23 @@ def db_get_prospect_lists() -> list[dict]:
     return lists
 
 
+def db_update_prospect_list(list_id: str, data: dict) -> dict | None:
+    clean = {k: v for k, v in data.items() if k in ("name", "description", "sort_order") and v is not None}
+    if not clean:
+        return None
+    clean["updated_at"] = _utc_now()
+    result = supabase.table("prospect_lists").update(clean).eq("id", list_id).execute()
+    return result.data[0] if result.data else None
+
+
+def db_delete_prospect_list(list_id: str) -> None:
+    supabase.table("prospect_lists").delete().eq("id", list_id).execute()
+
+
+def db_get_prospects_for_list(list_id: str, limit: int = 500, offset: int = 0) -> tuple[list[dict], int]:
+    return db_get_prospects(list_id=list_id, limit=limit, offset=offset)
+
+
 def db_add_prospects_to_list(list_id: str, prospect_ids: list[str]) -> int:
     payload = [{"list_id": list_id, "prospect_id": pid} for pid in prospect_ids]
     if not payload:
@@ -737,6 +948,14 @@ def db_add_prospects_to_list(list_id: str, prospect_ids: list[str]) -> int:
         on_conflict="list_id,prospect_id",
     ).execute()
     return len(result.data or [])
+
+
+def db_remove_prospects_from_list(list_id: str, prospect_ids: list[str]) -> int:
+    removed = 0
+    for pid in prospect_ids:
+        supabase.table("prospect_list_members").delete().eq("list_id", list_id).eq("prospect_id", pid).execute()
+        removed += 1
+    return removed
 
 
 def db_get_list_prospect_ids(list_ids: list[str]) -> list[str]:
@@ -782,6 +1001,9 @@ def db_queue_next_campaign_step(campaign_id: str, prospect_id: str, after_step_o
 
     steps = db_get_campaign_template_steps(campaign["template_id"])
     scheduled_for = base_time or datetime.now(timezone.utc)
+    profile_key = prospect.get("assigned_account") or "profile_1"
+    profile_state = db_get_profile_connection_state(prospect_id, profile_key)
+    is_connected_for_profile = (profile_state or {}).get("connection_status") == "connected"
     for step in steps:
         order = int(step.get("step_order") or 0)
         if order <= after_step_order:
@@ -794,7 +1016,7 @@ def db_queue_next_campaign_step(campaign_id: str, prospect_id: str, after_step_o
             if isinstance(delay_override, dict):
                 config = {**config, **delay_override}
             if config.get("until") == "connected":
-                if prospect.get("status") not in (
+                if not is_connected_for_profile and prospect.get("status") not in (
                     "Ready to Send", "Needs Personalization", "Initial Message Sent", "Following Up", "Replied", "No Response"
                 ):
                     _update_enrollment_next(campaign_id, prospect_id, order, scheduled_for, None)
@@ -807,6 +1029,14 @@ def db_queue_next_campaign_step(campaign_id: str, prospect_id: str, after_step_o
             continue
 
         if action == "invitation":
+            if is_connected_for_profile:
+                db_mark_prospect_connected(
+                    prospect_id,
+                    "Skipped invitation because prospect is already connected for this profile",
+                    profile_key=profile_key,
+                    campaign_id=campaign_id,
+                )
+                continue
             job_type = "send_connections"
             note_field = config.get("note_field") or "inmail_message"
             note = db_render_message_template(config.get("note") or prospect.get(note_field) or "", prospect)[:300]
@@ -822,7 +1052,7 @@ def db_queue_next_campaign_step(campaign_id: str, prospect_id: str, after_step_o
                 db_log_activity(prospect_id, "campaign_step", "skipped", f"Missing message for step {order}")
                 _update_enrollment_next(campaign_id, prospect_id, order, scheduled_for, None)
                 continue
-            if message_type == "initial" and prospect.get("status") not in (
+            if message_type == "initial" and not is_connected_for_profile and prospect.get("status") not in (
                 "Ready to Send", "Initial Message Sent", "Following Up", "Replied", "No Response"
             ):
                 db_log_activity(prospect_id, "campaign_step", "blocked", "Initial message blocked until prospect is connected and ready")
@@ -847,7 +1077,7 @@ def db_queue_next_campaign_step(campaign_id: str, prospect_id: str, after_step_o
 
         job = db_create_job({
             "job_type": job_type,
-            "profile_key": prospect.get("assigned_account") or "profile_1",
+            "profile_key": profile_key,
             "campaign_id": campaign_id,
             "prospect_id": prospect_id,
             "scheduled_for": scheduled_for.isoformat(),
@@ -1024,21 +1254,37 @@ def db_apply_completed_job_result(job: dict, result: dict) -> None:
         (job.get("payload") or {}).get("message_type")
     )
     today = date.today().isoformat()
+    prospect, _ = db_get_prospect(prospect_id)
 
     if task_type == "send_connection" and status == "connected":
-        db_mark_prospect_connected(prospect_id, "Already connected detected during connection job completion")
+        db_mark_prospect_connected(
+            prospect_id,
+            "Already connected detected during connection job completion",
+            profile_key=job.get("profile_key"),
+            campaign_id=job.get("campaign_id"),
+        )
     elif task_type == "send_connection" and status == "sent":
         db_update_prospect(prospect_id, {
             "status": "Connection Request Sent",
             "connection_sent_date": today,
             "next_steps": "Check acceptance in My Network",
+            "connection_status": "invitation_sent",
+            "last_action_at": _utc_now(),
         })
+        db_mark_invitation_sent(prospect or {"id": prospect_id}, job.get("profile_key"), job.get("campaign_id"))
     elif task_type == "send_message" and status == "message_sent" and message_type == "initial":
         db_update_prospect(prospect_id, {
             "status": "Initial Message Sent",
             "message_sent_date": today,
+            "initial_message_sent_at": _utc_now(),
+            "last_action_at": _utc_now(),
             "next_steps": f"Follow-up 1 on {(date.today() + timedelta(days=2)).isoformat()}",
         })
+        if job.get("campaign_id"):
+            supabase.table("campaign_enrollments").update({
+                "last_message_sent_at": _utc_now(),
+                "updated_at": _utc_now(),
+            }).eq("campaign_id", job["campaign_id"]).eq("prospect_id", prospect_id).execute()
         step_order = int((job.get("payload") or {}).get("campaign_step_order") or 0)
         if job.get("campaign_id") and step_order:
             db_queue_next_campaign_step(job["campaign_id"], prospect_id, step_order)
@@ -1117,6 +1363,7 @@ def db_get_dashboard_stats() -> dict:
         .count or 0
     )
     needs_personalization = _count("prospects", status="Needs Personalization")
+    ready_for_message = _count("prospects", status="Ready to Send")
     pending_jobs = _count("jobs", status="pending")
     failed_jobs = _count("jobs", status="failed")
 
@@ -1182,6 +1429,7 @@ def db_get_dashboard_stats() -> dict:
         "reply_rate":             reply_rate,
         "acceptance_rate":        acceptance_rate,
         "needs_personalization":   needs_personalization,
+        "ready_for_message":       ready_for_message,
         "pending_jobs":            pending_jobs,
         "failed_jobs":             failed_jobs,
         "online_agents":           sum(1 for p in profiles if p.get("session_active")),

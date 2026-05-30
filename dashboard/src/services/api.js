@@ -23,6 +23,7 @@ api.interceptors.response.use(
 export const getCampaigns      = ()         => api.get('/campaigns');
 export const createCampaign    = (data)     => api.post('/campaigns', data);
 export const getCampaign       = (id)       => api.get(`/campaigns/${id}`);
+export const updateCampaign    = (id, data) => api.put(`/campaigns/${id}`, data);
 export const deleteCampaign    = (id)       => api.delete(`/campaigns/${id}`);
 export const getCampaignTemplates = (params) => api.get('/campaign-templates', { params });
 export const getCampaignTemplate  = (id)     => api.get(`/campaign-templates/${id}`);
@@ -33,7 +34,11 @@ export const getCampaignSequence = (id) => api.get(`/campaigns/${id}/sequence`);
 export const getCampaignVariables = () => api.get('/campaign-variables');
 export const getProspectLists = () => api.get('/prospect-lists');
 export const createProspectList = (data) => api.post('/prospect-lists', data);
+export const updateProspectList = (id, data) => api.put(`/prospect-lists/${id}`, data);
+export const deleteProspectList = (id) => api.delete(`/prospect-lists/${id}`);
+export const getProspectListMembers = (id, params) => api.get(`/prospect-lists/${id}/prospects`, { params });
 export const addProspectsToList = (id, prospect_ids) => api.post(`/prospect-lists/${id}/members`, { prospect_ids });
+export const removeProspectsFromList = (id, prospect_ids) => api.delete(`/prospect-lists/${id}/members`, { data: { prospect_ids } });
 
 // ── Prospects ────────────────────────────────────────────────
 export const getProspects      = (params)   => api.get('/prospects', { params });
@@ -42,6 +47,7 @@ export const getProspect       = (id)       => api.get(`/prospects/${id}`);
 export const updateProspect    = (id, data) => api.put(`/prospects/${id}`, data);
 export const deleteProspect    = (id)       => api.delete(`/prospects/${id}`);
 export const getNeedsPersonalization = (params) => api.get('/needs-personalization', { params });
+export const getReadyForMessage = (params) => api.get('/ready-for-message', { params });
 export const bulkImportProspects = (file, campaignId, mode = 'create_or_update') => {
   const fd = new FormData();
   fd.append('file', file);

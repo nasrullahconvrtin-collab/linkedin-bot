@@ -112,7 +112,7 @@ class WebSocketManager:
             self._handle_action_result(profile_key, raw)
 
         elif msg_type == "accepted":
-            self._handle_acceptances(raw.get("accepted_urls") or raw.get("urls", []))
+            self._handle_acceptances(raw.get("accepted_urls") or raw.get("urls", []), profile_key)
 
         elif msg_type == "replied":
             self._handle_reply(raw)
@@ -158,7 +158,11 @@ class WebSocketManager:
                     "status":                "Connection Request Sent",
                     "connection_sent_date":  today,
                     "next_steps":            "Check acceptance in My Network",
+                    "connection_status":     "invitation_sent",
+                    "last_action_at":        datetime.now(timezone.utc).isoformat(),
                 })
+                prospect, _ = db.db_get_prospect(prospect_id)
+                db.db_mark_invitation_sent(prospect or {"id": prospect_id}, profile_key)
                 db.db_log_activity(prospect_id, "send_connection", "sent", message)
 
             elif status == "pending":
@@ -166,12 +170,15 @@ class WebSocketManager:
                     "status":     "Connection Request Sent",
                     "next_steps": "Already pending — check acceptance",
                 })
+                prospect, _ = db.db_get_prospect(prospect_id)
+                db.db_mark_invitation_sent(prospect or {"id": prospect_id}, profile_key)
                 db.db_log_activity(prospect_id, "send_connection", "pending", message)
 
             elif status == "connected":
                 transition = db.db_mark_prospect_connected(
                     prospect_id,
                     message or "Already connected",
+                    profile_key=profile_key,
                 )
                 queued_job = transition.get("queued_job")
                 if queued_job:
@@ -219,6 +226,8 @@ class WebSocketManager:
             db.db_update_prospect(prospect_id, {
                 "status":             "Initial Message Sent",
                 "message_sent_date":  today,
+                "initial_message_sent_at": datetime.now(timezone.utc).isoformat(),
+                "last_action_at":     datetime.now(timezone.utc).isoformat(),
                 "next_steps":         f"Follow-up 1 on {fu1}",
             })
             db.db_log_activity(prospect_id, "send_message", "initial_sent",
@@ -259,7 +268,7 @@ class WebSocketManager:
             db.db_log_activity(prospect_id, "send_message", "followup_4_sent",
                                "Follow-up 4 delivered — sequence complete")
 
-    def _handle_acceptances(self, accepted_urls: list[str]):
+    def _handle_acceptances(self, accepted_urls: list[str], profile_key: str):
         """Match accepted URLs against Connection Request Sent rows."""
         today = date.today().isoformat()
         accepted_set = {
@@ -275,6 +284,7 @@ class WebSocketManager:
                 transition = db.db_mark_prospect_connected(
                     p["id"],
                     f"Connection accepted - {p.get('first_name')} {p.get('last_name')}",
+                    profile_key=profile_key,
                 )
                 queued_job = transition.get("queued_job")
                 if queued_job:

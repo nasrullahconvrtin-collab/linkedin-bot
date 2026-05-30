@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $taskName = "LinkedFlow Agent Tray"
-$projectDir = "D:\linkedin-bot"
+$projectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $python = (Get-Command py.exe).Source
 $script = Join-Path $projectDir "agent_tray.py"
 

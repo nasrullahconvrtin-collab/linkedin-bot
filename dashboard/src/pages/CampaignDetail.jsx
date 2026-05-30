@@ -6,7 +6,7 @@ import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
 import ProspectTable from '../components/ProspectTable';
 import StatusBadge from '../components/StatusBadge';
-import { getCampaign, bulkImportProspects, getCampaignSequence, launchCampaign, updateCampaignStatus } from '../services/api';
+import { getCampaign, bulkImportProspects, getCampaignSequence, launchCampaign, updateCampaignStatus, updateCampaign } from '../services/api';
 
 const REQUIRED_FIELDS = [
   { key: 'first_name',    label: 'First Name' },
@@ -77,10 +77,16 @@ export default function CampaignDetail() {
   const [importMode, setImportMode] = useState('create_or_update');
   const [sequence, setSequence] = useState(null);
   const [actioning, setActioning] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editConfig, setEditConfig] = useState('{}');
 
   useEffect(() => {
     getCampaign(id)
-      .then(d => { setCampaign(d.campaign); setStats(d); })
+      .then(d => {
+        setCampaign(d.campaign); setStats(d);
+        setEditName(d.campaign?.name || '');
+        setEditConfig(JSON.stringify(d.campaign?.sequence_config || {}, null, 2));
+      })
       .catch(() => toast.error('Campaign not found'))
       .finally(() => setLoading(false));
   }, [id]);
@@ -92,8 +98,23 @@ export default function CampaignDetail() {
   }, [tab, id]);
 
   const refreshCampaign = () => {
-    getCampaign(id).then(d => { setCampaign(d.campaign); setStats(d); }).catch(() => {});
+    getCampaign(id).then(d => {
+      setCampaign(d.campaign); setStats(d);
+      setEditName(d.campaign?.name || '');
+      setEditConfig(JSON.stringify(d.campaign?.sequence_config || {}, null, 2));
+    }).catch(() => {});
     if (tab === 'sequence') getCampaignSequence(id).then(setSequence).catch(() => {});
+  };
+
+  const saveCampaignEdits = async () => {
+    try {
+      const config = JSON.parse(editConfig || '{}');
+      await updateCampaign(id, { name: editName.trim(), sequence_config: config });
+      toast.success('Campaign updated');
+      refreshCampaign();
+    } catch (e) {
+      toast.error(e.message || 'Invalid campaign config JSON');
+    }
   };
 
   const setStatus = async (status) => {
@@ -224,7 +245,7 @@ export default function CampaignDetail() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-5 bg-[#111111] rounded-xl p-1 w-fit border border-[#2a2a2a]">
-        {['prospects', 'import', 'sequence', 'analytics'].map(t => (
+        {['prospects', 'import', 'sequence', 'edit', 'analytics'].map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -401,6 +422,34 @@ export default function CampaignDetail() {
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {tab === 'edit' && (
+        <div className="max-w-3xl rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5 space-y-4">
+          <div>
+            <label className="block text-xs text-[#9ca3af] mb-1">Campaign Name</label>
+            <input
+              value={editName}
+              onChange={e => setEditName(e.target.value)}
+              className="w-full bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-[#9ca3af] mb-1">Sequence Config JSON</label>
+            <textarea
+              rows={12}
+              value={editConfig}
+              onChange={e => setEditConfig(e.target.value)}
+              className="w-full bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm font-mono focus:outline-none focus:border-[#6366f1]"
+            />
+            <p className="text-[#6b7280] text-xs mt-2">
+              Edits affect future queued steps only. Existing completed jobs and sent messages are not modified.
+            </p>
+          </div>
+          <button onClick={saveCampaignEdits} className="px-4 py-2.5 rounded-lg bg-[#6366f1] text-white text-sm font-medium">
+            Save Campaign
+          </button>
         </div>
       )}
 
