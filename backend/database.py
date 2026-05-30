@@ -683,11 +683,13 @@ def db_queue_ready_prospect_initial_message(prospect: dict, reason: str = "") ->
             "updated_at": now,
         }).eq("campaign_id", campaign_id).eq("prospect_id", prospect_id).execute()
 
-        job = db_queue_next_campaign_step(
-            campaign_id,
-            prospect_id,
-            int(enrollment.get("current_step_order") or 0),
-        )
+        if not prospect.get("message_sent_date"):
+            initial_step_order = db_get_initial_message_step_order(campaign_id)
+            after_step_order = max((initial_step_order or 1) - 1, 0)
+        else:
+            after_step_order = int(enrollment.get("current_step_order") or 0)
+
+        job = db_queue_next_campaign_step(campaign_id, prospect_id, after_step_order)
         if job:
             db_log_activity(
                 prospect_id,
@@ -1075,6 +1077,19 @@ def _message_for_step(step: dict, prospect: dict, campaign: dict) -> tuple[str, 
     if not raw and field:
         raw = prospect.get(field) or ""
     return db_render_message_template(raw, prospect), message_type
+
+
+def db_get_initial_message_step_order(campaign_id: str) -> int | None:
+    campaign, _ = db_get_campaign(campaign_id)
+    if not campaign or not campaign.get("template_id"):
+        return None
+    for step in db_get_campaign_template_steps(campaign["template_id"]):
+        action = step.get("action_type")
+        config = step.get("config") or {}
+        message_type = config.get("message_type") or "initial"
+        if action in ("message", "follow-up message") and message_type == "initial":
+            return int(step.get("step_order") or 0)
+    return None
 
 
 def db_queue_next_campaign_step(campaign_id: str, prospect_id: str, after_step_order: int = 0,

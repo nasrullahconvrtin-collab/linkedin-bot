@@ -116,12 +116,13 @@ def test_ready_prospect_with_stale_campaign_queues_against_running_enrollment(mo
     monkeypatch.setattr(database, "supabase", FakeSupabase())
     monkeypatch.setattr(database, "db_get_running_enrollments_for_prospect", lambda prospect_id: [enrollment])
     monkeypatch.setattr(database, "db_upsert_profile_connection_state", lambda *args, **kwargs: {"connection_status": "connected"})
+    monkeypatch.setattr(database, "db_get_initial_message_step_order", lambda campaign_id: 3)
     monkeypatch.setattr(database, "db_queue_next_campaign_step", lambda campaign_id, prospect_id, after_step_order: {
         "id": "message-job-1",
         "job_type": "send_messages",
         "campaign_id": campaign_id,
         "prospect_id": prospect_id,
-        "payload": {"campaign_step_order": after_step_order + 2, "message_type": "initial"},
+        "payload": {"campaign_step_order": after_step_order + 1, "message_type": "initial"},
     })
     monkeypatch.setattr(database, "db_log_activity", lambda *args: logs.append(args))
 
@@ -129,4 +130,5 @@ def test_ready_prospect_with_stale_campaign_queues_against_running_enrollment(mo
 
     assert job["job_type"] == "send_messages"
     assert job["campaign_id"] == "running-campaign"
+    assert job["payload"]["campaign_step_order"] == 3
     assert any(entry[1] == "queue_initial_message" for entry in logs)
