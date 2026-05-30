@@ -206,6 +206,7 @@ def _inside_sending_window() -> bool:
 
 def _queue_job_for_prospect(job_type: str, prospect: dict, payload: dict | None = None) -> dict | None:
     profile_key = prospect.get("assigned_account") or "profile_1"
+    campaign_id = db.db_get_queue_campaign_id_for_prospect(prospect)
     if db.db_has_active_job_for_prospect(job_type, prospect.get("id")):
         logger.info("Skipping duplicate active %s job for prospect %s", job_type, prospect.get("id"))
         return None
@@ -216,13 +217,18 @@ def _queue_job_for_prospect(job_type: str, prospect: dict, payload: dict | None 
     if not ok:
         logger.info("Skipping job for %s: %s", profile_key, reason)
         return None
-    if not _campaign_is_active(prospect.get("campaign_id")):
-        logger.info("Skipping job for inactive campaign: %s", prospect.get("campaign_id"))
+    if not _campaign_is_active(campaign_id):
+        logger.info(
+            "Skipping job for inactive campaign: prospect_campaign=%s resolved_campaign=%s prospect=%s",
+            prospect.get("campaign_id"),
+            campaign_id,
+            prospect.get("id"),
+        )
         return None
     return db.db_create_job({
         "job_type": job_type,
         "profile_key": profile_key,
-        "campaign_id": prospect.get("campaign_id"),
+        "campaign_id": campaign_id,
         "prospect_id": prospect.get("id"),
         "payload": payload or {},
     })
@@ -982,11 +988,14 @@ async def run_messages() -> SchedulerResponse:
         for prospect in ready:
             if not (prospect.get("initial_message") or "").strip():
                 continue
-            if _queue_job_for_prospect("send_messages", prospect, {
-                "linkedin_url": prospect.get("linkedin_url", ""),
-                "message": prospect.get("initial_message", ""),
-                "message_type": "initial",
-            }):
+            job = db.db_queue_ready_prospect_initial_message(prospect, reason="scheduler_run_messages")
+            if not job:
+                job = _queue_job_for_prospect("send_messages", prospect, {
+                    "linkedin_url": prospect.get("linkedin_url", ""),
+                    "message": prospect.get("initial_message", ""),
+                    "message_type": "initial",
+                })
+            if job:
                 queued += 1
         return SchedulerResponse(queued=queued, agents_available=manager.connected_count(), message=f"Created {queued} pending initial message job(s)")
     except Exception as e:

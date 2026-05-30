@@ -610,10 +610,10 @@ def db_create_initial_message_job_if_ready(prospect: dict, reason: str = "") -> 
         logger.info("Initial message job already active for prospect %s", prospect_id)
         return None
 
-    campaign_id = prospect.get("campaign_id")
+    campaign_id = db_get_queue_campaign_id_for_prospect(prospect)
     if campaign_id:
         campaign, _ = db_get_campaign(campaign_id)
-        if campaign and campaign.get("status", "active") != "active":
+        if campaign and campaign.get("status") not in ("active", "running"):
             logger.info("Campaign %s is not active; not queueing message for %s", campaign_id, prospect_id)
             return None
 
@@ -642,6 +642,62 @@ def db_create_initial_message_job_if_ready(prospect: dict, reason: str = "") -> 
     if job:
         logger.info("Queued initial message job %s for prospect %s", job.get("id"), prospect_id)
     return job
+
+
+def db_queue_ready_prospect_initial_message(prospect: dict, reason: str = "") -> dict | None:
+    """
+    Queue the first message for a prospect that is already accepted/connected.
+
+    This is the recovery path for prospects whose invitation job failed because
+    LinkedIn showed they were already a 1st-degree connection. It treats
+    Ready-to-Send as connected for the assigned profile, advances the active
+    campaign enrollment, and falls back to a generic first-message job only when
+    there is no running campaign sequence.
+    """
+    if not prospect:
+        return None
+    prospect_id = prospect.get("id")
+    initial_message = (prospect.get("initial_message") or "").strip()
+    if not prospect_id or not initial_message or prospect.get("message_sent_date"):
+        return None
+    if prospect.get("status") != "Ready to Send":
+        return None
+
+    profile_key = prospect.get("assigned_account") or "profile_1"
+    running_enrollments = db_get_running_enrollments_for_prospect(prospect_id)
+    for enrollment in running_enrollments:
+        campaign_id = enrollment.get("campaign_id")
+        now = _utc_now()
+        db_upsert_profile_connection_state(
+            prospect_id,
+            profile_key,
+            campaign_id=campaign_id,
+            connection_status="connected",
+            detected_by=profile_key,
+        )
+        supabase.table("campaign_enrollments").update({
+            "accepted_at": enrollment.get("accepted_at") or now,
+            "connected_at": enrollment.get("connected_at") or now,
+            "connection_detected_by_profile": profile_key,
+            "messaging_profile": profile_key,
+            "updated_at": now,
+        }).eq("campaign_id", campaign_id).eq("prospect_id", prospect_id).execute()
+
+        job = db_queue_next_campaign_step(
+            campaign_id,
+            prospect_id,
+            int(enrollment.get("current_step_order") or 0),
+        )
+        if job:
+            db_log_activity(
+                prospect_id,
+                "queue_initial_message",
+                "queued",
+                f"Queued after accepted/connected recovery ({reason or 'ready_to_send'}): {job.get('id')}",
+            )
+            return job
+
+    return db_create_initial_message_job_if_ready(prospect, reason=reason or "ready_to_send")
 
 
 def db_upsert_profile_connection_state(
@@ -879,6 +935,38 @@ def db_get_active_enrollments_for_prospect(prospect_id: str) -> list[dict]:
         .execute()
         .data or []
     )
+
+
+def db_get_running_enrollments_for_prospect(prospect_id: str) -> list[dict]:
+    """Active enrollments whose campaign can currently progress."""
+    running = []
+    for enrollment in db_get_active_enrollments_for_prospect(prospect_id):
+        campaign, _ = db_get_campaign(enrollment.get("campaign_id"))
+        if campaign and campaign.get("status") in ("active", "running"):
+            running.append({**enrollment, "campaign": campaign})
+    return running
+
+
+def db_get_queue_campaign_id_for_prospect(prospect: dict) -> str | None:
+    """
+    Resolve the campaign to use for queued jobs.
+
+    Prospects can keep an older campaign_id after being enrolled in a newer
+    running campaign. Queueing must follow the active enrollment first, or a
+    ready prospect can be blocked by an archived stale campaign id.
+    """
+    prospect_id = (prospect or {}).get("id")
+    if prospect_id:
+        enrollments = db_get_running_enrollments_for_prospect(prospect_id)
+        if enrollments:
+            return enrollments[0].get("campaign_id")
+
+    campaign_id = (prospect or {}).get("campaign_id")
+    if campaign_id:
+        campaign, _ = db_get_campaign(campaign_id)
+        if campaign and campaign.get("status") in ("active", "running"):
+            return campaign_id
+    return None
 
 
 def db_upsert_enrollment(campaign: dict, prospect: dict) -> dict | None:
