@@ -1426,7 +1426,6 @@ def db_apply_completed_job_result(job: dict, result: dict) -> None:
         final_status = "No Response" if not next_job else "Following Up"
         db_update_prospect(prospect_id, {
             "status": final_status,
-            "last_message_sent_at": _utc_now(),
             "last_action_at": _utc_now(),
             "next_steps": _next_steps_for_queued_job(next_job),
         })
