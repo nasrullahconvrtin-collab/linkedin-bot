@@ -52,6 +52,7 @@ def setup_logging():
     logging.basicConfig(
         level=logging.INFO,
         format=fmt,
+        force=True,
         handlers=[
             rotating,
             logging.StreamHandler(sys.stdout),
@@ -72,7 +73,9 @@ class LinkedFlowAgent:
         self.stop_event = asyncio.Event()
         self.context = None
         self.page = None
+        self.playwright = None
         self.running_job = None
+        self.last_task_message = ""
         self.job_lock = asyncio.Lock()
 
     async def start_browser(self, playwright):
@@ -106,6 +109,17 @@ class LinkedFlowAgent:
     async def close_browser(self):
         if self.context:
             await self.context.close()
+        self.context = None
+        self.page = None
+
+    async def ensure_browser_ready(self):
+        if self.page and not self.page.is_closed():
+            return
+        logger.warning("Browser page is closed or unavailable; restarting isolated browser context")
+        await self.close_browser()
+        if not self.playwright:
+            raise RuntimeError("Playwright runtime is not available")
+        await self.start_browser(self.playwright)
 
     async def send_heartbeat(self, ws, session_active=True):
         await ws.send(json.dumps({
@@ -183,15 +197,20 @@ class LinkedFlowAgent:
                 return
             await self.api("POST", f"/jobs/{job_id}/start")
             try:
+                self.last_task_message = ""
                 status = await self.handle_task(ws, task)
                 result = {
                     "task_type": task.get("type"),
                     "status": status,
                     "prospect_id": task.get("prospect_id"),
                     "message_type": task.get("message_type"),
+                    "message": self.last_task_message,
                 }
                 if status in ("error", "session_expired", "restricted", "limit_reached"):
-                    await self.api("POST", f"/jobs/{job_id}/fail", {"error_message": status, "result": result})
+                    await self.api("POST", f"/jobs/{job_id}/fail", {
+                        "error_message": self.last_task_message or status,
+                        "result": result,
+                    })
                 else:
                     await self.api("POST", f"/jobs/{job_id}/complete", {"result": result})
             except Exception as exc:
@@ -229,6 +248,7 @@ class LinkedFlowAgent:
         result = await send_connection_request(self.page, url, note, self.profile_key)
         status = result.get("status", "error")
         message = result.get("message", "")
+        self.last_task_message = message
 
         if status == "sent":
             self.daily_sent += 1
@@ -250,6 +270,9 @@ class LinkedFlowAgent:
         result = await send_message(self.page, url, message_text, self.profile_key)
         status = result.get("status", "error")
         message = result.get("message", "")
+        self.last_task_message = message
+        if status == "error":
+            logger.warning("send_message failed for %s: %s", url, message)
 
         await self.send_result(ws, task, status, message)
         await self.send_heartbeat(ws, session_active=status not in ("session_expired", "restricted"))
@@ -291,6 +314,7 @@ class LinkedFlowAgent:
             return "completed"
         try:
             async def run_task():
+                await self.ensure_browser_ready()
                 if task_type == "send_connection":
                     return await self.handle_send_connection(ws, task)
                 elif task_type == "send_message":
@@ -305,6 +329,7 @@ class LinkedFlowAgent:
 
             return await asyncio.wait_for(run_task(), timeout=TASK_TIMEOUT_SECONDS)
         except asyncio.TimeoutError:
+            self.last_task_message = f"Agent task timed out after {TASK_TIMEOUT_SECONDS}s"
             logger.error("Task timed out after %ss: %s", TASK_TIMEOUT_SECONDS, task_type)
             await self.send_result(
                 ws,
@@ -319,6 +344,7 @@ class LinkedFlowAgent:
             self.page = await self.context.new_page()
             return "error"
         except Exception as exc:
+            self.last_task_message = str(exc)
             logger.exception("Task failed: %s", task_type)
             await self.send_result(ws, task, "error", str(exc))
             return "error"
@@ -338,6 +364,7 @@ class LinkedFlowAgent:
         write_state(state="Connecting", profile_key=self.profile_key, backend_url=self.backend_url)
 
         async with async_playwright() as playwright:
+            self.playwright = playwright
             await self.start_browser(playwright)
             try:
                 while not self.stop_event.is_set():
