@@ -108,18 +108,43 @@ class LinkedFlowAgent:
 
     async def close_browser(self):
         if self.context:
-            await self.context.close()
+            try:
+                await self.context.close()
+            except Exception as exc:
+                logger.warning("Browser context close failed during recovery: %s", exc)
         self.context = None
         self.page = None
 
     async def ensure_browser_ready(self):
         if self.page and not self.page.is_closed():
-            return
+            try:
+                await self.page.evaluate("() => true")
+                return
+            except Exception as exc:
+                logger.warning("Browser page health check failed; restarting context: %s", exc)
         logger.warning("Browser page is closed or unavailable; restarting isolated browser context")
         await self.close_browser()
         if not self.playwright:
             raise RuntimeError("Playwright runtime is not available")
         await self.start_browser(self.playwright)
+
+    async def restart_browser_context(self):
+        logger.warning("Restarting isolated browser context for recovery")
+        await self.close_browser()
+        if not self.playwright:
+            raise RuntimeError("Playwright runtime is not available")
+        await self.start_browser(self.playwright)
+
+    @staticmethod
+    def is_browser_recoverable_error(exc: Exception) -> bool:
+        text = str(exc).lower()
+        return any(part in text for part in (
+            "target page, context or browser has been closed",
+            "browsercontext.new_page",
+            "target.createtarget",
+            "failed to open a new tab",
+            "protocol error",
+        ))
 
     async def send_heartbeat(self, ws, session_active=True):
         write_state(
@@ -363,9 +388,19 @@ class LinkedFlowAgent:
             self.page = await self.context.new_page()
             return "error"
         except Exception as exc:
+            if self.is_browser_recoverable_error(exc):
+                logger.warning("Recoverable browser error during %s; restarting and retrying once: %s", task_type, exc)
+                try:
+                    await self.restart_browser_context()
+                    return await asyncio.wait_for(run_task(), timeout=TASK_TIMEOUT_SECONDS)
+                except Exception as retry_exc:
+                    self.last_task_message = str(retry_exc)
+                    logger.exception("Task retry failed after browser restart: %s", task_type)
+                    await self.safe_send_result(ws, task, "error", str(retry_exc))
+                    return "error"
             self.last_task_message = str(exc)
             logger.exception("Task failed: %s", task_type)
-            await self.send_result(ws, task, "error", str(exc))
+            await self.safe_send_result(ws, task, "error", str(exc))
             return "error"
 
     async def heartbeat_loop(self, ws):
