@@ -45,13 +45,9 @@ def db_get_all_campaigns() -> list[dict]:
     )
     campaigns = result.data or []
     for c in campaigns:
-        cnt = (
-            supabase.table("prospects")
-            .select("id", count="exact")
-            .eq("campaign_id", c["id"])
-            .execute()
-        )
-        c["prospect_count"] = cnt.count or 0
+        _, stats = db_get_campaign(c["id"])
+        c.update(stats or {})
+        c["prospect_count"] = (stats or {}).get("total", 0)
         if c.get("template_id"):
             tmpl = (
                 supabase.table("campaign_templates")
@@ -65,6 +61,7 @@ def db_get_all_campaigns() -> list[dict]:
 
 
 def db_create_campaign(name: str, status: str = "draft", template_id: str | None = None,
+                       profile_key: str | None = None,
                        sequence_config: dict | None = None,
                        schedule_config: dict | None = None,
                        settings: dict | None = None) -> dict | None:
@@ -74,6 +71,8 @@ def db_create_campaign(name: str, status: str = "draft", template_id: str | None
     }
     if template_id:
         payload["template_id"] = template_id
+    if profile_key:
+        payload["profile_key"] = profile_key
     if sequence_config:
         payload["sequence_config"] = sequence_config
     if schedule_config:
@@ -90,7 +89,7 @@ def db_create_campaign(name: str, status: str = "draft", template_id: str | None
 
 def db_update_campaign(campaign_id: str, data: dict) -> dict | None:
     allowed = {
-        "name", "status", "template_id", "sequence_config",
+        "name", "status", "template_id", "profile_key", "sequence_config",
         "schedule_config", "settings",
     }
     clean = {k: v for k, v in data.items() if k in allowed and v is not None}
@@ -110,7 +109,7 @@ def db_get_campaign(campaign_id: str) -> tuple[dict | None, dict | None]:
     campaign = result.data[0]
     enrollments = (
         supabase.table("campaign_enrollments")
-        .select("*, prospects(status, connection_sent_date, message_sent_date)")
+        .select("*, prospects(status, connection_status, connection_sent_date, message_sent_date)")
         .eq("campaign_id", campaign_id)
         .execute()
         .data or []
@@ -146,8 +145,32 @@ def db_get_campaign(campaign_id: str) -> tuple[dict | None, dict | None]:
 
 
 def db_delete_campaign(campaign_id: str):
-    supabase.table("prospects").delete().eq("campaign_id", campaign_id).execute()
+    # Campaigns are reusable containers. Deleting a campaign must not delete
+    # prospects, because prospects can belong to other lists/campaigns.
+    supabase.table("jobs").delete().eq("campaign_id", campaign_id).in_("status", ["pending", "retrying", "failed", "cancelled"]).execute()
+    supabase.table("campaign_enrollments").delete().eq("campaign_id", campaign_id).execute()
     supabase.table("campaigns").delete().eq("id", campaign_id).execute()
+
+
+def db_duplicate_campaign(campaign_id: str, name: str | None = None, include_prospects: bool = False) -> dict | None:
+    campaign, _ = db_get_campaign(campaign_id)
+    if not campaign:
+        return None
+    copied = db_create_campaign(
+        name or f"{campaign.get('name', 'Campaign')} Copy",
+        status="draft",
+        template_id=campaign.get("template_id"),
+        profile_key=campaign.get("profile_key") or "profile_1",
+        sequence_config=campaign.get("sequence_config") or {},
+        schedule_config=campaign.get("schedule_config") or {},
+        settings=campaign.get("settings") or {},
+    )
+    if copied and include_prospects:
+        for enrollment in db_get_campaign_enrollments(campaign_id):
+            prospect, _ = db_get_prospect(enrollment.get("prospect_id"))
+            if prospect:
+                db_upsert_enrollment(copied, prospect)
+    return copied
 
 
 # ── Prospects ─────────────────────────────────────────────────────────────────
@@ -209,6 +232,18 @@ def db_get_prospects(
 def db_create_prospect(data: dict) -> dict | None:
     result = supabase.table("prospects").insert(data).execute()
     return result.data[0] if result.data else None
+
+
+def db_create_prospect_for_campaign(campaign_id: str, data: dict) -> dict | None:
+    campaign, _ = db_get_campaign(campaign_id)
+    if not campaign:
+        return None
+    data["campaign_id"] = campaign_id
+    data["assigned_account"] = campaign.get("profile_key") or data.get("assigned_account") or "profile_1"
+    prospect = db_create_prospect(data)
+    if prospect:
+        db_upsert_enrollment(campaign, prospect)
+    return prospect
 
 
 def db_create_or_update_prospect(data: dict) -> tuple[str, dict | None]:
@@ -356,6 +391,9 @@ def db_get_prospect_by_linkedin_url(linkedin_url: str) -> dict | None:
 
 def db_delete_prospect(prospect_id: str):
     supabase.table("activity_log").delete().eq("prospect_id", prospect_id).execute()
+    supabase.table("campaign_enrollments").delete().eq("prospect_id", prospect_id).execute()
+    supabase.table("prospect_list_members").delete().eq("prospect_id", prospect_id).execute()
+    supabase.table("jobs").delete().eq("prospect_id", prospect_id).in_("status", ["pending", "retrying", "failed", "cancelled"]).execute()
     supabase.table("prospects").delete().eq("id", prospect_id).execute()
 
 
@@ -920,7 +958,7 @@ def db_create_campaign_template(data: dict) -> dict | None:
 def db_get_campaign_enrollments(campaign_id: str) -> list[dict]:
     return (
         supabase.table("campaign_enrollments")
-        .select("*")
+        .select("*, prospects(first_name, last_name, company, job_title, linkedin_url, status)")
         .eq("campaign_id", campaign_id)
         .order("created_at")
         .execute()
@@ -972,7 +1010,7 @@ def db_get_queue_campaign_id_for_prospect(prospect: dict) -> str | None:
 
 
 def db_upsert_enrollment(campaign: dict, prospect: dict) -> dict | None:
-    profile_key = prospect.get("assigned_account") or "profile_1"
+    profile_key = campaign.get("profile_key") or prospect.get("assigned_account") or "profile_1"
     payload = {
         "campaign_id": campaign["id"],
         "prospect_id": prospect["id"],
@@ -987,7 +1025,59 @@ def db_upsert_enrollment(campaign: dict, prospect: dict) -> dict | None:
         .upsert(payload, on_conflict="campaign_id,prospect_id")
         .execute()
     )
+    supabase.table("prospects").update({
+        "campaign_id": campaign["id"],
+        "assigned_account": profile_key,
+    }).eq("id", prospect["id"]).execute()
     return result.data[0] if result.data else None
+
+
+def db_delete_profile(profile_key: str) -> bool:
+    # Disable related running work first. Historical jobs/activity stay for audit.
+    supabase.table("jobs").update({
+        "status": "cancelled",
+        "updated_at": _utc_now(),
+        "error_message": "Cancelled because profile was deleted",
+    }).eq("profile_key", profile_key).in_("status", ["pending", "retrying"]).execute()
+    supabase.table("campaigns").update({
+        "status": "paused",
+        "paused_at": _utc_now(),
+    }).eq("profile_key", profile_key).eq("status", "running").execute()
+    result = supabase.table("linkedin_profiles").delete().eq("profile_key", profile_key).execute()
+    return bool(result.data)
+
+
+def db_add_prospects_to_campaign(campaign_id: str, prospect_ids: list[str]) -> dict:
+    campaign, _ = db_get_campaign(campaign_id)
+    if not campaign:
+        return {"error": "campaign_not_found", "added": 0, "queued": 0}
+    added = queued = 0
+    for prospect_id in sorted(set(prospect_ids or [])):
+        prospect, _ = db_get_prospect(prospect_id)
+        if not prospect:
+            continue
+        enrollment = db_upsert_enrollment(campaign, prospect)
+        if enrollment:
+            added += 1
+            if campaign.get("status") == "running" and db_queue_next_campaign_step(campaign_id, prospect_id, int(enrollment.get("current_step_order") or 0)):
+                queued += 1
+    return {"campaign_id": campaign_id, "added": added, "queued": queued}
+
+
+def db_remove_prospects_from_campaign(campaign_id: str, prospect_ids: list[str]) -> int:
+    removed = 0
+    for prospect_id in sorted(set(prospect_ids or [])):
+        supabase.table("campaign_enrollments").delete().eq("campaign_id", campaign_id).eq("prospect_id", prospect_id).execute()
+        supabase.table("jobs").update({
+            "status": "cancelled",
+            "updated_at": _utc_now(),
+            "error_message": "Cancelled because prospect was removed from campaign",
+        }).eq("campaign_id", campaign_id).eq("prospect_id", prospect_id).in_("status", ["pending", "retrying"]).execute()
+        active = db_get_active_enrollments_for_prospect(prospect_id)
+        if not active:
+            supabase.table("prospects").update({"campaign_id": None}).eq("id", prospect_id).execute()
+        removed += 1
+    return removed
 
 
 def db_create_prospect_list(name: str, description: str | None = None, sort_order: int = 0) -> dict | None:

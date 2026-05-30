@@ -6,7 +6,7 @@ import StatCard from '../components/StatCard';
 import ActivityFeed from '../components/ActivityFeed';
 import TriggerButtons from '../components/TriggerButtons';
 import { useApp } from '../context/AppContext';
-import { getCampaign } from '../services/api';
+import { getCampaign, getJobs } from '../services/api';
 
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
@@ -27,6 +27,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 export default function Dashboard() {
   const { stats, campaigns, profiles } = useApp();
   const [chartData, setChartData] = useState([]);
+  const [jobs, setJobs] = useState([]);
 
   useEffect(() => {
     if (!campaigns.length) return;
@@ -50,6 +51,10 @@ export default function Dashboard() {
       );
     }).catch(() => {/* ignore chart errors */});
   }, [campaigns]);
+
+  useEffect(() => {
+    getJobs({ limit: 250 }).then(d => setJobs(d.jobs || [])).catch(() => {});
+  }, []);
 
   const statCards = [
     { title: 'Total Prospects',        value: stats?.total_prospects,        icon: Users,          color: '#3b82f6' },

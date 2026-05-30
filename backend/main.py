@@ -27,8 +27,10 @@ from models import (
     ActivityLogCreate,
     BulkImportResponse,
     CampaignCreate,
+    CampaignDuplicateRequest,
     CampaignFromTemplateCreate,
     CampaignLaunchRequest,
+    CampaignProspectsUpdate,
     CampaignStatusUpdate,
     CampaignTemplateCreate,
     CampaignUpdate,
@@ -278,6 +280,7 @@ async def create_campaign(body: CampaignCreate):
             body.name,
             status=body.status or "draft",
             template_id=body.template_id,
+            profile_key=body.profile_key,
             sequence_config=body.sequence_config,
             schedule_config=body.schedule_config,
             settings=body.settings,
@@ -343,6 +346,22 @@ async def delete_campaign(campaign_id: str):
         raise HTTPException(500, str(e))
 
 
+@app.post("/campaigns/{campaign_id}/duplicate", tags=["Campaigns"], status_code=201)
+async def duplicate_campaign(campaign_id: str, body: CampaignDuplicateRequest | None = None):
+    """Duplicate campaign setup. Prospects are optional and are deduped by enrollment."""
+    try:
+        payload = body or CampaignDuplicateRequest()
+        copied = db.db_duplicate_campaign(campaign_id, payload.name, payload.include_prospects)
+        if not copied:
+            raise HTTPException(404, "Campaign not found")
+        return copied
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"duplicate_campaign: {e}")
+        raise HTTPException(500, str(e))
+
+
 @app.get("/campaign-templates", tags=["Campaign Wizard"])
 async def list_campaign_templates(include_coming_soon: bool = Query(True)):
     try:
@@ -401,6 +420,7 @@ async def create_campaign_from_template(body: CampaignFromTemplateCreate):
             body.name,
             status=body.status or "draft",
             template_id=body.template_id,
+            profile_key=(body.settings or {}).get("profile_key") or "profile_1",
             sequence_config=body.sequence_config,
             schedule_config=body.schedule_config,
             settings=body.settings,
@@ -433,6 +453,31 @@ async def launch_campaign(campaign_id: str, body: CampaignLaunchRequest | None =
         raise
     except Exception as e:
         logger.error(f"launch_campaign: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.post("/campaigns/{campaign_id}/prospects", tags=["Campaign Wizard"])
+async def add_campaign_prospects(campaign_id: str, body: CampaignProspectsUpdate):
+    """Enroll existing prospects into a campaign without duplicating rows."""
+    try:
+        result = db.db_add_prospects_to_campaign(campaign_id, body.prospect_ids)
+        if result.get("error") == "campaign_not_found":
+            raise HTTPException(404, "Campaign not found")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"add_campaign_prospects: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.delete("/campaigns/{campaign_id}/prospects", tags=["Campaign Wizard"])
+async def remove_campaign_prospects(campaign_id: str, body: CampaignProspectsUpdate):
+    """Remove prospects from this campaign only; prospect records remain reusable."""
+    try:
+        return {"removed": db.db_remove_prospects_from_campaign(campaign_id, body.prospect_ids)}
+    except Exception as e:
+        logger.error(f"remove_campaign_prospects: {e}")
         raise HTTPException(500, str(e))
 
 
@@ -581,7 +626,10 @@ async def create_prospect(body: ProspectCreate):
         data = body.model_dump(exclude_none=True)
         if not data.get("linkedin_url") and not data.get("email"):
             raise HTTPException(400, "linkedin_url or email is required")
-        prospect = db.db_create_prospect(data)
+        if data.get("campaign_id"):
+            prospect = db.db_create_prospect_for_campaign(data["campaign_id"], data)
+        else:
+            prospect = db.db_create_prospect(data)
         if not prospect:
             raise HTTPException(500, "Failed to create prospect")
         return prospect
@@ -638,6 +686,10 @@ async def bulk_import_prospects(
                 skipped += 1
             if saved and saved.get("status") == "Ready to Send":
                 ready += 1
+            if saved and campaign_id:
+                campaign, _ = db.db_get_campaign(campaign_id)
+                if campaign:
+                    db.db_upsert_enrollment(campaign, saved)
 
         return BulkImportResponse(
             imported=created + updated,
@@ -802,6 +854,21 @@ async def update_profile(profile_key: str, body: LinkedInProfileUpdate):
         raise
     except Exception as e:
         logger.error(f"update_profile: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.delete("/profiles/{profile_key}", tags=["LinkedIn Profiles"])
+async def delete_profile(profile_key: str):
+    """Delete a profile record and cancel pending profile jobs; local browser data remains local."""
+    try:
+        deleted = db.db_delete_profile(profile_key)
+        if not deleted:
+            raise HTTPException(404, "Profile not found")
+        return {"deleted": True, "profile_key": profile_key}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"delete_profile: {e}")
         raise HTTPException(500, str(e))
 
 

@@ -9,6 +9,7 @@ import {
   createCampaignFromTemplate,
   getCampaignTemplates,
   getCampaignVariables,
+  getProfiles,
   getProspectLists,
   getProspects,
   launchCampaign,
@@ -125,6 +126,8 @@ export default function CampaignWizard({ onClose, onCreated }) {
   const [selected, setSelected] = useState(null);
   const [step, setStep] = useState(0);
   const [campaignName, setCampaignName] = useState('');
+  const [profileKey, setProfileKey] = useState('profile_1');
+  const [profiles, setProfiles] = useState([]);
   const [prospects, setProspects] = useState([]);
   const [lists, setLists] = useState([]);
   const [selectedProspects, setSelectedProspects] = useState({});
@@ -144,8 +147,9 @@ export default function CampaignWizard({ onClose, onCreated }) {
       getCampaignVariables().catch(() => ({ standard: DEFAULT_VARS })),
       getProspects({ limit: 500 }),
       getProspectLists().catch(() => ({ lists: [] })),
+      getProfiles().catch(() => []),
     ])
-      .then(([templateData, variableData, prospectData, listData]) => {
+      .then(([templateData, variableData, prospectData, listData, profileData]) => {
         const allTemplates = templateData.templates || [];
         setTemplates(allTemplates);
         const firstActive = allTemplates.find(t => t.status === 'active') || allTemplates[0] || null;
@@ -154,6 +158,8 @@ export default function CampaignWizard({ onClose, onCreated }) {
         setVariables(variableData.standard || DEFAULT_VARS);
         setProspects(prospectData.prospects || []);
         setLists(listData.lists || []);
+        setProfiles(profileData || []);
+        if ((profileData || [])[0]?.profile_key) setProfileKey(profileData[0].profile_key);
       })
       .catch(err => toast.error(err.message))
       .finally(() => setLoading(false));
@@ -202,6 +208,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
         name: campaignName.trim(),
         template_id: selected.id,
         status: 'draft',
+        settings: { profile_key: profileKey },
         sequence_config: {
           messages: messageOverrides,
           delays: delayOverrides,
@@ -442,6 +449,19 @@ export default function CampaignWizard({ onClose, onCreated }) {
                 placeholder="Q3 founder outreach"
                 className="mt-2 w-full bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
               />
+            </div>
+            <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
+              <label className="text-xs text-[#9ca3af]">LinkedIn Profile</label>
+              <select
+                value={profileKey}
+                onChange={e => setProfileKey(e.target.value)}
+                className="mt-2 w-full bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+              >
+                {(profiles.length ? profiles : [{ profile_key: 'profile_1', display_name: 'profile_1' }]).map(p => (
+                  <option key={p.profile_key} value={p.profile_key}>{p.display_name || p.profile_key}</option>
+                ))}
+              </select>
+              <p className="text-[#6b7280] text-xs mt-2">One campaign runs through one LinkedIn account.</p>
             </div>
             <StepPreview steps={steps} />
             <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">

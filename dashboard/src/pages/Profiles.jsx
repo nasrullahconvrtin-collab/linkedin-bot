@@ -10,6 +10,8 @@ import {
   Server,
   ToggleLeft,
   ToggleRight,
+  Trash2,
+  Edit3,
   Wifi,
   WifiOff,
   X,
@@ -17,7 +19,7 @@ import {
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
 import { useApp } from '../context/AppContext';
-import { createProfile, getJobs, updateProfile } from '../services/api';
+import { createProfile, deleteProfile, getJobs, updateProfile } from '../services/api';
 
 const DAILY_LIMIT = 25;
 
@@ -45,6 +47,7 @@ export default function Profiles() {
   const { profiles, fetchProfiles } = useApp();
   const [tab, setTab] = useState('overview');
   const [modal, setModal] = useState(false);
+  const [editing, setEditing] = useState(null);
   const [key, setKey] = useState('profile_1');
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
@@ -69,9 +72,15 @@ export default function Profiles() {
     e.preventDefault();
     setLoading(true);
     try {
-      await createProfile({ profile_key: key, display_name: name });
-      toast.success(`Profile ${key} added`);
+      if (editing) {
+        await updateProfile(editing.profile_key, { display_name: name });
+        toast.success(`Profile ${editing.profile_key} updated`);
+      } else {
+        await createProfile({ profile_key: key, display_name: name });
+        toast.success(`Profile ${key} added`);
+      }
       setModal(false);
+      setEditing(null);
       setKey('profile_1');
       setName('');
       fetchProfiles();
@@ -79,6 +88,24 @@ export default function Profiles() {
       toast.error(e.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const openEdit = (profile) => {
+    setEditing(profile);
+    setKey(profile.profile_key);
+    setName(profile.display_name || '');
+    setModal(true);
+  };
+
+  const removeProfile = async (profile) => {
+    if (!confirm(`Delete ${profile.profile_key}? This removes the dashboard profile record and cancels pending jobs, but keeps local browser/session files on the agent machine.`)) return;
+    try {
+      await deleteProfile(profile.profile_key);
+      toast.success('Profile deleted');
+      fetchProfiles();
+    } catch (e) {
+      toast.error(e.message);
     }
   };
 
@@ -112,7 +139,7 @@ export default function Profiles() {
           </p>
         </div>
         <button
-          onClick={() => setModal(true)}
+          onClick={() => { setEditing(null); setKey('profile_1'); setName(''); setModal(true); }}
           className="flex items-center gap-2 px-4 py-2.5 bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-xl font-medium text-sm transition-colors shadow-lg shadow-indigo-500/20"
         >
           <Plus size={16} /> Add Profile
@@ -290,6 +317,14 @@ export default function Profiles() {
                   }
                   {enabled ? 'Disable Profile' : 'Enable Profile'}
                 </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => openEdit(p)} className="flex items-center justify-center gap-2 py-2 rounded-xl border border-[#2a2a2a] text-sm text-[#9ca3af] hover:text-white">
+                    <Edit3 size={14} /> Edit
+                  </button>
+                  <button onClick={() => removeProfile(p)} className="flex items-center justify-center gap-2 py-2 rounded-xl border border-red-500/30 text-sm text-red-400 hover:bg-red-500/10">
+                    <Trash2 size={14} /> Delete
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -300,13 +335,13 @@ export default function Profiles() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-[#2a2a2a] bg-[#111111] p-6 shadow-2xl">
             <div className="flex items-center justify-between mb-5">
-              <h2 className="text-white font-semibold text-lg">Add LinkedIn Profile</h2>
-              <button onClick={() => setModal(false)} className="text-[#6b7280] hover:text-white"><X size={20} /></button>
+              <h2 className="text-white font-semibold text-lg">{editing ? 'Edit LinkedIn Profile' : 'Add LinkedIn Profile'}</h2>
+              <button onClick={() => { setModal(false); setEditing(null); }} className="text-[#6b7280] hover:text-white"><X size={20} /></button>
             </div>
             <form onSubmit={handleCreate} className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-[#9ca3af] mb-1.5">Profile Key</label>
-                <select value={key} onChange={e => setKey(e.target.value)}
+                <select value={key} disabled={!!editing} onChange={e => setKey(e.target.value)}
                   className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-[#6366f1]">
                   {['profile_1','profile_2','profile_3','profile_4','profile_5'].map(k => (
                     <option key={k} value={k}>{k}</option>
@@ -324,14 +359,14 @@ export default function Profiles() {
                 />
               </div>
               <div className="flex gap-3 pt-1">
-                <button type="button" onClick={() => setModal(false)}
+                <button type="button" onClick={() => { setModal(false); setEditing(null); }}
                   className="flex-1 py-2.5 rounded-xl border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-sm font-medium">
                   Cancel
                 </button>
                 <button type="submit" disabled={loading || !name.trim()}
                   className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[#6366f1] hover:bg-[#4f46e5] text-white text-sm font-medium disabled:opacity-50">
                   {loading && <Loader2 size={14} className="animate-spin" />}
-                  Add Profile
+                  {editing ? 'Save Profile' : 'Add Profile'}
                 </button>
               </div>
             </form>

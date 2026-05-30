@@ -25,10 +25,13 @@ export const createCampaign    = (data)     => api.post('/campaigns', data);
 export const getCampaign       = (id)       => api.get(`/campaigns/${id}`);
 export const updateCampaign    = (id, data) => api.put(`/campaigns/${id}`, data);
 export const deleteCampaign    = (id)       => api.delete(`/campaigns/${id}`);
+export const duplicateCampaign = (id, data) => api.post(`/campaigns/${id}/duplicate`, data || {});
 export const getCampaignTemplates = (params) => api.get('/campaign-templates', { params });
 export const getCampaignTemplate  = (id)     => api.get(`/campaign-templates/${id}`);
 export const createCampaignFromTemplate = (data) => api.post('/campaigns/from-template', data);
 export const launchCampaign    = (id, data) => api.post(`/campaigns/${id}/launch`, data || {});
+export const addProspectsToCampaign = (id, prospect_ids) => api.post(`/campaigns/${id}/prospects`, { prospect_ids });
+export const removeProspectsFromCampaign = (id, prospect_ids) => api.delete(`/campaigns/${id}/prospects`, { data: { prospect_ids } });
 export const updateCampaignStatus = (id, data) => api.put(`/campaigns/${id}/status`, data);
 export const getCampaignSequence = (id) => api.get(`/campaigns/${id}/sequence`);
 export const getCampaignVariables = () => api.get('/campaign-variables');
@@ -66,6 +69,7 @@ export const logActivity       = (data)     => api.post('/activity-log', data);
 export const getProfiles       = ()         => api.get('/profiles');
 export const createProfile     = (data)     => api.post('/profiles', data);
 export const updateProfile     = (key, data)=> api.put(`/profiles/${key}`, data);
+export const deleteProfile     = (key)      => api.delete(`/profiles/${key}`);
 
 // ── Stats ────────────────────────────────────────────────────
 export const getStats          = ()         => api.get('/stats');

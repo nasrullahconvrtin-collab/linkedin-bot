@@ -1,8 +1,10 @@
 import { useNavigate } from 'react-router-dom';
-import { Eye, Trash2, Users, Send, Reply } from 'lucide-react';
+import { Archive, Copy, Edit3, Eye, MoreVertical, Pause, Play, Trash2, Users, Send, Reply } from 'lucide-react';
+import { useState } from 'react';
 
-export default function CampaignCard({ campaign, onDelete }) {
+export default function CampaignCard({ campaign, onDelete, onDuplicate, onStatus }) {
   const nav = useNavigate();
+  const [menuOpen, setMenuOpen] = useState(false);
   const total    = campaign.prospect_count || 0;
   const sent     = campaign.sent     || 0;
   const accepted = campaign.accepted || 0;
@@ -27,10 +29,33 @@ export default function CampaignCard({ campaign, onDelete }) {
             Created {new Date(campaign.created_at).toLocaleDateString()}
           </p>
         </div>
-        <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${statusClass}`}>
-          {status}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${statusClass}`}>
+            {status}
+          </span>
+          <div className="relative">
+            <button onClick={() => setMenuOpen(v => !v)} className="w-7 h-7 rounded-lg border border-[#2a2a2a] flex items-center justify-center text-[#6b7280] hover:text-white">
+              <MoreVertical size={14} />
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-8 z-20 w-40 rounded-xl border border-[#2a2a2a] bg-[#111111] shadow-2xl overflow-hidden">
+                <button onClick={() => nav(`/campaigns/${campaign.id}`)} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[#9ca3af] hover:text-white hover:bg-[#1a1a1a]"><Edit3 size={13} /> Edit</button>
+                <button onClick={() => { setMenuOpen(false); onDuplicate?.(campaign); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[#9ca3af] hover:text-white hover:bg-[#1a1a1a]"><Copy size={13} /> Duplicate</button>
+                {status === 'running' ? (
+                  <button onClick={() => { setMenuOpen(false); onStatus?.(campaign, 'paused'); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[#9ca3af] hover:text-white hover:bg-[#1a1a1a]"><Pause size={13} /> Pause</button>
+                ) : status !== 'archived' ? (
+                  <button onClick={() => { setMenuOpen(false); onStatus?.(campaign, 'running'); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[#9ca3af] hover:text-white hover:bg-[#1a1a1a]"><Play size={13} /> Resume</button>
+                ) : null}
+                {status !== 'archived' && (
+                  <button onClick={() => { setMenuOpen(false); onStatus?.(campaign, 'archived'); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[#9ca3af] hover:text-white hover:bg-[#1a1a1a]"><Archive size={13} /> Archive</button>
+                )}
+                <button onClick={() => { setMenuOpen(false); onDelete?.(campaign.id); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10"><Trash2 size={13} /> Delete</button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
+      <p className="text-[#6b7280] text-xs -mt-3">Profile: {campaign.profile_key || campaign.settings?.profile_key || 'profile_1'}</p>
       {campaign.template?.name && (
         <p className="text-[#9ca3af] text-xs -mt-2">Template: {campaign.template.name}</p>
       )}
@@ -70,12 +95,6 @@ export default function CampaignCard({ campaign, onDelete }) {
           className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-[#6366f1] hover:bg-[#4f46e5] text-white text-xs font-medium transition-colors"
         >
           <Eye size={13} /> View
-        </button>
-        <button
-          onClick={() => onDelete(campaign.id)}
-          className="w-9 flex items-center justify-center rounded-lg border border-[#2a2a2a] hover:border-red-500/50 hover:text-red-400 text-[#6b7280] transition-colors"
-        >
-          <Trash2 size={14} />
         </button>
       </div>
     </div>

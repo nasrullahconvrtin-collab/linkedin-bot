@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Archive, Clock, Filter, ListChecks, Loader2, MessageSquare, Plus, Search, Send, X } from 'lucide-react';
+import { Clock, Filter, ListChecks, Loader2, MessageSquare, Plus, Search, Send, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
 import CampaignCard from '../components/CampaignCard';
@@ -8,6 +8,7 @@ import CampaignWizard from './CampaignWizard';
 import { useApp } from '../context/AppContext';
 import {
   deleteCampaign,
+  duplicateCampaign,
   getCampaignTemplates,
   getJobs,
   getMessages,
@@ -95,10 +96,20 @@ export default function Campaigns() {
   }, [tab]);
 
   const handleDelete = async (id) => {
-    if (!confirm('Archive is safer. Delete this campaign and its legacy assigned prospects?')) return;
+    if (!confirm('Delete this campaign? Prospects stay in your database/lists. Pending campaign jobs will be cancelled.')) return;
     try {
       await deleteCampaign(id);
       toast.success('Campaign deleted');
+      fetchCampaigns();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const handleDuplicate = async (campaign) => {
+    try {
+      await duplicateCampaign(campaign.id, { name: `${campaign.name} Copy`, include_prospects: false });
+      toast.success('Campaign duplicated as draft');
       fetchCampaigns();
     } catch (err) {
       toast.error(err.message);
@@ -191,21 +202,13 @@ export default function Campaigns() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {filtered.map(c => (
-              <div key={c.id} className="relative">
-                <CampaignCard campaign={c} onDelete={handleDelete} />
-                <div className="absolute right-3 bottom-3 flex gap-1">
-                  {c.status === 'running' ? (
-                    <button onClick={() => setStatus(c, 'paused')} className="px-2 py-1 rounded-md bg-[#111111] border border-[#2a2a2a] text-xs text-[#9ca3af]">Pause</button>
-                  ) : c.status !== 'archived' ? (
-                    <button onClick={() => setStatus(c, 'running')} className="px-2 py-1 rounded-md bg-[#111111] border border-[#2a2a2a] text-xs text-[#9ca3af]">Resume</button>
-                  ) : null}
-                  {c.status !== 'archived' && (
-                    <button onClick={() => setStatus(c, 'archived')} className="px-2 py-1 rounded-md bg-[#111111] border border-[#2a2a2a] text-xs text-[#9ca3af]">
-                      <Archive size={12} />
-                    </button>
-                  )}
-                </div>
-              </div>
+              <CampaignCard
+                key={c.id}
+                campaign={c}
+                onDelete={handleDelete}
+                onDuplicate={handleDuplicate}
+                onStatus={setStatus}
+              />
             ))}
           </div>
         )

@@ -1,12 +1,24 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Upload, FileText, X, Loader2, CheckCircle, AlertCircle, Rocket, Pause, Archive } from 'lucide-react';
+import { ArrowLeft, Upload, FileText, X, Loader2, CheckCircle, AlertCircle, Rocket, Pause, Archive, Plus, UserPlus, Trash2 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
 import ProspectTable from '../components/ProspectTable';
 import StatusBadge from '../components/StatusBadge';
-import { getCampaign, bulkImportProspects, getCampaignSequence, launchCampaign, updateCampaignStatus, updateCampaign } from '../services/api';
+import {
+  addProspectsToCampaign,
+  createProspect,
+  getCampaign,
+  bulkImportProspects,
+  getCampaignSequence,
+  getProfiles,
+  getProspects,
+  launchCampaign,
+  removeProspectsFromCampaign,
+  updateCampaignStatus,
+  updateCampaign,
+} from '../services/api';
 
 const REQUIRED_FIELDS = [
   { key: 'first_name',    label: 'First Name' },
@@ -79,17 +91,31 @@ export default function CampaignDetail() {
   const [actioning, setActioning] = useState(false);
   const [editName, setEditName] = useState('');
   const [editConfig, setEditConfig] = useState('{}');
+  const [profiles, setProfiles] = useState([]);
+  const [profileKey, setProfileKey] = useState('profile_1');
+  const [prospectPicker, setProspectPicker] = useState([]);
+  const [pickedProspect, setPickedProspect] = useState('');
+  const [newProspectOpen, setNewProspectOpen] = useState(false);
+  const [newProspect, setNewProspect] = useState({
+    first_name: '', last_name: '', linkedin_url: '', email: '', company: '', job_title: '',
+  });
 
   useEffect(() => {
     getCampaign(id)
       .then(d => {
         setCampaign(d.campaign); setStats(d);
         setEditName(d.campaign?.name || '');
+        setProfileKey(d.campaign?.profile_key || d.campaign?.settings?.profile_key || 'profile_1');
         setEditConfig(JSON.stringify(d.campaign?.sequence_config || {}, null, 2));
       })
       .catch(() => toast.error('Campaign not found'))
       .finally(() => setLoading(false));
   }, [id]);
+
+  useEffect(() => {
+    getProfiles().then(setProfiles).catch(() => {});
+    getProspects({ limit: 500 }).then(d => setProspectPicker(d.prospects || [])).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (tab === 'sequence') {
@@ -101,6 +127,7 @@ export default function CampaignDetail() {
     getCampaign(id).then(d => {
       setCampaign(d.campaign); setStats(d);
       setEditName(d.campaign?.name || '');
+      setProfileKey(d.campaign?.profile_key || d.campaign?.settings?.profile_key || 'profile_1');
       setEditConfig(JSON.stringify(d.campaign?.sequence_config || {}, null, 2));
     }).catch(() => {});
     if (tab === 'sequence') getCampaignSequence(id).then(setSequence).catch(() => {});
@@ -109,11 +136,79 @@ export default function CampaignDetail() {
   const saveCampaignEdits = async () => {
     try {
       const config = JSON.parse(editConfig || '{}');
-      await updateCampaign(id, { name: editName.trim(), sequence_config: config });
+      await updateCampaign(id, { name: editName.trim(), profile_key: profileKey, sequence_config: config });
       toast.success('Campaign updated');
       refreshCampaign();
     } catch (e) {
       toast.error(e.message || 'Invalid campaign config JSON');
+    }
+  };
+
+  const saveSequenceConfig = async (nextConfig) => {
+    const merged = { ...(campaign.sequence_config || {}), ...nextConfig };
+    await updateCampaign(id, { sequence_config: merged });
+    setCampaign(c => ({ ...c, sequence_config: merged }));
+    setEditConfig(JSON.stringify(merged, null, 2));
+    toast.success('Sequence saved. Future queued steps will use the new settings.');
+    if (tab === 'sequence') getCampaignSequence(id).then(setSequence).catch(() => {});
+  };
+
+  const updateDelay = (stepOrder, days) => {
+    const config = campaign.sequence_config || {};
+    saveSequenceConfig({
+      delays: {
+        ...(config.delays || {}),
+        [String(stepOrder)]: { days: Number(days || 0), working_days: 0 },
+      },
+    }).catch(e => toast.error(e.message));
+  };
+
+  const updateMessage = (stepOrder, value) => {
+    const config = campaign.sequence_config || {};
+    saveSequenceConfig({
+      messages: {
+        ...(config.messages || {}),
+        [String(stepOrder)]: value,
+      },
+    }).catch(e => toast.error(e.message));
+  };
+
+  const addExistingProspect = async () => {
+    if (!pickedProspect) return;
+    try {
+      const result = await addProspectsToCampaign(id, [pickedProspect]);
+      toast.success(`Added ${result.added || 0} prospect`);
+      setPickedProspect('');
+      refreshCampaign();
+    } catch (e) {
+      toast.error(e.message);
+    }
+  };
+
+  const addSingleProspect = async () => {
+    if (!newProspect.linkedin_url && !newProspect.email) {
+      toast.error('LinkedIn URL or email is required');
+      return;
+    }
+    try {
+      await createProspect({ ...newProspect, campaign_id: id, assigned_account: profileKey });
+      toast.success('Prospect added to campaign');
+      setNewProspectOpen(false);
+      setNewProspect({ first_name: '', last_name: '', linkedin_url: '', email: '', company: '', job_title: '' });
+      refreshCampaign();
+    } catch (e) {
+      toast.error(e.message);
+    }
+  };
+
+  const removeEnrollment = async (prospectId) => {
+    if (!confirm('Remove this prospect from this campaign? The prospect will stay in Prospects/Lists.')) return;
+    try {
+      await removeProspectsFromCampaign(id, [prospectId]);
+      toast.success('Removed from campaign');
+      refreshCampaign();
+    } catch (e) {
+      toast.error(e.message);
     }
   };
 
@@ -260,7 +355,40 @@ export default function CampaignDetail() {
 
       {/* Tab content */}
       {tab === 'prospects' && (
-        <ProspectTable campaignId={id} />
+        <div className="space-y-4">
+          <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-4">
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_auto] gap-3">
+              <select value={pickedProspect} onChange={e => setPickedProspect(e.target.value)} className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white">
+                <option value="">Add existing prospect...</option>
+                {prospectPicker.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {[p.first_name, p.last_name].filter(Boolean).join(' ') || p.linkedin_url} {p.company ? `- ${p.company}` : ''}
+                  </option>
+                ))}
+              </select>
+              <button onClick={addExistingProspect} className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-sm">
+                <UserPlus size={15} /> Add Existing
+              </button>
+              <button onClick={() => setNewProspectOpen(v => !v)} className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-[#6366f1] text-white text-sm">
+                <Plus size={15} /> New Prospect
+              </button>
+            </div>
+            {newProspectOpen && (
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                {[
+                  ['first_name', 'First name'], ['last_name', 'Last name'], ['linkedin_url', 'LinkedIn URL'],
+                  ['email', 'Email'], ['company', 'Company'], ['job_title', 'Job title'],
+                ].map(([key, label]) => (
+                  <input key={key} value={newProspect[key]} onChange={e => setNewProspect(p => ({ ...p, [key]: e.target.value }))} placeholder={label} className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white" />
+                ))}
+                <button onClick={addSingleProspect} className="md:col-span-2 px-4 py-2.5 rounded-lg bg-[#22c55e] text-white text-sm font-medium">
+                  Save and Enroll Prospect
+                </button>
+              </div>
+            )}
+          </div>
+          <ProspectTable campaignId={id} />
+        </div>
       )}
 
       {tab === 'import' && (
@@ -392,7 +520,7 @@ export default function CampaignDetail() {
       {tab === 'sequence' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
-            <h3 className="text-white font-semibold mb-4">Template Steps</h3>
+            <h3 className="text-white font-semibold mb-4">Editable Sequence</h3>
             {!sequence?.template ? (
               <p className="text-[#6b7280] text-sm">This campaign was not created from a template.</p>
             ) : (
@@ -401,6 +529,32 @@ export default function CampaignDetail() {
                   <div key={step.id} className="rounded-lg bg-[#111111] border border-[#2a2a2a] p-3">
                     <p className="text-white text-sm font-medium">{step.step_order}. {step.label}</p>
                     <p className="text-[#6b7280] text-xs mt-1">{step.action_type}</p>
+                    {step.action_type === 'wait' && (
+                      <div className="mt-3">
+                        <label className="block text-xs text-[#9ca3af] mb-1">Delay days</label>
+                        <input
+                          type="number"
+                          min="0"
+                          defaultValue={(campaign.sequence_config?.delays || {})[String(step.step_order)]?.days ?? step.config?.days ?? step.config?.working_days ?? 0}
+                          onBlur={e => updateDelay(step.step_order, e.target.value)}
+                          className="w-28 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white"
+                        />
+                      </div>
+                    )}
+                    {['message', 'follow-up message', 'invitation'].includes(step.action_type) && (
+                      <div className="mt-3">
+                        <label className="block text-xs text-[#9ca3af] mb-1">
+                          {step.action_type === 'invitation' ? 'Invitation note' : 'Message text'}
+                        </label>
+                        <textarea
+                          rows={3}
+                          defaultValue={(campaign.sequence_config?.messages || {})[String(step.step_order)] || step.config?.message || ''}
+                          onBlur={e => updateMessage(step.step_order, e.target.value)}
+                          placeholder={step.config?.message_field ? `Uses prospect field: ${step.config.message_field}` : 'Type message override'}
+                          className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white"
+                        />
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -415,8 +569,12 @@ export default function CampaignDetail() {
                 <div key={row.id} className="rounded-lg bg-[#111111] border border-[#2a2a2a] p-3">
                   <div className="flex justify-between gap-3">
                     <p className="text-white text-sm">Step {row.current_step_order}</p>
-                    <span className="text-xs text-[#9ca3af]">{row.status}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-[#9ca3af]">{row.status}</span>
+                      <button onClick={() => removeEnrollment(row.prospect_id)} className="text-[#6b7280] hover:text-red-400"><Trash2 size={13} /></button>
+                    </div>
                   </div>
+                  <p className="text-[#9ca3af] text-xs mt-1">{row.profile_key || profileKey}</p>
                   <p className="text-[#6b7280] text-xs mt-1">Next: {row.next_step_at ? new Date(row.next_step_at).toLocaleString() : '-'}</p>
                 </div>
               ))}
@@ -434,6 +592,17 @@ export default function CampaignDetail() {
               onChange={e => setEditName(e.target.value)}
               className="w-full bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
             />
+          </div>
+          <div>
+            <label className="block text-xs text-[#9ca3af] mb-1">LinkedIn Profile for this Campaign</label>
+            <select value={profileKey} onChange={e => setProfileKey(e.target.value)} className="w-full bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]">
+              {(profiles.length ? profiles : [{ profile_key: 'profile_1', display_name: 'profile_1' }]).map(p => (
+                <option key={p.profile_key} value={p.profile_key}>{p.display_name || p.profile_key}</option>
+              ))}
+            </select>
+            <p className="text-[#6b7280] text-xs mt-2">
+              One campaign uses one LinkedIn profile. Existing completed messages are not changed.
+            </p>
           </div>
           <div>
             <label className="block text-xs text-[#9ca3af] mb-1">Sequence Config JSON</label>

@@ -5,9 +5,11 @@ import Layout from '../components/Layout';
 import StatusBadge from '../components/StatusBadge';
 import {
   addProspectsToList,
+  addProspectsToCampaign,
   bulkImportProspects,
   createProspect,
   createProspectList,
+  deleteProspect,
   deleteProspectList,
   getCampaigns,
   getProspect,
@@ -162,6 +164,32 @@ export default function Prospects() {
     }
   };
 
+  const addSelectedToCampaign = async (targetCampaignId) => {
+    if (!selectedIds.length || !targetCampaignId) return;
+    try {
+      const res = await addProspectsToCampaign(targetCampaignId, selectedIds);
+      toast.success(`Moved/enrolled ${res.added || 0} prospect(s) to campaign`);
+      setSelected({});
+      loadRows();
+    } catch (e) {
+      toast.error(e.message);
+    }
+  };
+
+  const deleteSelected = async () => {
+    if (!selectedIds.length) return;
+    if (!confirm(`Delete ${selectedIds.length} selected prospect(s)? This removes them from campaigns/lists too.`)) return;
+    try {
+      for (const id of selectedIds) await deleteProspect(id);
+      toast.success('Selected prospects deleted');
+      setSelected({});
+      loadRows();
+      loadLists();
+    } catch (e) {
+      toast.error(e.message);
+    }
+  };
+
   const handleImport = async (file) => {
     if (!file) return;
     try {
@@ -258,10 +286,19 @@ export default function Prospects() {
                 {['profile_1','profile_2','profile_3','profile_4','profile_5'].map(p => <option key={p} value={p}>{p}</option>)}
               </select>
               {selectedIds.length > 0 && (
-                <select onChange={e => addSelectedToList(e.target.value)} defaultValue="" className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white">
-                  <option value="">Add selected to list...</option>
-                  {lists.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-                </select>
+                <>
+                  <select onChange={e => addSelectedToList(e.target.value)} defaultValue="" className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white">
+                    <option value="">Add selected to list...</option>
+                    {lists.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                  </select>
+                  <select onChange={e => addSelectedToCampaign(e.target.value)} defaultValue="" className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white">
+                    <option value="">Move/enroll to campaign...</option>
+                    {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  <button onClick={deleteSelected} className="px-3 py-2 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 text-sm">
+                    Delete selected
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -291,7 +328,7 @@ export default function Prospects() {
                     <td className="px-4 py-3 text-white font-medium">{[r.first_name, r.last_name].filter(Boolean).join(' ') || '-'}</td>
                     <td className="px-4 py-3 text-[#9ca3af]">{r.job_title || '-'}</td>
                     <td className="px-4 py-3 text-[#9ca3af]">{r.company || '-'}</td>
-                    <td className="px-4 py-3 text-[#9ca3af]">{r.campaign_id || '-'}</td>
+                    <td className="px-4 py-3 text-[#9ca3af]">{campaigns.find(c => c.id === r.campaign_id)?.name || r.campaign_id || '-'}</td>
                     <td className="px-4 py-3 text-[#9ca3af]">{r.email || '-'}</td>
                     <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
                     <td className="px-4 py-3 text-[#6b7280] max-w-[220px] truncate">{r.linkedin_url || '-'}</td>

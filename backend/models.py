@@ -15,6 +15,7 @@ class CampaignCreate(BaseModel):
     name: str
     status: Optional[str] = "draft"
     template_id: Optional[str] = None
+    profile_key: Optional[str] = "profile_1"
     sequence_config: Optional[dict] = None
     schedule_config: Optional[dict] = None
     settings: Optional[dict] = None
@@ -24,6 +25,7 @@ class CampaignUpdate(BaseModel):
     name: Optional[str] = None
     status: Optional[str] = None
     template_id: Optional[str] = None
+    profile_key: Optional[str] = None
     sequence_config: Optional[dict] = None
     schedule_config: Optional[dict] = None
     settings: Optional[dict] = None
@@ -274,6 +276,15 @@ class CampaignLaunchRequest(BaseModel):
 
 class CampaignStatusUpdate(BaseModel):
     status: str
+
+
+class CampaignProspectsUpdate(BaseModel):
+    prospect_ids: List[str]
+
+
+class CampaignDuplicateRequest(BaseModel):
+    name: Optional[str] = None
+    include_prospects: bool = False
 
 
 class ProspectListCreate(BaseModel):
