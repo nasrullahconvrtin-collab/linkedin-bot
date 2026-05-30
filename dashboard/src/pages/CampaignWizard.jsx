@@ -16,6 +16,19 @@ import {
 
 const DEFAULT_VARS = ['first_name', 'last_name', 'company', 'title', 'industry', 'location'];
 
+function waitStepHelp(step) {
+  const config = step?.config || {};
+  if (config.until === 'connected') {
+    return 'Waits until LinkedIn acceptance is detected. This is not a follow-up delay.';
+  }
+  const order = Number(step?.step_order || 0);
+  const nextFollowup = order >= 4 ? Math.floor((order - 2) / 2) : null;
+  if (nextFollowup) {
+    return `Delay before Follow-up ${nextFollowup}. Use 0 to send it the same day after the previous message.`;
+  }
+  return 'Delay before the next sequence action.';
+}
+
 function parseCSV(text) {
   const rows = [];
   let row = [];
@@ -360,13 +373,25 @@ export default function CampaignWizard({ onClose, onCreated }) {
                         />
                       )}
                       {isWait && (
-                        <input
-                          type="number"
-                          min="0"
-                          value={delayOverrides[String(s.step_order)]?.days ?? s.config?.days ?? 0}
-                          onChange={e => setDelayOverrides(d => ({ ...d, [String(s.step_order)]: { days: Number(e.target.value) } }))}
-                          className="w-40 bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm"
-                        />
+                        <div className="space-y-2">
+                          {s.config?.until === 'connected' ? (
+                            <div className="rounded-lg border border-[#2a2a2a] bg-[#0a0a0a] px-3 py-2 text-sm text-[#9ca3af]">
+                              Acceptance based wait
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="number"
+                                min="0"
+                                value={delayOverrides[String(s.step_order)]?.days ?? s.config?.days ?? 0}
+                                onChange={e => setDelayOverrides(d => ({ ...d, [String(s.step_order)]: { days: Number(e.target.value) } }))}
+                                className="w-28 bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm"
+                              />
+                              <span className="text-sm text-[#9ca3af]">day(s)</span>
+                            </div>
+                          )}
+                          <p className="text-xs text-[#6b7280]">{waitStepHelp(s)}</p>
+                        </div>
                       )}
                     </div>
                   );

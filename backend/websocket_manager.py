@@ -221,41 +221,51 @@ class WebSocketManager:
 
     def _apply_message_sent(self, prospect_id: str, msg_type: str, today: str):
         """Update prospect and log after a successful message send."""
+        next_job = None
+        for enrollment in db.db_get_active_enrollments_for_prospect(prospect_id):
+            current_step = int(enrollment.get("current_step_order") or 0)
+            if current_step:
+                next_job = db.db_queue_next_campaign_step(
+                    enrollment["campaign_id"],
+                    prospect_id,
+                    current_step,
+                )
+                break
+
         if msg_type == "initial":
-            fu1 = (date.today() + timedelta(days=2)).isoformat()
             db.db_update_prospect(prospect_id, {
                 "status":             "Initial Message Sent",
                 "message_sent_date":  today,
                 "initial_message_sent_at": datetime.now(timezone.utc).isoformat(),
                 "last_action_at":     datetime.now(timezone.utc).isoformat(),
-                "next_steps":         f"Follow-up 1 on {fu1}",
+                "next_steps":         db._next_steps_for_queued_job(next_job),
             })
             db.db_log_activity(prospect_id, "send_message", "initial_sent",
                                "Initial message delivered")
 
         elif msg_type == "followup_1":
-            fu2 = db.add_working_days(date.today(), 5).isoformat()
+            fallback = db.add_working_days(date.today(), 5).isoformat()
             db.db_update_prospect(prospect_id, {
                 "status":     "Following Up",
-                "next_steps": f"Follow-up 2 on {fu2}",
+                "next_steps": db._next_steps_for_queued_job(next_job) if next_job else f"Follow-up 2 on {fallback}",
             })
             db.db_log_activity(prospect_id, "send_message", "followup_1_sent",
                                "Follow-up 1 delivered")
 
         elif msg_type == "followup_2":
-            fu3 = db.add_working_days(date.today(), 5).isoformat()
+            fallback = db.add_working_days(date.today(), 5).isoformat()
             db.db_update_prospect(prospect_id, {
                 "status":     "Following Up",
-                "next_steps": f"Follow-up 3 on {fu3}",
+                "next_steps": db._next_steps_for_queued_job(next_job) if next_job else f"Follow-up 3 on {fallback}",
             })
             db.db_log_activity(prospect_id, "send_message", "followup_2_sent",
                                "Follow-up 2 delivered")
 
         elif msg_type == "followup_3":
-            fu4 = db.add_working_days(date.today(), 5).isoformat()
+            fallback = db.add_working_days(date.today(), 5).isoformat()
             db.db_update_prospect(prospect_id, {
                 "status":     "Following Up",
-                "next_steps": f"Follow-up 4 on {fu4}",
+                "next_steps": db._next_steps_for_queued_job(next_job) if next_job else f"Follow-up 4 on {fallback}",
             })
             db.db_log_activity(prospect_id, "send_message", "followup_3_sent",
                                "Follow-up 3 delivered")
@@ -263,7 +273,7 @@ class WebSocketManager:
         elif msg_type == "followup_4":
             db.db_update_prospect(prospect_id, {
                 "status":     "No Response",
-                "next_steps": "Sequence Complete",
+                "next_steps": db._next_steps_for_queued_job(next_job),
             })
             db.db_log_activity(prospect_id, "send_message", "followup_4_sent",
                                "Follow-up 4 delivered — sequence complete")

@@ -1345,6 +1345,28 @@ def db_complete_job(job_id: str, result: dict | None = None) -> dict | None:
     return completed
 
 
+def _job_scheduled_date(job: dict | None) -> str | None:
+    value = (job or {}).get("scheduled_for")
+    if not value:
+        return None
+    return str(value).split("T", 1)[0]
+
+
+def _next_steps_for_queued_job(job: dict | None) -> str:
+    if not job:
+        return "Sequence Complete"
+    payload = job.get("payload") or {}
+    message_type = payload.get("message_type") or ""
+    scheduled_date = _job_scheduled_date(job) or date.today().isoformat()
+    if message_type.startswith("followup_"):
+        number = message_type.rsplit("_", 1)[-1]
+        return f"Follow-up {number} on {scheduled_date}"
+    if message_type == "initial":
+        return f"Initial message on {scheduled_date}"
+    action = payload.get("action_type") or job.get("job_type") or "next step"
+    return f"{action} on {scheduled_date}"
+
+
 def db_apply_completed_job_result(job: dict, result: dict) -> None:
     """Apply critical prospect transitions from REST job completion as a fallback."""
     prospect_id = job.get("prospect_id")
@@ -1381,7 +1403,7 @@ def db_apply_completed_job_result(job: dict, result: dict) -> None:
             "message_sent_date": today,
             "initial_message_sent_at": _utc_now(),
             "last_action_at": _utc_now(),
-            "next_steps": f"Follow-up 1 on {(date.today() + timedelta(days=2)).isoformat()}",
+            "next_steps": "Queueing next campaign step",
         })
         if job.get("campaign_id"):
             supabase.table("campaign_enrollments").update({
@@ -1389,12 +1411,25 @@ def db_apply_completed_job_result(job: dict, result: dict) -> None:
                 "updated_at": _utc_now(),
             }).eq("campaign_id", job["campaign_id"]).eq("prospect_id", prospect_id).execute()
         step_order = int((job.get("payload") or {}).get("campaign_step_order") or 0)
+        next_job = None
         if job.get("campaign_id") and step_order:
-            db_queue_next_campaign_step(job["campaign_id"], prospect_id, step_order)
+            next_job = db_queue_next_campaign_step(job["campaign_id"], prospect_id, step_order)
+        db_update_prospect(prospect_id, {
+            "next_steps": _next_steps_for_queued_job(next_job),
+            "last_action_at": _utc_now(),
+        })
     elif task_type == "send_message" and status == "message_sent":
         step_order = int((job.get("payload") or {}).get("campaign_step_order") or 0)
+        next_job = None
         if job.get("campaign_id") and step_order:
-            db_queue_next_campaign_step(job["campaign_id"], prospect_id, step_order)
+            next_job = db_queue_next_campaign_step(job["campaign_id"], prospect_id, step_order)
+        final_status = "No Response" if not next_job else "Following Up"
+        db_update_prospect(prospect_id, {
+            "status": final_status,
+            "last_message_sent_at": _utc_now(),
+            "last_action_at": _utc_now(),
+            "next_steps": _next_steps_for_queued_job(next_job),
+        })
 
 
 def db_fail_job(job_id: str, error_message: str, result: dict | None = None) -> dict | None:
