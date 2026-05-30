@@ -29,7 +29,10 @@ DEFAULT_CONFIG = {
     "cloud_runner": {"enabled": False, "status": "coming_soon"},
     "user_data_dir": str(PROFILE_DIR / "profile_1"),
     "auto_start": True,
+    "start_with_windows": True,
     "minimized_on_launch": True,
+    "minimize_to_tray": True,
+    "job_polling_interval": 15,
 }
 
 

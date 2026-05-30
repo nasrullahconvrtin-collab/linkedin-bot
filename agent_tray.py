@@ -11,6 +11,8 @@ import os
 import json
 import subprocess
 import sys
+import threading
+import traceback
 import urllib.request
 import webbrowser
 from pathlib import Path
@@ -33,12 +35,20 @@ from agent_config import (
 
 ROOT = Path(__file__).resolve().parent
 DASHBOARD_URL = "https://linkedflow-dashboard.vercel.app"
+GUI_LOG = LOG_DIR / "gui.log"
+
+
+def log_gui_error(message):
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    with GUI_LOG.open("a", encoding="utf-8") as f:
+        f.write(message.rstrip() + "\n")
 
 
 class TrayApp:
     def __init__(self):
         self.proc = None
         self.config = load_config()
+        self.panel = None
         self.icon = pystray.Icon(
             "LinkedFlow",
             self.make_icon("#6366f1"),
@@ -118,6 +128,10 @@ class TrayApp:
     def open_dashboard(self, *_):
         webbrowser.open(DASHBOARD_URL)
 
+    def show_window(self, *_):
+        if self.panel:
+            self.panel.root.after(0, self.panel.show)
+
     def status_text(self, _=None):
         state = read_state()
         app_state = state.get("state", "Offline")
@@ -185,6 +199,8 @@ class TrayApp:
     def exit(self, *_):
         self.stop_agent()
         self.icon.stop()
+        if self.panel:
+            self.panel.root.after(0, self.panel.root.destroy)
 
     def menu(self):
         account_items = [
@@ -214,7 +230,12 @@ class TrayApp:
         return pystray.Menu(
             pystray.MenuItem(lambda _: self.status_text(), None, enabled=False),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Show LinkedFlow Agent", self.show_window),
             pystray.MenuItem("Accounts", pystray.Menu(*account_items)),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Open Dashboard", self.open_dashboard),
+            pystray.MenuItem("Open Logs", self.open_logs),
+            pystray.Menu.SEPARATOR,
             pystray.MenuItem("Start Agent", self.start_agent, enabled=lambda _: not self.is_running()),
             pystray.MenuItem("Stop Agent", self.stop_agent, enabled=lambda _: self.is_running()),
             pystray.MenuItem("Pause Jobs", self.pause, enabled=lambda _: not is_paused()),
@@ -227,16 +248,21 @@ class TrayApp:
             pystray.MenuItem("Export Agent Config", self.backup_config),
             pystray.MenuItem("Open Backups", self.open_backups),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Open Logs", self.open_logs),
-            pystray.MenuItem("Open Dashboard", self.open_dashboard),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Exit", self.exit),
+            pystray.MenuItem("Quit", self.exit),
         )
 
     def run(self):
         if self.config.get("auto_start", True):
             self.start_agent()
-        self.icon.run()
+        try:
+            from agent_control_panel import ControlPanel
+
+            self.panel = ControlPanel(self)
+            threading.Thread(target=self.icon.run, daemon=True).start()
+            self.panel.run()
+        except Exception:
+            log_gui_error(traceback.format_exc())
+            self.icon.run()
 
 
 if __name__ == "__main__":

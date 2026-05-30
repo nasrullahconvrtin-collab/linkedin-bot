@@ -25,7 +25,7 @@ import websockets
 from playwright.async_api import async_playwright
 
 from config import WS_BASE_URL
-from agent_config import LOG_DIR, is_paused, load_config, write_state
+from agent_config import LOG_DIR, is_paused, load_config, read_state, write_state
 from linkedin_actions import (
     check_for_reply,
     detect_accepted_connections,
@@ -122,6 +122,12 @@ class LinkedFlowAgent:
         await self.start_browser(self.playwright)
 
     async def send_heartbeat(self, ws, session_active=True):
+        write_state(
+            state="Idle" if session_active and not self.running_job else read_state().get("state", "Idle"),
+            connected=session_active,
+            profile_key=self.profile_key,
+            last_heartbeat=datetime.now(timezone.utc).isoformat(),
+        )
         await ws.send(json.dumps({
             "type": "heartbeat",
             "profile_key": self.profile_key,
@@ -221,6 +227,7 @@ class LinkedFlowAgent:
                 write_state(state="Idle", current_job=None, current_job_type=None)
 
     async def poll_jobs_loop(self, ws):
+        interval = max(5, int(self.config.get("job_polling_interval") or 15))
         while not self.stop_event.is_set():
             try:
                 if is_paused():
@@ -233,7 +240,7 @@ class LinkedFlowAgent:
                     await self.run_job(ws, job)
             except Exception as exc:
                 logger.warning("Job poll failed: %s", exc)
-            await asyncio.sleep(15)
+            await asyncio.sleep(interval)
 
     async def handle_send_connection(self, ws, task):
         url = task.get("linkedin_url", "")

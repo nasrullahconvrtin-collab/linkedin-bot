@@ -45,6 +45,8 @@ py -m PyInstaller `
   --name LinkedFlowAgent `
   --collect-all playwright `
   --hidden-import pystray._win32 `
+  --hidden-import agent_control_panel `
+  --hidden-import tkinter `
   agent_app.py
 
 Copy-Item "bundled_browsers" "dist\LinkedFlowAgent\bundled_browsers" -Recurse -Force
