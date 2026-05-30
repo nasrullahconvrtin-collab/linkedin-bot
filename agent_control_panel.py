@@ -397,6 +397,8 @@ class ControlPanel:
         tk.Label(frame, text="Settings", bg=BG, fg=TEXT, font=("Segoe UI", 16, "bold")).pack(anchor="w")
         fields = {}
         rows = [
+            ("Active profile key", "profile_key"),
+            ("Profile display name", "display_name"),
             ("Backend URL", "backend_url"),
             ("Agent token / API key", "agent_token"),
             ("Job polling interval", "job_polling_interval"),
@@ -405,6 +407,8 @@ class ControlPanel:
         ]
         values = {
             "backend_url": self.config.get("backend_url", ""),
+            "profile_key": self.config.get("profile_key", "profile_1"),
+            "display_name": self.config.get("display_name", self.config.get("profile_key", "profile_1")),
             "agent_token": self.config.get("agent_token", ""),
             "job_polling_interval": str(self.config.get("job_polling_interval", 15)),
             "logs_folder": str(LOG_DIR),
@@ -430,6 +434,10 @@ class ControlPanel:
 
         def save():
             config = load_config()
+            config["profile_key"] = fields["profile_key"].get().strip() or "profile_1"
+            config["display_name"] = fields["display_name"].get().strip() or config["profile_key"]
+            config["user_data_dir"] = str(PROFILE_DIR / config["profile_key"])
+            config["profiles"] = sorted(set((config.get("profiles") or []) + [config["profile_key"]]))
             config["backend_url"] = fields["backend_url"].get().strip()
             config["agent_token"] = fields["agent_token"].get().strip()
             try:
@@ -440,6 +448,19 @@ class ControlPanel:
                 config[key] = bool(var.get())
             save_config(config)
             self.config = config
+            try:
+                self.api.request("PUT", f"/profiles/{config['profile_key']}", {
+                    "display_name": config["display_name"],
+                    "enabled": True,
+                })
+            except Exception:
+                try:
+                    self.api.request("POST", "/profiles", {
+                        "profile_key": config["profile_key"],
+                        "display_name": config["display_name"],
+                    })
+                except Exception as exc:
+                    messagebox.showwarning("LinkedFlow Agent", f"Local settings saved, but dashboard profile sync failed: {exc}")
             messagebox.showinfo("LinkedFlow Agent", "Settings saved. Restart the agent worker for polling changes.")
             self.refresh_all()
 

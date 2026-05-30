@@ -826,6 +826,21 @@ async def list_profiles():
         raise HTTPException(500, str(e))
 
 
+@app.get("/profiles/{profile_key}", tags=["LinkedIn Profiles"])
+async def get_profile(profile_key: str):
+    """Return one LinkedIn profile record for agent/dashboard sync."""
+    try:
+        profile = db.db_get_profile(profile_key)
+        if not profile:
+            raise HTTPException(404, "Profile not found")
+        return profile
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"get_profile: {e}")
+        raise HTTPException(500, str(e))
+
+
 @app.post("/profiles", tags=["LinkedIn Profiles"], status_code=201)
 async def create_profile(body: LinkedInProfileCreate):
     """Register a new LinkedIn profile for sending."""

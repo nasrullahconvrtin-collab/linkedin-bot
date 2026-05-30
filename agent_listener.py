@@ -25,7 +25,7 @@ import websockets
 from playwright.async_api import async_playwright
 
 from config import WS_BASE_URL
-from agent_config import LOG_DIR, is_paused, load_config, read_state, write_state
+from agent_config import LOG_DIR, is_paused, load_config, read_state, save_config, write_state
 from linkedin_actions import (
     check_for_reply,
     detect_accepted_connections,
@@ -77,6 +77,8 @@ class LinkedFlowAgent:
         self.running_job = None
         self.last_task_message = ""
         self.job_lock = asyncio.Lock()
+        self.profile_enabled = True
+        self.profile_display_name = ""
 
     async def start_browser(self, playwright):
         user_data_dir = Path(self.config.get("user_data_dir"))
@@ -199,6 +201,26 @@ class LinkedFlowAgent:
     async def api(self, method, path, body=None):
         return await asyncio.to_thread(self._api, method, path, body)
 
+    async def sync_profile_settings(self):
+        """Pull dashboard profile settings so enable/disable changes affect the local agent."""
+        try:
+            profile = await self.api("GET", f"/profiles/{self.profile_key}")
+        except Exception as exc:
+            logger.debug("Could not sync profile settings: %s", exc)
+            return
+
+        enabled = profile.get("enabled")
+        self.profile_enabled = enabled is not False
+        self.profile_display_name = profile.get("display_name") or self.profile_key
+        write_state(
+            profile_enabled=self.profile_enabled,
+            profile_display_name=self.profile_display_name,
+        )
+        local = load_config()
+        local["profile_key"] = self.profile_key
+        local["display_name"] = self.profile_display_name
+        save_config(local)
+
     def task_from_job(self, job):
         payload = job.get("payload") or {}
         job_type = job.get("job_type")
@@ -267,6 +289,11 @@ class LinkedFlowAgent:
         interval = max(5, int(self.config.get("job_polling_interval") or 15))
         while not self.stop_event.is_set():
             try:
+                await self.sync_profile_settings()
+                if not self.profile_enabled:
+                    write_state(state="Disabled", connected=True)
+                    await asyncio.sleep(10)
+                    continue
                 if is_paused():
                     write_state(state="Paused")
                     await asyncio.sleep(5)
