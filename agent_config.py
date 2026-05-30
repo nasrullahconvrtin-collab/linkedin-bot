@@ -24,6 +24,9 @@ DEFAULT_CONFIG = {
     "backend_url": "https://linkedin-bot-backend-production.up.railway.app",
     "ws_base_url": "wss://linkedin-bot-backend-production.up.railway.app/ws/agent",
     "profile_key": "profile_1",
+    "profiles": ["profile_1"],
+    "proxy_settings": {},
+    "cloud_runner": {"enabled": False, "status": "coming_soon"},
     "user_data_dir": str(PROFILE_DIR / "profile_1"),
     "auto_start": True,
     "minimized_on_launch": True,
@@ -47,6 +50,8 @@ def load_config() -> dict:
     except Exception:
         saved = {}
     config = {**DEFAULT_CONFIG, **saved}
+    if not config.get("profiles"):
+        config["profiles"] = [config.get("profile_key", "profile_1")]
     if not config.get("user_data_dir"):
         config["user_data_dir"] = str(PROFILE_DIR / config.get("profile_key", "profile_1"))
     return config
