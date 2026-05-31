@@ -176,6 +176,11 @@ class LinkedInProfileUpdate(BaseModel):
     session_active: Optional[bool] = None
     daily_sent: Optional[int] = None
     last_active: Optional[str] = None
+    runtime_mode: Optional[str] = None
+    proxy_settings: Optional[dict] = None
+    session_status: Optional[str] = None
+    local_state: Optional[str] = None
+    last_job_result: Optional[dict] = None
 
 
 # ── Dashboard Stats ───────────────────────────────────────────────────────────

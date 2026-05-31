@@ -5,17 +5,29 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
+  addProspectsToCampaign,
   bulkImportProspects,
+  createProspect,
   createCampaignFromTemplate,
   getCampaignTemplates,
   getCampaignVariables,
   getProfiles,
+  getProspectListMembers,
   getProspectLists,
   getProspects,
   launchCampaign,
 } from '../services/api';
 
 const DEFAULT_VARS = ['first_name', 'last_name', 'company', 'title', 'industry', 'location'];
+
+const blankProspect = {
+  first_name: '',
+  last_name: '',
+  linkedin_url: '',
+  email: '',
+  company: '',
+  job_title: '',
+};
 
 function waitStepHelp(step) {
   const config = step?.config || {};
@@ -132,8 +144,11 @@ export default function CampaignWizard({ onClose, onCreated }) {
   const [lists, setLists] = useState([]);
   const [selectedProspects, setSelectedProspects] = useState({});
   const [selectedLists, setSelectedLists] = useState({});
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualProspect, setManualProspect] = useState(blankProspect);
   const [csvFile, setCsvFile] = useState(null);
   const [csvMeta, setCsvMeta] = useState(null);
+  const [importMode, setImportMode] = useState('create_or_update');
   const [messageOverrides, setMessageOverrides] = useState({});
   const [delayOverrides, setDelayOverrides] = useState({});
   const [launchNow, setLaunchNow] = useState(false);
@@ -186,6 +201,13 @@ export default function CampaignWizard({ onClose, onCreated }) {
       .map(h => h.trim().toLowerCase().replaceAll(' ', '_').replaceAll('-', '_'));
   }, [csvMeta]);
 
+  const selectedCountEstimate = useMemo(() => {
+    const listCount = lists
+      .filter(l => selectedListIds.includes(l.id))
+      .reduce((sum, l) => sum + Number(l.prospect_count || 0), 0);
+    return selectedIds.length + listCount + (csvMeta?.count || 0);
+  }, [csvMeta, lists, selectedIds.length, selectedListIds]);
+
   const handleCSV = (file) => {
     if (!file) return;
     if (!file.name.toLowerCase().endsWith('.csv')) return toast.error('Select a CSV file');
@@ -193,6 +215,34 @@ export default function CampaignWizard({ onClose, onCreated }) {
     const reader = new FileReader();
     reader.onload = (e) => setCsvMeta(parseCSV(String(e.target.result || '')));
     reader.readAsText(file);
+  };
+
+  const addManualProspect = async () => {
+    const payload = {
+      ...manualProspect,
+      assigned_account: profileKey,
+      status: '',
+    };
+    if (!payload.linkedin_url && !payload.email) {
+      return toast.error('LinkedIn URL or email is required');
+    }
+    try {
+      const saved = await createProspect(payload);
+      setProspects(p => [saved, ...p]);
+      setSelectedProspects(s => ({ ...s, [saved.id]: true }));
+      setManualProspect(blankProspect);
+      setManualOpen(false);
+      toast.success('Prospect added and selected');
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const getSelectedListProspectIds = async () => {
+    const batches = await Promise.all(
+      selectedListIds.map(id => getProspectListMembers(id, { limit: 1000 }).catch(() => ({ prospects: [] }))),
+    );
+    return batches.flatMap(batch => (batch.prospects || []).map(p => p.id).filter(Boolean));
   };
 
   const createOrLaunch = async () => {
@@ -216,13 +266,18 @@ export default function CampaignWizard({ onClose, onCreated }) {
         },
       });
 
-      if (csvFile) await bulkImportProspects(csvFile, campaign.id, 'create_or_update');
+      if (csvFile) await bulkImportProspects(csvFile, campaign.id, importMode);
+
+      const listProspectIds = await getSelectedListProspectIds();
+      const enrollmentIds = [...new Set([...selectedIds, ...listProspectIds])];
+      if (enrollmentIds.length) {
+        await addProspectsToCampaign(campaign.id, enrollmentIds);
+      }
 
       let launchResult = null;
       if (launchNow) {
         launchResult = await launchCampaign(campaign.id, {
-          prospect_ids: selectedIds,
-          list_ids: selectedListIds,
+          prospect_ids: enrollmentIds,
         });
       }
 
@@ -293,6 +348,15 @@ export default function CampaignWizard({ onClose, onCreated }) {
                       <FileUp size={15} /> CSV
                     </button>
                   </div>
+                  <select
+                    value={importMode}
+                    onChange={e => setImportMode(e.target.value)}
+                    className="mb-3 w-full bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white"
+                  >
+                    <option value="create_or_update">Create and update</option>
+                    <option value="create">Create new only</option>
+                    <option value="update">Update existing only</option>
+                  </select>
                   <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={e => handleCSV(e.target.files?.[0])} />
                   <div className="rounded-xl border border-dashed border-[#2a2a2a] bg-[#111111] p-7 text-center">
                     <FileUp size={28} className="mx-auto mb-3 text-[#6366f1]" />
@@ -354,6 +418,43 @@ export default function CampaignWizard({ onClose, onCreated }) {
                       </label>
                     ))}
                   </div>
+                </div>
+
+                <div className="lg:col-span-3 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-white font-semibold">Add One New Prospect</h3>
+                      <p className="text-[#6b7280] text-xs mt-1">Manual prospects are saved once, selected for this campaign, and deduplicated by the backend.</p>
+                    </div>
+                    <button
+                      onClick={() => setManualOpen(v => !v)}
+                      className="px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-sm"
+                    >
+                      {manualOpen ? 'Close' : 'Add manually'}
+                    </button>
+                  </div>
+                  {manualOpen && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+                      {[
+                        ['first_name', 'First name'], ['last_name', 'Last name'], ['linkedin_url', 'LinkedIn URL'],
+                        ['email', 'Email'], ['company', 'Company'], ['job_title', 'Job title'],
+                      ].map(([key, label]) => (
+                        <input
+                          key={key}
+                          value={manualProspect[key] || ''}
+                          onChange={e => setManualProspect(p => ({ ...p, [key]: e.target.value }))}
+                          placeholder={label}
+                          className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      ))}
+                      <button
+                        onClick={addManualProspect}
+                        className="md:col-span-3 px-4 py-2.5 rounded-lg bg-[#6366f1] text-white text-sm font-medium"
+                      >
+                        Save and select prospect
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -417,6 +518,11 @@ export default function CampaignWizard({ onClose, onCreated }) {
                   <div className="bg-[#111111] rounded-lg p-4"><p className="text-[#6b7280] text-xs">CSV</p><p className="text-white font-medium mt-1">{csvMeta?.count || 0}</p></div>
                   <div className="bg-[#111111] rounded-lg p-4"><p className="text-[#6b7280] text-xs">Lists</p><p className="text-white font-medium mt-1">{selectedListIds.length}</p></div>
                   <div className="bg-[#111111] rounded-lg p-4"><p className="text-[#6b7280] text-xs">Individuals</p><p className="text-white font-medium mt-1">{selectedIds.length}</p></div>
+                </div>
+                <div className="rounded-lg border border-[#2a2a2a] bg-[#111111] px-4 py-3 mb-5">
+                  <p className="text-[#6b7280] text-xs">Estimated final selected prospects</p>
+                  <p className="text-white text-xl font-bold mt-1">{selectedCountEstimate}</p>
+                  <p className="text-[#6b7280] text-xs mt-1">The backend deduplicates by LinkedIn URL first, then email.</p>
                 </div>
                 <label className="flex items-center gap-3 text-sm text-[#9ca3af]">
                   <input type="checkbox" checked={launchNow} onChange={e => setLaunchNow(e.target.checked)} />

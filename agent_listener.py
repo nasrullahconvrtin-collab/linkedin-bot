@@ -149,8 +149,11 @@ class LinkedFlowAgent:
         ))
 
     async def send_heartbeat(self, ws, session_active=True):
+        current_state = read_state()
+        local_state = current_state.get("state", "Idle")
+        session_status = "login_required" if local_state == "Needs LinkedIn Login" else "stored"
         write_state(
-            state="Idle" if session_active and not self.running_job else read_state().get("state", "Idle"),
+            state="Idle" if session_active and not self.running_job else local_state,
             connected=session_active,
             profile_key=self.profile_key,
             last_heartbeat=datetime.now(timezone.utc).isoformat(),
@@ -160,6 +163,9 @@ class LinkedFlowAgent:
             "profile_key": self.profile_key,
             "daily_sent": self.daily_sent,
             "session_active": session_active,
+            "local_state": local_state,
+            "session_status": session_status,
+            "runtime_mode": self.config.get("runtime_mode", "local"),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }))
 

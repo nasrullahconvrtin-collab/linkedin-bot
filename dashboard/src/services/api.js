@@ -51,10 +51,11 @@ export const updateProspect    = (id, data) => api.put(`/prospects/${id}`, data)
 export const deleteProspect    = (id)       => api.delete(`/prospects/${id}`);
 export const getNeedsPersonalization = (params) => api.get('/needs-personalization', { params });
 export const getReadyForMessage = (params) => api.get('/ready-for-message', { params });
-export const bulkImportProspects = (file, campaignId, mode = 'create_or_update') => {
+export const bulkImportProspects = (file, campaignId, mode = 'create_or_update', listId = null) => {
   const fd = new FormData();
   fd.append('file', file);
   if (campaignId) fd.append('campaign_id', campaignId);
+  if (listId) fd.append('list_id', listId);
   return api.post('/prospects/bulk', fd, {
     params: { mode },
     headers: { 'Content-Type': 'multipart/form-data' },

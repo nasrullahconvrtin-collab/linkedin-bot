@@ -349,6 +349,18 @@ def db_get_prospect(prospect_id: str) -> tuple[dict | None, list[dict]]:
     return prospect, log_res.data or []
 
 
+def db_get_prospect_enrollments(prospect_id: str) -> list[dict]:
+    """Campaign memberships for one prospect; used by the prospect detail UI."""
+    return (
+        supabase.table("campaign_enrollments")
+        .select("*, campaigns(id, name, status, profile_key)")
+        .eq("prospect_id", prospect_id)
+        .order("created_at", desc=True)
+        .execute()
+        .data or []
+    )
+
+
 def db_update_prospect(prospect_id: str, data: dict) -> dict | None:
     clean = {k: v for k, v in data.items() if v is not None}
     if not clean:
@@ -516,15 +528,84 @@ def db_get_activity_log(
 
 # ── LinkedIn Profiles ─────────────────────────────────────────────────────────
 
+def _count_rows(table: str, **filters) -> int:
+    q = supabase.table(table).select("id", count="exact")
+    for k, v in filters.items():
+        q = q.eq(k, v)
+    return q.execute().count or 0
+
+
+def _profile_job_stats(profile_key: str) -> dict:
+    jobs = (
+        supabase.table("jobs")
+        .select("*")
+        .eq("profile_key", profile_key)
+        .order("updated_at", desc=True)
+        .limit(50)
+        .execute()
+        .data or []
+    )
+    running = [j for j in jobs if j.get("status") in ("claimed", "running")]
+    active = [j for j in jobs if j.get("status") in ("pending", "retrying", "claimed", "running")]
+    return {
+        "pending_jobs": sum(1 for j in jobs if j.get("status") in ("pending", "retrying")),
+        "running_jobs": len(running),
+        "failed_jobs": sum(1 for j in jobs if j.get("status") == "failed"),
+        "active_jobs": len(active),
+        "current_job": running[0] if running else None,
+        "last_job": jobs[0] if jobs else None,
+        "last_job_result": (jobs[0] or {}).get("result") if jobs else None,
+    }
+
+
+def db_enrich_profile(profile: dict) -> dict:
+    profile_key = profile.get("profile_key") or "profile_1"
+    today = date.today().isoformat()
+    enriched = dict(profile)
+    enriched.update(_profile_job_stats(profile_key))
+    enriched["active_campaign_count"] = (
+        supabase.table("campaigns")
+        .select("id", count="exact")
+        .eq("profile_key", profile_key)
+        .in_("status", ["active", "running"])
+        .execute()
+        .count or 0
+    )
+    enriched["invitations_sent_today"] = _count_rows(
+        "prospects", assigned_account=profile_key, connection_sent_date=today
+    )
+    enriched["messages_sent_today"] = _count_rows(
+        "prospects", assigned_account=profile_key, message_sent_date=today
+    )
+    enriched["ready_for_message_count"] = _count_rows(
+        "prospects", assigned_account=profile_key, status="Ready to Send"
+    )
+    try:
+        enriched["accepted_today"] = (
+            supabase.table("prospect_profile_states")
+            .select("id", count="exact")
+            .eq("profile_key", profile_key)
+            .gte("accepted_at", today)
+            .execute()
+            .count or 0
+        )
+    except Exception:
+        enriched["accepted_today"] = 0
+    enriched.setdefault("runtime_mode", "local")
+    enriched.setdefault("session_status", "unknown")
+    return enriched
+
+
 def db_get_all_profiles() -> list[dict]:
     db_mark_stale_profiles_offline()
-    return (
+    profiles = (
         supabase.table("linkedin_profiles")
         .select("*")
         .order("profile_key")
         .execute()
         .data or []
     )
+    return [db_enrich_profile(p) for p in profiles]
 
 
 def db_create_profile(profile_key: str, display_name: str) -> dict | None:
@@ -535,7 +616,7 @@ def db_create_profile(profile_key: str, display_name: str) -> dict | None:
         "daily_sent": 0,
     }
     result = supabase.table("linkedin_profiles").insert(data).execute()
-    return result.data[0] if result.data else None
+    return db_enrich_profile(result.data[0]) if result.data else None
 
 
 def db_update_profile(profile_key: str, data: dict) -> dict | None:
@@ -548,7 +629,7 @@ def db_update_profile(profile_key: str, data: dict) -> dict | None:
         .eq("profile_key", profile_key)
         .execute()
     )
-    return result.data[0] if result.data else None
+    return db_enrich_profile(result.data[0]) if result.data else None
 
 
 def db_mark_stale_profiles_offline(seconds: int = 90):
@@ -567,7 +648,7 @@ def db_upsert_profile(profile_key: str, updates: dict) -> dict | None:
         .upsert(updates, on_conflict="profile_key")
         .execute()
     )
-    return result.data[0] if result.data else None
+    return db_enrich_profile(result.data[0]) if result.data else None
 
 
 def db_get_profile(profile_key: str) -> dict | None:
@@ -578,7 +659,7 @@ def db_get_profile(profile_key: str) -> dict | None:
         .limit(1)
         .execute()
     )
-    return result.data[0] if result.data else None
+    return db_enrich_profile(result.data[0]) if result.data else None
 
 
 # ── Jobs ─────────────────────────────────────────────────────────────────────
@@ -649,13 +730,14 @@ def db_create_initial_message_job_if_ready(prospect: dict, reason: str = "") -> 
         return None
 
     campaign_id = db_get_queue_campaign_id_for_prospect(prospect)
+    campaign = None
     if campaign_id:
         campaign, _ = db_get_campaign(campaign_id)
         if campaign and campaign.get("status") not in ("active", "running"):
             logger.info("Campaign %s is not active; not queueing message for %s", campaign_id, prospect_id)
             return None
 
-    profile_key = prospect.get("assigned_account") or "profile_1"
+    profile_key = (campaign or {}).get("profile_key") or prospect.get("assigned_account") or "profile_1"
     profile = db_get_profile(profile_key)
     if profile:
         if profile.get("enabled") is False:
@@ -701,10 +783,11 @@ def db_queue_ready_prospect_initial_message(prospect: dict, reason: str = "") ->
     if prospect.get("status") != "Ready to Send":
         return None
 
-    profile_key = prospect.get("assigned_account") or "profile_1"
     running_enrollments = db_get_running_enrollments_for_prospect(prospect_id)
     for enrollment in running_enrollments:
         campaign_id = enrollment.get("campaign_id")
+        campaign = enrollment.get("campaign") or {}
+        profile_key = campaign.get("profile_key") or enrollment.get("profile_key") or prospect.get("assigned_account") or "profile_1"
         now = _utc_now()
         db_upsert_profile_connection_state(
             prospect_id,
@@ -1206,7 +1289,7 @@ def db_queue_next_campaign_step(campaign_id: str, prospect_id: str, after_step_o
 
     steps = db_get_campaign_template_steps(campaign["template_id"])
     scheduled_for = base_time or datetime.now(timezone.utc)
-    profile_key = prospect.get("assigned_account") or "profile_1"
+    profile_key = campaign.get("profile_key") or prospect.get("assigned_account") or "profile_1"
     profile_state = db_get_profile_connection_state(prospect_id, profile_key)
     is_connected_for_profile = (profile_state or {}).get("connection_status") == "connected"
     for step in steps:
@@ -1649,12 +1732,7 @@ def db_get_dashboard_stats() -> dict:
     reply_rate       = round(total_replied  / total_messaged  * 100, 1) if total_messaged  else 0.0
     acceptance_rate  = round(total_accepted / total_sent_ever * 100, 1) if total_sent_ever else 0.0
 
-    profiles = (
-        supabase.table("linkedin_profiles")
-        .select("profile_key, daily_sent, session_active")
-        .execute()
-        .data or []
-    )
+    profiles = db_get_all_profiles()
 
     return {
         "total_prospects":        total_prospects,

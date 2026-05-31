@@ -215,16 +215,14 @@ export default function Settings() {
 
     const cron = enabled.map(s => {
       const [hh, mm] = s.time.split(':');
-      return `${mm} ${parseInt(hh)} * * 1-5  cd /path/to/linkedin-bot && python main.py  # ${s.label}`;
+      return `${mm} ${parseInt(hh)} * * 1-5  # ${s.label} - LinkedFlow now schedules jobs in the cloud backend`;
     }).join('\n');
 
     const tasks = enabled.map(s => {
-      const [hh, mm] = s.time.split(':');
-      const time12 = to12h(s.time);
-      return `schtasks /create /tn "LinkedFlow - ${s.label}" /tr "python D:\\linkedin-bot\\main.py" /sc DAILY /st ${s.time} /f`;
+      return `Use the cloud scheduler for "${s.label}" at ${s.time}. Keep LinkedFlow Agent running so it can pull queued jobs.`;
     }).join('\n');
 
-    return `# Windows Task Scheduler (run in CMD as Administrator):\n${tasks}\n\n# Linux / Mac cron (crontab -e):\n${cron}`;
+    return `# LinkedFlow cloud scheduler\n${tasks}\n\n# Cron note\n${cron}`;
   };
 
   const copyCommands = () => {
