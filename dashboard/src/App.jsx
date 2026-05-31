@@ -58,6 +58,7 @@ import Dashboard      from './pages/Dashboard';
 import Campaigns      from './pages/Campaigns';
 import CampaignDetail from './pages/CampaignDetail';
 import MessageTemplates from './pages/MessageTemplates';
+import Queue          from './pages/Queue';
 import Prospects      from './pages/Prospects';
 import NeedsPersonalization from './pages/NeedsPersonalization';
 import Inbox          from './pages/Inbox';
@@ -111,6 +112,7 @@ export default function App() {
                   <Route path="/campaign-wizard" element={<Navigate to="/campaigns" replace />} />
                   <Route path="/campaigns"      element={<Campaigns />} />
                   <Route path="/campaigns/:id"  element={<CampaignDetail />} />
+                  <Route path="/queue"          element={<Queue />} />
                   <Route path="/message-templates" element={<MessageTemplates />} />
                   <Route path="/prospects"      element={<Prospects />} />
                   <Route path="/needs-personalization" element={<NeedsPersonalization />} />

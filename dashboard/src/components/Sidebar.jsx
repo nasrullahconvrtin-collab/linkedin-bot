@@ -1,13 +1,16 @@
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import {
-  ChevronDown, ChevronLeft, ChevronRight, FileText, LayoutDashboard,
-  ListChecks, Megaphone, Users, MessageSquare, Settings, Zap, UserCheck,
+  ChevronLeft, ChevronRight, FileText, LayoutDashboard,
+  Megaphone, Users, MessageSquare, Settings, Zap, UserCheck, Briefcase,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 const NAV = [
   { to: '/',          label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/prospects', label: 'Prospects / Lists', icon: Users },
+  { to: '/campaigns', label: 'Campaigns', icon: Megaphone },
+  { to: '/queue',     label: 'Queue', icon: Briefcase },
+  { to: '/message-templates', label: 'Message Templates', icon: FileText },
 ];
 
 const NAV_AFTER_CAMPAIGNS = [
@@ -18,8 +21,6 @@ const NAV_AFTER_CAMPAIGNS = [
 
 export default function Sidebar({ collapsed = false, onToggle }) {
   const { wsConnected, unreadReplies } = useApp();
-  const location = useLocation();
-  const campaignsOpen = location.pathname.startsWith('/campaigns') || location.pathname.startsWith('/message-templates');
   const width = collapsed ? 76 : 240;
 
   const labelClass = collapsed ? 'sr-only' : '';
@@ -61,41 +62,6 @@ export default function Sidebar({ collapsed = false, onToggle }) {
             )}
           </NavLink>
         ))}
-
-        <div>
-          <NavLink
-            to="/campaigns"
-            title={collapsed ? 'Campaigns' : undefined}
-            className={({ isActive }) =>
-              `nav-item relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                isActive || campaignsOpen
-                  ? 'active bg-[#6366f1] text-white shadow-lg shadow-indigo-500/20'
-                  : 'text-[#9ca3af] hover:text-white hover:bg-[#1a1a1a]'
-              }`
-            }
-          >
-            <Megaphone size={17} />
-            <span className={labelClass}>Campaigns</span>
-            {!collapsed && <ChevronDown size={14} className={`ml-auto transition-transform ${campaignsOpen ? 'rotate-180' : ''}`} />}
-          </NavLink>
-          {!collapsed && campaignsOpen && (
-            <div className="mt-1 ml-4 pl-3 border-l border-[#2a2a2a] space-y-1 animate-fade-in">
-              <NavLink
-                to="/campaigns"
-                end
-                className={({ isActive }) => `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium ${isActive ? 'text-white bg-[#1a1a1a]' : 'text-[#9ca3af] hover:text-white hover:bg-[#1a1a1a]'}`}
-              >
-                <ListChecks size={14} /> Campaign List
-              </NavLink>
-              <NavLink
-                to="/message-templates"
-                className={({ isActive }) => `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium ${isActive ? 'text-white bg-[#1a1a1a]' : 'text-[#9ca3af] hover:text-white hover:bg-[#1a1a1a]'}`}
-              >
-                <FileText size={14} /> Message Templates
-              </NavLink>
-            </div>
-          )}
-        </div>
 
         {NAV_AFTER_CAMPAIGNS.map(({ to, label, icon: Icon, end }) => (
           <NavLink

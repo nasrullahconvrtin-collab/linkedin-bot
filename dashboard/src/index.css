@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
 @import "tailwindcss";
 
 :root {
@@ -61,6 +61,32 @@ body {
   font-family: 'Inter', sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: geometricPrecision;
+}
+
+h1, h2, h3,
+.page-title,
+.section-title {
+  font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+  letter-spacing: 0;
+}
+
+.page-title {
+  font-size: 32px;
+  line-height: 1.1;
+  font-weight: 700;
+}
+
+.section-title {
+  font-size: 24px;
+  line-height: 1.2;
+  font-weight: 600;
+}
+
+.premium-card {
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card) 94%, transparent);
+  border-radius: 18px;
+  box-shadow: var(--shadow-card);
 }
 
 :root[data-theme="light"] body {
