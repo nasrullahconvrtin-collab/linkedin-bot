@@ -1097,7 +1097,7 @@ async def run_followups() -> SchedulerResponse:
     import re
     try:
         due = db.db_get_followups_due_today()
-        queued = 0
+        queued = db.db_recover_due_campaign_message_steps()
         col_map = {1: "followup_1", 2: "followup_2", 3: "followup_3", 4: "followup_4"}
         for prospect in due:
             m = re.search(r"Follow-up (\d)", prospect.get("next_steps") or "")

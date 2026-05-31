@@ -1535,7 +1535,87 @@ def db_get_pending_jobs(profile_key: str, limit: int = 25) -> list[dict]:
         .limit(limit)
         .execute()
     )
-    return result.data or []
+    jobs = []
+    for job in result.data or []:
+        if db_job_is_still_eligible(job):
+            jobs.append(job)
+    return jobs
+
+
+def db_job_is_still_eligible(job: dict) -> bool:
+    """Cancel stale pending message jobs that no longer match prospect state."""
+    if not job or job.get("job_type") not in ("send_messages", "send_followups"):
+        return True
+
+    prospect_id = job.get("prospect_id")
+    if not prospect_id:
+        return True
+
+    prospect, _ = db_get_prospect(prospect_id)
+    if not prospect:
+        db_update_job(job["id"], {
+            "status": "cancelled",
+            "error_message": "Cancelled because prospect no longer exists",
+        })
+        return False
+
+    payload = job.get("payload") or {}
+    message_type = payload.get("message_type") or "initial"
+    terminal_statuses = {"Replied", "No Response"}
+    if prospect.get("status") in terminal_statuses:
+        db_update_job(job["id"], {
+            "status": "cancelled",
+            "error_message": f"Cancelled because prospect is {prospect.get('status')}",
+        })
+        return False
+
+    if message_type == "initial" and prospect.get("message_sent_date"):
+        db_update_job(job["id"], {
+            "status": "cancelled",
+            "error_message": "Cancelled stale initial-message job; initial message is already sent",
+        })
+        return False
+
+    if message_type != "initial" and not prospect.get("message_sent_date"):
+        db_update_job(job["id"], {
+            "status": "cancelled",
+            "error_message": "Cancelled follow-up job because initial message has not been sent",
+        })
+        return False
+
+    return True
+
+
+def db_recover_due_campaign_message_steps() -> int:
+    """
+    Recover sequence progress when a prospect was marked messaged by an older
+    non-campaign job. This queues the next due campaign message from the
+    enrollment's current step without resending completed initial messages.
+    """
+    now = _utc_now()
+    rows = (
+        supabase.table("campaign_enrollments")
+        .select("*, prospects(*)")
+        .eq("status", "active")
+        .lte("next_step_at", now)
+        .execute()
+        .data or []
+    )
+    queued = 0
+    for enrollment in rows:
+        prospect = enrollment.get("prospects") or {}
+        prospect_id = enrollment.get("prospect_id")
+        if not prospect_id:
+            continue
+        if prospect.get("status") not in ("Initial Message Sent", "Following Up"):
+            continue
+        if db_has_active_job_for_prospect("send_messages", prospect_id) or db_has_active_job_for_prospect("send_followups", prospect_id):
+            continue
+        current_step = int(enrollment.get("current_step_order") or 0)
+        job = db_queue_next_campaign_step(enrollment["campaign_id"], prospect_id, current_step)
+        if job:
+            queued += 1
+    return queued
 
 
 def db_update_job(job_id: str, updates: dict) -> dict | None:
