@@ -1,16 +1,20 @@
-import { NavLink } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import {
-  ChevronLeft, ChevronRight, FileText, LayoutDashboard,
-  Megaphone, Users, MessageSquare, Settings, Zap, UserCheck, Briefcase,
+  ChevronDown, ChevronLeft, ChevronRight, FileText, LayoutDashboard,
+  ListChecks, Megaphone, Users, MessageSquare, Settings, Zap, UserCheck, Briefcase,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 const NAV = [
   { to: '/',          label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/prospects', label: 'Prospects / Lists', icon: Users },
-  { to: '/campaigns', label: 'Campaigns', icon: Megaphone },
-  { to: '/queue',     label: 'Queue', icon: Briefcase },
+];
+
+const CAMPAIGN_NAV = [
+  { to: '/campaigns', label: 'Campaign List', icon: ListChecks, end: true },
   { to: '/message-templates', label: 'Message Templates', icon: FileText },
+  { to: '/queue', label: 'Queue', icon: Briefcase },
 ];
 
 const NAV_AFTER_CAMPAIGNS = [
@@ -21,7 +25,16 @@ const NAV_AFTER_CAMPAIGNS = [
 
 export default function Sidebar({ collapsed = false, onToggle }) {
   const { wsConnected, unreadReplies } = useApp();
+  const location = useLocation();
   const width = collapsed ? 76 : 240;
+  const campaignSectionActive = CAMPAIGN_NAV.some(item => (
+    item.end ? location.pathname === item.to : location.pathname.startsWith(item.to)
+  ));
+  const [campaignsOpen, setCampaignsOpen] = useState(campaignSectionActive);
+
+  useEffect(() => {
+    if (campaignSectionActive) setCampaignsOpen(true);
+  }, [campaignSectionActive]);
 
   const labelClass = collapsed ? 'sr-only' : '';
 
@@ -62,6 +75,54 @@ export default function Sidebar({ collapsed = false, onToggle }) {
             )}
           </NavLink>
         ))}
+
+        <div>
+          <button
+            type="button"
+            onClick={() => {
+              if (collapsed) {
+                onToggle?.();
+                setCampaignsOpen(true);
+                return;
+              }
+              setCampaignsOpen(open => !open);
+            }}
+            title={collapsed ? 'Campaigns' : undefined}
+            className={`nav-item relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+              campaignSectionActive
+                ? 'active bg-[#6366f1] text-white shadow-lg shadow-indigo-500/20'
+                : 'text-[#9ca3af] hover:text-white hover:bg-[#1a1a1a]'
+            }`}
+          >
+            <Megaphone size={17} />
+            <span className={labelClass}>Campaigns</span>
+            {!collapsed && (
+              <ChevronDown size={14} className={`ml-auto transition-transform ${campaignsOpen ? 'rotate-180' : ''}`} />
+            )}
+          </button>
+
+          {!collapsed && campaignsOpen && (
+            <div className="mt-1 ml-4 pl-3 border-l border-[#2a2a2a] space-y-1 animate-fade-in">
+              {CAMPAIGN_NAV.map(({ to, label, icon: Icon, end }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={end}
+                  className={({ isActive }) =>
+                    `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                      isActive
+                        ? 'text-white bg-[#1a1a1a]'
+                        : 'text-[#9ca3af] hover:text-white hover:bg-[#1a1a1a]'
+                    }`
+                  }
+                >
+                  <Icon size={14} />
+                  {label}
+                </NavLink>
+              ))}
+            </div>
+          )}
+        </div>
 
         {NAV_AFTER_CAMPAIGNS.map(({ to, label, icon: Icon, end }) => (
           <NavLink
