@@ -644,6 +644,7 @@ async def create_prospect(body: ProspectCreate):
 async def bulk_import_prospects(
     file:        UploadFile     = File(...),
     campaign_id: Optional[str] = Form(None),
+    list_id: Optional[str] = Form(None),
     mode: str = Query("create_or_update", pattern="^(create|update|create_or_update)$"),
 ) -> BulkImportResponse:
     """
@@ -690,6 +691,8 @@ async def bulk_import_prospects(
                 campaign, _ = db.db_get_campaign(campaign_id)
                 if campaign:
                     db.db_upsert_enrollment(campaign, saved)
+            if saved and list_id:
+                db.db_add_prospects_to_list(list_id, [saved["id"]])
 
         return BulkImportResponse(
             imported=created + updated,
@@ -713,7 +716,11 @@ async def get_prospect(prospect_id: str):
         prospect, activity = db.db_get_prospect(prospect_id)
         if not prospect:
             raise HTTPException(404, "Prospect not found")
-        return {"prospect": prospect, "activity_log": activity}
+        return {
+            "prospect": prospect,
+            "activity_log": activity,
+            "campaign_enrollments": db.db_get_prospect_enrollments(prospect_id),
+        }
     except HTTPException:
         raise
     except Exception as e:

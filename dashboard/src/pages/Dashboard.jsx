@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Users, Send, UserCheck, MessageSquare, Reply, TrendingUp, Sparkles, Briefcase, Wifi, AlertTriangle } from 'lucide-react';
+import {
+  AlertTriangle, Briefcase, MessageSquare, Reply, Send, Sparkles,
+  TrendingUp, UserCheck, Users, Wifi,
+} from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import Layout from '../components/Layout';
 import StatCard from '../components/StatCard';
@@ -33,19 +36,17 @@ export default function Dashboard() {
     if (!campaigns.length) return;
     Promise.all(campaigns.slice(0, 6).map(c => getCampaign(c.id).catch(() => null)))
       .then(results => {
-        setChartData(
-          results
-            .filter(r => r && r.campaign)
-            .map(r => {
-              const name = r.campaign.name || '';
-              return {
-                name: name.slice(0, 16) + (name.length > 16 ? '...' : ''),
-                Sent: r.sent || 0,
-                Accepted: r.accepted || 0,
-                Replied: r.replied || 0,
-              };
-            }),
-        );
+        setChartData(results
+          .filter(r => r && r.campaign)
+          .map(r => {
+            const name = r.campaign.name || '';
+            return {
+              name: name.slice(0, 16) + (name.length > 16 ? '...' : ''),
+              Sent: r.sent || 0,
+              Accepted: r.accepted || 0,
+              Replied: r.replied || 0,
+            };
+          }));
       })
       .catch(() => {});
   }, [campaigns]);
@@ -124,9 +125,10 @@ export default function Dashboard() {
               <div className="space-y-3">
                 {profiles.map(p => {
                   const profileJobs = jobs.filter(j => j.profile_key === p.profile_key);
-                  const pending = profileJobs.filter(j => ['pending', 'retrying'].includes(j.status)).length;
-                  const running = profileJobs.find(j => ['claimed', 'running'].includes(j.status));
-                  const failed = profileJobs.filter(j => j.status === 'failed').length;
+                  const pending = p.pending_jobs ?? profileJobs.filter(j => ['pending', 'retrying'].includes(j.status)).length;
+                  const running = p.current_job || profileJobs.find(j => ['claimed', 'running'].includes(j.status));
+                  const failed = p.failed_jobs ?? profileJobs.filter(j => j.status === 'failed').length;
+                  const lastJob = p.last_job || profileJobs[0];
                   return (
                     <div key={p.profile_key} className="rounded-xl bg-[#111111] border border-[#2a2a2a] p-3">
                       <div className="flex items-center justify-between gap-3">
@@ -134,13 +136,14 @@ export default function Dashboard() {
                           <span className={`w-2 h-2 rounded-full shrink-0 ${p.session_active ? 'bg-[#22c55e] animate-pulse' : 'bg-[#4b5563]'}`} />
                           <div className="min-w-0">
                             <p className="text-white text-sm font-medium truncate">{p.display_name || p.profile_key}</p>
-                            <p className="text-[#6b7280] text-xs">{p.profile_key} · {(p.enabled ?? true) ? 'Enabled' : 'Disabled'}</p>
+                            <p className="text-[#6b7280] text-xs">{p.profile_key} - {p.runtime_mode || 'local'} - {(p.enabled ?? true) ? 'Enabled' : 'Disabled'}</p>
                           </div>
                         </div>
                         <div className="w-16 h-1.5 bg-[#2a2a2a] rounded-full overflow-hidden shrink-0">
                           <div className="h-full bg-[#6366f1] rounded-full" style={{ width: `${Math.min(100, ((p.daily_sent || 0) / 25) * 100)}%` }} />
                         </div>
                       </div>
+
                       <div className="grid grid-cols-3 gap-2 mt-3 text-xs">
                         <div className="rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] p-2">
                           <p className="text-[#6b7280]">Usage</p>
@@ -155,9 +158,37 @@ export default function Dashboard() {
                           <p className={failed ? 'text-[#ef4444] mt-1' : 'text-white mt-1'}>{failed}</p>
                         </div>
                       </div>
+
+                      <div className="grid grid-cols-3 gap-2 mt-2 text-xs">
+                        <div className="rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] p-2">
+                          <p className="text-[#6b7280]">Campaigns</p>
+                          <p className="text-white mt-1">{p.active_campaign_count ?? 0}</p>
+                        </div>
+                        <div className="rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] p-2">
+                          <p className="text-[#6b7280]">Accepted</p>
+                          <p className="text-white mt-1">{p.accepted_today ?? 0}</p>
+                        </div>
+                        <div className="rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] p-2">
+                          <p className="text-[#6b7280]">Ready</p>
+                          <p className="text-white mt-1">{p.ready_for_message_count ?? 0}</p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 mt-2 text-xs">
+                        <div className="rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] p-2">
+                          <p className="text-[#6b7280]">Invites today</p>
+                          <p className="text-white mt-1">{p.invitations_sent_today ?? 0}</p>
+                        </div>
+                        <div className="rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] p-2">
+                          <p className="text-[#6b7280]">Messages today</p>
+                          <p className="text-white mt-1">{p.messages_sent_today ?? 0}</p>
+                        </div>
+                      </div>
+
                       <p className="text-[#6b7280] text-xs mt-2">
                         Current: {running?.job_type || 'Idle'}
-                        {p.last_active && ` · Last heartbeat ${new Date(p.last_active).toLocaleString()}`}
+                        {lastJob?.job_type && ` - Last job ${lastJob.job_type} (${lastJob.status})`}
+                        {p.last_active && ` - Last heartbeat ${new Date(p.last_active).toLocaleString()}`}
                       </p>
                     </div>
                   );

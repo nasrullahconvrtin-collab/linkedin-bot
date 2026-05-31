@@ -15,6 +15,8 @@ import {
   getProspect,
   getProspectLists,
   getProspects,
+  removeProspectsFromCampaign,
+  removeProspectsFromList,
   updateProspect,
   updateProspectList,
 } from '../services/api';
@@ -50,6 +52,7 @@ export default function Prospects() {
   const [loading, setLoading] = useState(false);
   const [panel, setPanel] = useState(null);
   const [draft, setDraft] = useState(blankProspect);
+  const [panelEnrollments, setPanelEnrollments] = useState([]);
   const [newListName, setNewListName] = useState('');
   const [importMode, setImportMode] = useState('create_or_update');
   const fileRef = useRef(null);
@@ -96,6 +99,7 @@ export default function Prospects() {
       const d = await getProspect(row.id);
       setPanel({ mode: 'edit', id: row.id });
       setDraft({ ...blankProspect, ...d.prospect, tags: d.prospect.tags || [], custom_fields: d.prospect.custom_fields || {} });
+      setPanelEnrollments(d.campaign_enrollments || []);
     } catch {
       toast.error('Failed to load prospect');
     }
@@ -164,6 +168,49 @@ export default function Prospects() {
     }
   };
 
+  const removeFromCampaign = async (campaignId) => {
+    if (!panel?.id || !campaignId) return;
+    if (!confirm('Remove this prospect from the campaign? Pending campaign jobs for this prospect will be cancelled.')) return;
+    try {
+      await removeProspectsFromCampaign(campaignId, [panel.id]);
+      const d = await getProspect(panel.id);
+      setPanelEnrollments(d.campaign_enrollments || []);
+      loadRows();
+      toast.success('Removed from campaign');
+    } catch (e) {
+      toast.error(e.message);
+    }
+  };
+
+  const moveSelectedToList = async (listId) => {
+    if (!selectedIds.length || !listId) return;
+    try {
+      await addProspectsToList(listId, selectedIds);
+      if (activeList && activeList !== listId) {
+        await removeProspectsFromList(activeList, selectedIds);
+      }
+      toast.success(`Moved ${selectedIds.length} prospect(s)`);
+      setSelected({});
+      loadRows();
+      loadLists();
+    } catch (e) {
+      toast.error(e.message);
+    }
+  };
+
+  const removeSelectedFromActiveList = async () => {
+    if (!activeList || !selectedIds.length) return;
+    try {
+      await removeProspectsFromList(activeList, selectedIds);
+      toast.success(`Removed ${selectedIds.length} prospect(s) from list`);
+      setSelected({});
+      loadRows();
+      loadLists();
+    } catch (e) {
+      toast.error(e.message);
+    }
+  };
+
   const addSelectedToCampaign = async (targetCampaignId) => {
     if (!selectedIds.length || !targetCampaignId) return;
     try {
@@ -193,9 +240,10 @@ export default function Prospects() {
   const handleImport = async (file) => {
     if (!file) return;
     try {
-      const res = await bulkImportProspects(file, null, importMode);
+      const res = await bulkImportProspects(file, null, importMode, activeList || null);
       toast.success(`Created ${res.created_count || 0}, updated ${res.updated_count || 0}, skipped ${res.skipped_count || 0}`);
       loadRows();
+      loadLists();
     } catch (e) {
       toast.error(e.message);
     }
@@ -291,10 +339,19 @@ export default function Prospects() {
                     <option value="">Add selected to list...</option>
                     {lists.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                   </select>
+                  <select onChange={e => moveSelectedToList(e.target.value)} defaultValue="" className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white">
+                    <option value="">Move selected to list...</option>
+                    {lists.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                  </select>
                   <select onChange={e => addSelectedToCampaign(e.target.value)} defaultValue="" className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white">
                     <option value="">Move/enroll to campaign...</option>
                     {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
+                  {activeList && (
+                    <button onClick={removeSelectedFromActiveList} className="px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-sm">
+                      Remove from list
+                    </button>
+                  )}
                   <button onClick={deleteSelected} className="px-3 py-2 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 text-sm">
                     Delete selected
                   </button>
@@ -390,6 +447,32 @@ export default function Prospects() {
                 <label className="text-xs text-[#9ca3af]">Custom Fields JSON</label>
                 <textarea rows={5} value={typeof draft.custom_fields === 'string' ? draft.custom_fields : JSON.stringify(draft.custom_fields || {}, null, 2)} onChange={e => setDraft(d => ({ ...d, custom_fields: e.target.value }))} className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm font-mono" />
               </div>
+              {panel.mode === 'edit' && (
+                <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-4">
+                  <h3 className="text-white font-semibold mb-3">Campaigns for this prospect</h3>
+                  <div className="space-y-2">
+                    {panelEnrollments.length === 0 ? (
+                      <p className="text-[#6b7280] text-sm">No campaign enrollments yet.</p>
+                    ) : panelEnrollments.map(enrollment => {
+                      const campaign = enrollment.campaigns || {};
+                      return (
+                        <div key={enrollment.id || `${enrollment.campaign_id}-${enrollment.prospect_id}`} className="flex items-center justify-between gap-3 rounded-lg bg-[#111111] border border-[#2a2a2a] px-3 py-2">
+                          <div>
+                            <p className="text-white text-sm">{campaign.name || enrollment.campaign_id}</p>
+                            <p className="text-[#6b7280] text-xs">{campaign.status || enrollment.status} - {enrollment.profile_key || campaign.profile_key || 'profile_1'}</p>
+                          </div>
+                          <button
+                            onClick={() => removeFromCampaign(enrollment.campaign_id)}
+                            className="px-3 py-1.5 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-red-400 text-xs"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               <button onClick={saveProspect} className="flex items-center gap-2 px-4 py-2.5 bg-[#6366f1] rounded-lg text-white text-sm font-medium">
                 <Save size={15} /> Save Prospect
               </button>

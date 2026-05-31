@@ -134,6 +134,9 @@ class WebSocketManager:
             "daily_sent":     data.get("daily_sent", 0),
             "session_active": data.get("session_active", True),
             "last_active":    datetime.now(timezone.utc).isoformat(),
+            "session_status": data.get("session_status"),
+            "local_state":    data.get("local_state"),
+            "runtime_mode":   data.get("runtime_mode"),
         })
 
     def _handle_action_result(self, profile_key: str, result: dict):
