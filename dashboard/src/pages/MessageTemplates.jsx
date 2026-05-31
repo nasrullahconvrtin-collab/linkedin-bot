@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Archive, Copy, FileText, Plus, Search, Trash2 } from 'lucide-react';
+import { Archive, Copy, FileText, Layers3, Plus, Search, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
 import MessageEditorModal from '../components/MessageEditorModal';
@@ -11,7 +11,13 @@ import {
   saveMessage,
   updateMessageTemplate,
 } from '../services/api';
-import { TEMPLATE_TYPES, extractVariables, renderTemplate } from '../utils/messageTools';
+import {
+  SEQUENCE_BLUEPRINTS,
+  TEMPLATE_TYPES,
+  buildSequenceFromBlueprint,
+  extractVariables,
+  renderTemplate,
+} from '../utils/messageTools';
 
 const sampleProspects = [{
   first_name: 'Mariam',
@@ -54,9 +60,10 @@ export default function MessageTemplates() {
 
   const saveTemplate = async (payload) => {
     try {
+      const nextPayload = { ...(editing || {}), ...payload };
       const saved = editing?.id
-        ? await updateMessageTemplate(editing.id, { ...editing, ...payload })
-        : await saveMessage(payload);
+        ? await updateMessageTemplate(editing.id, nextPayload)
+        : await saveMessage(nextPayload);
       toast.success('Template saved');
       setEditing(saved);
       load();
@@ -97,6 +104,24 @@ export default function MessageTemplates() {
     }
   };
 
+  const createSequenceTemplate = (blueprint) => {
+    const sequence = buildSequenceFromBlueprint(blueprint);
+    const body = sequence
+      .filter(step => step.body)
+      .map(step => `${step.label}\n${step.body}`)
+      .join('\n\n');
+    setEditing({
+      name: blueprint.name,
+      body,
+      type: 'message_sequence',
+      message_type: 'message_sequence',
+      category: 'Campaign sequence',
+      tags: ['sequence', blueprint.id],
+      sequence,
+      variables: extractVariables(body),
+    });
+  };
+
   return (
     <Layout title="Message Templates">
       <div className="space-y-5">
@@ -129,12 +154,36 @@ export default function MessageTemplates() {
           </select>
         </div>
 
+        <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div>
+              <h2 className="text-white font-semibold">Sequence Template Starters</h2>
+              <p className="text-[#6b7280] text-xs mt-1">Templates can store an entire campaign message sequence, not only one message.</p>
+            </div>
+            <Layers3 size={18} className="text-[#6366f1]" />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {SEQUENCE_BLUEPRINTS.map(blueprint => (
+              <button
+                key={blueprint.id}
+                onClick={() => createSequenceTemplate(blueprint)}
+                className="text-left rounded-xl border border-[#2a2a2a] bg-[#111111] p-4 hover:border-[#6366f1] hover:bg-[#6366f1]/10 transition-all"
+              >
+                <p className="text-white text-sm font-semibold">{blueprint.name}</p>
+                <p className="text-[#6b7280] text-xs mt-1 leading-5">{blueprint.description}</p>
+                <p className="text-[#9ca3af] text-xs mt-3">{blueprint.messages} message step(s) {blueprint.invitation ? '+ invitation' : '+ connected only'}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
           {loading ? (
             <div className="xl:col-span-3 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-10 text-center text-[#6b7280]">Loading templates...</div>
           ) : filtered.length === 0 ? (
             <div className="xl:col-span-3 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-10 text-center text-[#6b7280]">No templates found.</div>
           ) : filtered.map(template => {
+            const isSequence = (template.sequence || []).length > 0 || (template.type || template.message_type) === 'message_sequence';
             const rendered = renderTemplate(template.body || '', sampleProspects[0], {
               sender_name: 'Nasrullah',
               sender_company: 'LinkedFlow',
@@ -155,6 +204,18 @@ export default function MessageTemplates() {
                 </div>
                 <h3 className="text-white font-semibold mt-4">{template.name}</h3>
                 <p className="text-[#6b7280] text-xs mt-1">{template.category || template.type || template.message_type || 'linkedin_message'}</p>
+                {isSequence && (
+                  <div className="mt-3 rounded-xl border border-[#2a2a2a] bg-[#111111] p-3">
+                    <p className="text-[#9ca3af] text-xs font-semibold mb-2">Sequence</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(template.sequence || []).slice(0, 8).map((step, i) => (
+                        <span key={`${step.label}-${i}`} className="text-[11px] px-2 py-1 rounded-md bg-[#0a0a0a] border border-[#2a2a2a] text-[#9ca3af]">
+                          {step.label || step.action_type}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <p className="text-[#9ca3af] text-sm mt-3 line-clamp-4 whitespace-pre-wrap">{rendered.rendered || 'No body yet.'}</p>
                 <div className="flex flex-wrap gap-1.5 mt-4">
                   {extractVariables(template.body || '').slice(0, 6).map(v => (
@@ -187,7 +248,7 @@ export default function MessageTemplates() {
         senderVariables={{ sender_name: 'Nasrullah', sender_company: 'LinkedFlow', sender_email: 'hello@linkedflow.local', sender_phone: '', sender_linkedin: '' }}
         onClose={() => setEditing(null)}
         onSave={(_, payload) => saveTemplate(payload)}
-        onSaveTemplate={saveTemplate}
+        onSaveTemplate={payload => saveTemplate({ ...editing, ...payload })}
         onDuplicateTemplate={duplicate}
         onDeleteTemplate={remove}
       />

@@ -263,6 +263,25 @@ export default function CampaignWizard({ onClose, onCreated }) {
     return true;
   };
 
+  const applySequenceTemplate = (templateId) => {
+    const template = messageTemplates.find(t => t.id === templateId);
+    if (!template) return;
+    const sequenceMessages = (template.sequence || []).filter(s => s.body);
+    if (!sequenceMessages.length && template.body) {
+      const messageSteps = steps.filter(s => s.action_type === 'message' || s.action_type === 'follow-up message');
+      if (messageSteps[0]) setMessageOverrides(m => ({ ...m, [String(messageSteps[0].step_order)]: template.body }));
+      toast.success('Template applied to first message step');
+      return;
+    }
+    const messageSteps = steps.filter(s => s.action_type === 'message' || s.action_type === 'follow-up message');
+    const nextMessages = { ...messageOverrides };
+    messageSteps.forEach((step, index) => {
+      if (sequenceMessages[index]?.body) nextMessages[String(step.step_order)] = sequenceMessages[index].body;
+    });
+    setMessageOverrides(nextMessages);
+    toast.success('Sequence template applied');
+  };
+
   const addManualProspect = async () => {
     const payload = {
       ...manualProspect,
@@ -520,7 +539,24 @@ export default function CampaignWizard({ onClose, onCreated }) {
 
             {step === 2 && (
               <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5 space-y-4">
-                <h3 className="text-white font-semibold">Messages and Delays</h3>
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-white font-semibold">Messages and Delays</h3>
+                    <p className="text-[#6b7280] text-xs mt-1">Start from scratch or apply a saved sequence template for this campaign type.</p>
+                  </div>
+                  <select
+                    onChange={e => {
+                      if (e.target.value) applySequenceTemplate(e.target.value);
+                      e.target.value = '';
+                    }}
+                    className="bg-[#111111] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm"
+                  >
+                    <option value="">Apply saved sequence template</option>
+                    {messageTemplates
+                      .filter(t => (t.type || t.message_type) === 'message_sequence' || (t.sequence || []).length)
+                      .map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </div>
                 {steps.map(s => {
                   const isMessage = s.action_type === 'message' || s.action_type === 'follow-up message';
                   const isWait = s.action_type === 'wait';

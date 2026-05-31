@@ -98,9 +98,9 @@ export default function MessageEditorModal({
   });
 
   return (
-    <div className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-7xl max-h-[92vh] overflow-hidden rounded-2xl border border-[#2a2a2a] bg-[#111111] shadow-2xl">
-        <div className="flex items-center justify-between gap-4 border-b border-[#2a2a2a] px-5 py-4">
+    <div className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm p-3 md:p-6">
+      <div className="mx-auto flex h-[calc(100vh-24px)] md:h-[calc(100vh-48px)] w-full max-w-[1360px] flex-col overflow-hidden rounded-2xl border border-[#2a2a2a] bg-[#111111] shadow-2xl">
+        <div className="shrink-0 flex items-center justify-between gap-4 border-b border-[#2a2a2a] px-4 md:px-5 py-3.5">
           <div>
             <h2 className="text-white font-bold text-lg">{title}</h2>
             <p className="text-[#6b7280] text-xs mt-1">Build reusable LinkedIn copy with variables, preview, and safety checks.</p>
@@ -110,8 +110,8 @@ export default function MessageEditorModal({
           </button>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] max-h-[calc(92vh-73px)] overflow-y-auto">
-          <div className="p-5 space-y-4">
+        <div className="min-h-0 flex-1 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] overflow-hidden">
+          <div className="min-h-0 overflow-y-auto p-4 md:p-5 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-[200px_1fr_260px] gap-3">
               <select value={messageType} onChange={e => setMessageType(e.target.value)} className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm">
                 {TEMPLATE_TYPES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
@@ -128,12 +128,12 @@ export default function MessageEditorModal({
               </select>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-[210px_minmax(0,1fr)] gap-4">
               <div className="rounded-xl border border-[#2a2a2a] bg-[#0a0a0a] p-3">
                 <div className="flex items-center gap-2 text-white text-sm font-semibold mb-3">
                   <Search size={15} /> Insert Variables
                 </div>
-                <div className="space-y-3 max-h-[420px] overflow-y-auto">
+                <div className="space-y-3 max-h-[340px] overflow-y-auto pr-1">
                   {groups.map(([label, vars]) => (
                     <div key={label}>
                       <p className="text-[#6b7280] uppercase tracking-wide text-[10px] mb-1.5">{label}</p>
@@ -157,7 +157,7 @@ export default function MessageEditorModal({
                 <textarea
                   value={body}
                   onChange={e => setBody(e.target.value)}
-                  rows={14}
+                  rows={11}
                   placeholder="Write the message. Example: Hi {{first_name}}, noticed {{recent_post}} and thought this may be relevant..."
                   className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm leading-6 placeholder-[#4b5563] focus:outline-none focus:border-[#6366f1]"
                 />
@@ -180,7 +180,7 @@ export default function MessageEditorModal({
                   <h3 className="text-white font-semibold text-sm">Raw Template</h3>
                   <button onClick={() => navigator.clipboard?.writeText(body)} className="text-[#6b7280] hover:text-white"><Copy size={15} /></button>
                 </div>
-                <pre className="whitespace-pre-wrap text-[#9ca3af] text-sm leading-6">{body || 'No message yet.'}</pre>
+                <pre className="max-h-[190px] overflow-y-auto whitespace-pre-wrap text-[#9ca3af] text-sm leading-6 pr-1">{body || 'No message yet.'}</pre>
               </div>
               <div className="rounded-xl border border-[#2a2a2a] bg-[#0a0a0a] p-4">
                 <div className="flex items-center justify-between gap-3 mb-3">
@@ -191,14 +191,14 @@ export default function MessageEditorModal({
                     ))}
                   </select>
                 </div>
-                <pre className="whitespace-pre-wrap text-white text-sm leading-6">{rendered.rendered || 'No preview yet.'}</pre>
+                <pre className="max-h-[190px] overflow-y-auto whitespace-pre-wrap text-white text-sm leading-6 pr-1">{rendered.rendered || 'No preview yet.'}</pre>
                 {rendered.missing.length > 0 && (
                   <p className="mt-3 text-xs text-yellow-400">Missing for this prospect: {rendered.missing.join(', ')}</p>
                 )}
               </div>
             </div>
 
-            <div className="flex flex-wrap justify-between gap-3 pt-2">
+            <div className="sticky bottom-0 -mx-4 md:-mx-5 px-4 md:px-5 py-3 bg-[#111111]/95 backdrop-blur border-t border-[#2a2a2a] flex flex-wrap justify-between gap-3">
               <div className="flex flex-wrap gap-2">
                 <button onClick={() => onSaveTemplate?.(savePayload())} className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[#2a2a2a] text-[#9ca3af] hover:text-white">
                   <Save size={15} /> Save as template
@@ -221,7 +221,7 @@ export default function MessageEditorModal({
             </div>
           </div>
 
-          <aside className="border-l border-[#2a2a2a] bg-[#0a0a0a] p-5 space-y-4">
+          <aside className="min-h-0 overflow-y-auto border-t xl:border-t-0 xl:border-l border-[#2a2a2a] bg-[#0a0a0a] p-4 md:p-5 space-y-4">
             <div>
               <h3 className="text-white font-semibold">Quality Checker</h3>
               <p className="text-[#6b7280] text-xs mt-1">Warnings block nothing yet, but they stop weak copy from sneaking in.</p>

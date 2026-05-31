@@ -33,6 +33,38 @@ export const TEMPLATE_TYPES = [
   ['future_email', 'Future Email'],
 ];
 
+export const SEQUENCE_BLUEPRINTS = [
+  { id: 'invitation_only', name: 'Invitation Only', description: 'Connection request only.', messages: 0, invitation: true },
+  { id: 'invitation_1_message', name: 'Invitation + 1 Message', description: 'Invite, wait for acceptance, send first message.', messages: 1, invitation: true },
+  { id: 'invitation_2_messages', name: 'Invitation + 2 Messages', description: 'Invite, first message, one follow-up.', messages: 2, invitation: true },
+  { id: 'invitation_3_messages', name: 'Invitation + 3 Messages', description: 'Invite, first message, two follow-ups.', messages: 3, invitation: true },
+  { id: 'invitation_5_messages', name: 'Invitation + 5 Messages', description: 'Full LinkedIn message sequence after acceptance.', messages: 5, invitation: true },
+  { id: 'message_only_connected', name: 'Message Only (Connected Prospects)', description: 'No invite. Starts messaging 1st-degree connections.', messages: 5, invitation: false },
+];
+
+export function buildSequenceFromBlueprint(blueprint) {
+  const steps = [];
+  let order = 1;
+  if (blueprint.invitation) {
+    steps.push({ order: order++, action_type: 'invitation', label: 'Connection Request', body: 'Hi {{first_name}}, would be good to connect.' });
+    steps.push({ order: order++, action_type: 'wait', label: 'Wait for acceptance', delay_days: 0, until: 'connected' });
+  }
+  for (let i = 1; i <= blueprint.messages; i += 1) {
+    steps.push({
+      order: order++,
+      action_type: i === 1 ? 'message' : 'follow-up message',
+      label: i === 1 ? 'First Message' : `Follow-up ${i - 1}`,
+      body: i === 1
+        ? 'Hi {{first_name}}, thanks for connecting. Noticed {{company}} and thought this may be relevant.'
+        : 'Hi {{first_name}}, checking back on my last note. Worth a quick look?',
+    });
+    if (i < blueprint.messages) {
+      steps.push({ order: order++, action_type: 'wait', label: `Delay before message ${i + 1}`, delay_days: 3 });
+    }
+  }
+  return steps;
+}
+
 export function slugifyVariable(value) {
   return String(value || '')
     .trim()
