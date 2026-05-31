@@ -619,16 +619,42 @@ def db_create_profile(profile_key: str, display_name: str) -> dict | None:
     return db_enrich_profile(result.data[0]) if result.data else None
 
 
+PROFILE_RUNTIME_FIELDS = {
+    "runtime_mode",
+    "proxy_settings",
+    "session_status",
+    "local_state",
+    "last_job_result",
+}
+
+
+def _without_profile_runtime_fields(data: dict) -> dict:
+    return {k: v for k, v in data.items() if k not in PROFILE_RUNTIME_FIELDS}
+
+
 def db_update_profile(profile_key: str, data: dict) -> dict | None:
     clean = {k: v for k, v in data.items() if v is not None}
     if not clean:
         return None
-    result = (
-        supabase.table("linkedin_profiles")
-        .update(clean)
-        .eq("profile_key", profile_key)
-        .execute()
-    )
+    try:
+        result = (
+            supabase.table("linkedin_profiles")
+            .update(clean)
+            .eq("profile_key", profile_key)
+            .execute()
+        )
+    except Exception as exc:
+        if not any(field in str(exc) for field in PROFILE_RUNTIME_FIELDS):
+            raise
+        fallback = _without_profile_runtime_fields(clean)
+        if not fallback:
+            return db_get_profile(profile_key)
+        result = (
+            supabase.table("linkedin_profiles")
+            .update(fallback)
+            .eq("profile_key", profile_key)
+            .execute()
+        )
     return db_enrich_profile(result.data[0]) if result.data else None
 
 
@@ -643,11 +669,21 @@ def db_mark_stale_profiles_offline(seconds: int = 90):
 def db_upsert_profile(profile_key: str, updates: dict) -> dict | None:
     """Create the profile row if it doesn't exist, otherwise update it."""
     updates["profile_key"] = profile_key
-    result = (
-        supabase.table("linkedin_profiles")
-        .upsert(updates, on_conflict="profile_key")
-        .execute()
-    )
+    try:
+        result = (
+            supabase.table("linkedin_profiles")
+            .upsert(updates, on_conflict="profile_key")
+            .execute()
+        )
+    except Exception as exc:
+        if not any(field in str(exc) for field in PROFILE_RUNTIME_FIELDS):
+            raise
+        fallback = _without_profile_runtime_fields(updates)
+        result = (
+            supabase.table("linkedin_profiles")
+            .upsert(fallback, on_conflict="profile_key")
+            .execute()
+        )
     return db_enrich_profile(result.data[0]) if result.data else None
 
 
