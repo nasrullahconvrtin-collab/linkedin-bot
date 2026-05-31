@@ -244,11 +244,21 @@ class ScheduleUpdate(BaseModel):
 
 
 class MessageTemplateUpsert(BaseModel):
+    id: Optional[str] = None
     name: str
     subject: Optional[str] = None
-    body: str
+    body: str = ""
     message_type: str = "initial"
+    type: Optional[str] = None
+    category: Optional[str] = None
+    folder: Optional[str] = None
+    tags: List[str] = []
+    status: str = "active"
     active: bool = True
+    sequence: List[dict] = []
+    variables: List[str] = []
+    custom_fields: dict = {}
+    created_by: Optional[str] = "LinkedFlow"
 
 
 # Campaign Wizard / template engine

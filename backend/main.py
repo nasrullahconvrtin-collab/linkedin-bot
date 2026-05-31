@@ -1026,9 +1026,14 @@ async def update_schedules(rows: list[ScheduleUpdate]):
 
 
 @app.get("/messages", tags=["Messages"])
-async def get_message_templates():
+async def get_message_templates(
+    search: Optional[str] = None,
+    type: Optional[str] = None,
+    status: Optional[str] = None,
+    include_archived: bool = False,
+):
     try:
-        return {"messages": db.db_get_message_templates()}
+        return {"messages": db.db_get_message_templates(search, type, status, include_archived)}
     except Exception as e:
         logger.error(f"get_message_templates: {e}")
         raise HTTPException(500, str(e))
@@ -1045,6 +1050,74 @@ async def upsert_message_template(body: MessageTemplateUpsert):
         raise
     except Exception as e:
         logger.error(f"upsert_message_template: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.get("/messages/{template_id}", tags=["Messages"])
+async def get_message_template(template_id: str):
+    try:
+        row = db.db_get_message_template(template_id)
+        if not row:
+            raise HTTPException(404, "Message template not found")
+        return row
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"get_message_template: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.put("/messages/{template_id}", tags=["Messages"])
+async def update_message_template(template_id: str, body: MessageTemplateUpsert):
+    try:
+        payload = body.model_dump()
+        payload["id"] = template_id
+        row = db.db_upsert_message_template(payload)
+        if not row:
+            raise HTTPException(404, "Message template not found")
+        return row
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"update_message_template: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.post("/messages/{template_id}/duplicate", tags=["Messages"], status_code=201)
+async def duplicate_message_template(template_id: str):
+    try:
+        row = db.db_duplicate_message_template(template_id)
+        if not row:
+            raise HTTPException(404, "Message template not found")
+        return row
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"duplicate_message_template: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.post("/messages/{template_id}/archive", tags=["Messages"])
+async def archive_message_template(template_id: str):
+    try:
+        row = db.db_archive_message_template(template_id)
+        if not row:
+            raise HTTPException(404, "Message template not found")
+        return row
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"archive_message_template: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.delete("/messages/{template_id}", tags=["Messages"])
+async def delete_message_template(template_id: str):
+    try:
+        db.db_delete_message_template(template_id)
+        return {"deleted": True}
+    except Exception as e:
+        logger.error(f"delete_message_template: {e}")
         raise HTTPException(500, str(e))
 
 

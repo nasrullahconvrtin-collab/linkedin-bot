@@ -4,6 +4,7 @@ import { ArrowLeft, Upload, FileText, X, Loader2, CheckCircle, AlertCircle, Rock
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
+import MessageEditorModal from '../components/MessageEditorModal';
 import ProspectTable from '../components/ProspectTable';
 import StatusBadge from '../components/StatusBadge';
 import {
@@ -12,12 +13,14 @@ import {
   getCampaign,
   bulkImportProspects,
   getCampaignSequence,
+  getMessages,
   getProfiles,
   getProspects,
   launchCampaign,
   removeProspectsFromCampaign,
   updateCampaignStatus,
   updateCampaign,
+  saveMessage,
 } from '../services/api';
 
 const REQUIRED_FIELDS = [
@@ -99,6 +102,8 @@ export default function CampaignDetail() {
   const [newProspect, setNewProspect] = useState({
     first_name: '', last_name: '', linkedin_url: '', email: '', company: '', job_title: '',
   });
+  const [messageTemplates, setMessageTemplates] = useState([]);
+  const [editorStep, setEditorStep] = useState(null);
 
   useEffect(() => {
     getCampaign(id)
@@ -115,6 +120,7 @@ export default function CampaignDetail() {
   useEffect(() => {
     getProfiles().then(setProfiles).catch(() => {});
     getProspects({ limit: 500 }).then(d => setProspectPicker(d.prospects || [])).catch(() => {});
+    getMessages().then(d => setMessageTemplates(d.messages || [])).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -553,6 +559,26 @@ export default function CampaignDetail() {
                           placeholder={step.config?.message_field ? `Uses prospect field: ${step.config.message_field}` : 'Type message override'}
                           className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white"
                         />
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditorStep(step)}
+                            className="px-3 py-2 rounded-lg bg-[#6366f1] text-white text-xs font-medium"
+                          >
+                            Open rich editor
+                          </button>
+                          <select
+                            onChange={e => {
+                              const template = messageTemplates.find(t => t.id === e.target.value);
+                              if (template) updateMessage(step.step_order, template.body || '');
+                              e.target.value = '';
+                            }}
+                            className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-2 py-2 text-white text-xs"
+                          >
+                            <option value="">Load saved template</option>
+                            {messageTemplates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                          </select>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -662,6 +688,38 @@ export default function CampaignDetail() {
           </div>
         </div>
       )}
+      <MessageEditorModal
+        open={!!editorStep}
+        title={editorStep ? `Edit ${editorStep.label}` : 'Edit Message'}
+        value={editorStep ? ((campaign.sequence_config?.messages || {})[String(editorStep.step_order)] || editorStep.config?.message || '') : ''}
+        name={editorStep?.label || ''}
+        type={editorStep?.action_type === 'invitation' ? 'connection_request' : editorStep?.action_type === 'follow-up message' ? 'follow_up' : 'first_message'}
+        templates={messageTemplates}
+        availableVariables={['first_name', 'last_name', 'company', 'title', 'industry', 'location', 'email', 'linkedin_url', ...((campaign.sequence_config || {}).variables || [])]}
+        sampleProspects={prospectPicker.slice(0, 8)}
+        senderVariables={{
+          sender_name: profiles.find(p => p.profile_key === profileKey)?.display_name || profileKey,
+          sender_company: 'LinkedFlow',
+          sender_email: '',
+          sender_phone: '',
+          sender_linkedin: '',
+        }}
+        campaignVariables={{
+          campaign_name: campaign?.name || '',
+          campaign_profile: profileKey,
+          campaign_offer: '',
+        }}
+        onClose={() => setEditorStep(null)}
+        onSave={(body) => {
+          updateMessage(editorStep.step_order, body);
+          setEditorStep(null);
+        }}
+        onSaveTemplate={async (payload) => {
+          const saved = await saveMessage(payload);
+          setMessageTemplates(t => [saved, ...t.filter(x => x.id !== saved.id)]);
+          toast.success('Template saved');
+        }}
+      />
     </Layout>
   );
 }

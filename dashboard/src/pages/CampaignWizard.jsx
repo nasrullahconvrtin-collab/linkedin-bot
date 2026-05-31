@@ -4,6 +4,8 @@ import {
   MessageSquare, Rocket, Send, X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import MessageEditorModal from '../components/MessageEditorModal';
+import VariableMappingPanel, { autoVariableMappings } from '../components/VariableMappingPanel';
 import {
   addProspectsToCampaign,
   bulkImportProspects,
@@ -15,8 +17,11 @@ import {
   getProspectListMembers,
   getProspectLists,
   getProspects,
+  getMessages,
   launchCampaign,
+  saveMessage,
 } from '../services/api';
+import { extractVariables } from '../utils/messageTools';
 
 const DEFAULT_VARS = ['first_name', 'last_name', 'company', 'title', 'industry', 'location'];
 
@@ -151,6 +156,9 @@ export default function CampaignWizard({ onClose, onCreated }) {
   const [importMode, setImportMode] = useState('create_or_update');
   const [messageOverrides, setMessageOverrides] = useState({});
   const [delayOverrides, setDelayOverrides] = useState({});
+  const [messageTemplates, setMessageTemplates] = useState([]);
+  const [editorStep, setEditorStep] = useState(null);
+  const [variableMappings, setVariableMappings] = useState({});
   const [launchNow, setLaunchNow] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -163,8 +171,9 @@ export default function CampaignWizard({ onClose, onCreated }) {
       getProspects({ limit: 500 }),
       getProspectLists().catch(() => ({ lists: [] })),
       getProfiles().catch(() => []),
+      getMessages().catch(() => ({ messages: [] })),
     ])
-      .then(([templateData, variableData, prospectData, listData, profileData]) => {
+      .then(([templateData, variableData, prospectData, listData, profileData, messageTemplateData]) => {
         const allTemplates = templateData.templates || [];
         setTemplates(allTemplates);
         const firstActive = allTemplates.find(t => t.status === 'active') || allTemplates[0] || null;
@@ -174,6 +183,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
         setProspects(prospectData.prospects || []);
         setLists(listData.lists || []);
         setProfiles(profileData || []);
+        setMessageTemplates(messageTemplateData.messages || []);
         if ((profileData || [])[0]?.profile_key) setProfileKey(profileData[0].profile_key);
       })
       .catch(err => toast.error(err.message))
@@ -213,8 +223,44 @@ export default function CampaignWizard({ onClose, onCreated }) {
     if (!file.name.toLowerCase().endsWith('.csv')) return toast.error('Select a CSV file');
     setCsvFile(file);
     const reader = new FileReader();
-    reader.onload = (e) => setCsvMeta(parseCSV(String(e.target.result || '')));
+    reader.onload = (e) => {
+      const meta = parseCSV(String(e.target.result || ''));
+      setCsvMeta(meta);
+      setVariableMappings(autoVariableMappings(meta.headers));
+    };
     reader.readAsText(file);
+  };
+
+  const csvSampleRow = useMemo(() => {
+    if (!csvMeta?.headers || !csvMeta?.preview?.[0]) return {};
+    return Object.fromEntries(csvMeta.headers.map((header, index) => [header, csvMeta.preview[0][index] || '']));
+  }, [csvMeta]);
+
+  const mappedVariables = useMemo(() => {
+    if (!csvMeta?.headers) return [];
+    return csvMeta.headers.map(header => {
+      const row = variableMappings[header] || {};
+      return row.target || row.customName || header.trim().toLowerCase().replaceAll(' ', '_');
+    }).filter(Boolean);
+  }, [csvMeta, variableMappings]);
+
+  const availableMessageVariables = useMemo(
+    () => [...new Set([...variables, ...csvFields, ...mappedVariables, 'email', 'linkedin_url', 'sender_name', 'sender_company', 'sender_email', 'sender_phone', 'sender_linkedin'])],
+    [csvFields, mappedVariables, variables],
+  );
+
+  const validateMessages = () => {
+    const all = new Set(availableMessageVariables);
+    const unknown = [];
+    Object.values(messageOverrides).forEach(message => {
+      extractVariables(message || '').forEach(v => {
+        if (!all.has(v)) unknown.push(v);
+      });
+    });
+    if (unknown.length) {
+      return confirm(`Some variables are not mapped yet: ${[...new Set(unknown)].join(', ')}. Continue anyway?`);
+    }
+    return true;
   };
 
   const addManualProspect = async () => {
@@ -251,6 +297,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
     if (!csvFile && selectedIds.length === 0 && selectedListIds.length === 0) {
       return toast.error('Import prospects, select a list, or choose individual prospects');
     }
+    if (!validateMessages()) return;
 
     setSaving(true);
     try {
@@ -262,7 +309,8 @@ export default function CampaignWizard({ onClose, onCreated }) {
         sequence_config: {
           messages: messageOverrides,
           delays: delayOverrides,
-          variables: [...new Set([...variables, ...csvFields])],
+          variables: availableMessageVariables,
+          variable_mappings: variableMappings,
         },
       });
 
@@ -368,6 +416,17 @@ export default function CampaignWizard({ onClose, onCreated }) {
                   )}
                 </div>
 
+                {csvMeta && (
+                  <div className="lg:col-span-3">
+                    <VariableMappingPanel
+                      headers={csvMeta.headers}
+                      mappings={variableMappings}
+                      onChange={setVariableMappings}
+                      sampleRow={csvSampleRow}
+                    />
+                  </div>
+                )}
+
                 <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
                   <h3 className="text-white font-semibold mb-4">Prospect Lists</h3>
                   <div className="max-h-[360px] overflow-y-auto space-y-2">
@@ -472,13 +531,38 @@ export default function CampaignWizard({ onClose, onCreated }) {
                         <span className="text-xs text-[#6b7280]">Step {s.step_order}</span>
                       </div>
                       {isMessage && (
-                        <textarea
-                          rows={4}
-                          value={messageOverrides[String(s.step_order)] ?? s.config?.message ?? ''}
-                          onChange={e => setMessageOverrides(m => ({ ...m, [String(s.step_order)]: e.target.value }))}
-                          placeholder={`Use variables like {{first_name}} or {{recent_post}}. Leave blank to use prospect fields.`}
-                          className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm placeholder-[#4b5563] focus:outline-none focus:border-[#6366f1]"
-                        />
+                        <div className="space-y-2">
+                          <textarea
+                            rows={4}
+                            value={messageOverrides[String(s.step_order)] ?? s.config?.message ?? ''}
+                            onChange={e => setMessageOverrides(m => ({ ...m, [String(s.step_order)]: e.target.value }))}
+                            placeholder={`Use variables like {{first_name}} or {{recent_post}}. Leave blank to use prospect fields.`}
+                            className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm placeholder-[#4b5563] focus:outline-none focus:border-[#6366f1]"
+                          />
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setEditorStep(s)}
+                              className="px-3 py-2 rounded-lg bg-[#6366f1] text-white text-xs font-medium"
+                            >
+                              Open rich editor
+                            </button>
+                            <select
+                              onChange={e => {
+                                const template = messageTemplates.find(t => t.id === e.target.value);
+                                if (template) {
+                                  setMessageOverrides(m => ({ ...m, [String(s.step_order)]: template.body || '' }));
+                                  toast.success('Template loaded into this step');
+                                }
+                                e.target.value = '';
+                              }}
+                              className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-2 py-2 text-white text-xs"
+                            >
+                              <option value="">Load saved template</option>
+                              {messageTemplates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                            </select>
+                          </div>
+                        </div>
                       )}
                       {isWait && (
                         <div className="space-y-2">
@@ -573,7 +657,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
             <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
               <h3 className="text-white font-semibold mb-3">Variables</h3>
               <div className="flex flex-wrap gap-1.5">
-                {[...new Set([...variables, ...csvFields])].map(v => (
+                {availableMessageVariables.map(v => (
                   <span key={v} className="text-xs px-2 py-1 rounded-md bg-[#111111] border border-[#2a2a2a] text-[#9ca3af]">{`{{${v}}}`}</span>
                 ))}
               </div>
@@ -581,6 +665,39 @@ export default function CampaignWizard({ onClose, onCreated }) {
           </div>
         </div>
       </div>
+      <MessageEditorModal
+        open={!!editorStep}
+        title={editorStep ? `Edit ${editorStep.label}` : 'Edit Message'}
+        value={editorStep ? (messageOverrides[String(editorStep.step_order)] ?? editorStep.config?.message ?? '') : ''}
+        name={editorStep?.label || ''}
+        type={editorStep?.action_type === 'follow-up message' ? 'follow_up' : 'first_message'}
+        templates={messageTemplates}
+        availableVariables={availableMessageVariables}
+        customVariables={csvFields}
+        sampleProspects={prospects.slice(0, 8)}
+        senderVariables={{
+          sender_name: profiles.find(p => p.profile_key === profileKey)?.display_name || profileKey,
+          sender_company: 'LinkedFlow',
+          sender_email: '',
+          sender_phone: '',
+          sender_linkedin: '',
+        }}
+        campaignVariables={{
+          campaign_name: campaignName,
+          campaign_profile: profileKey,
+          campaign_offer: '',
+        }}
+        onClose={() => setEditorStep(null)}
+        onSave={(body) => {
+          setMessageOverrides(m => ({ ...m, [String(editorStep.step_order)]: body }));
+          setEditorStep(null);
+        }}
+        onSaveTemplate={async (payload) => {
+          const saved = await saveMessage(payload);
+          setMessageTemplates(t => [saved, ...t.filter(x => x.id !== saved.id)]);
+          toast.success('Template saved');
+        }}
+      />
     </div>
   );
 }

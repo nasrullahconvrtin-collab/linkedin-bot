@@ -94,8 +94,13 @@ export const runMessages       = ()         => api.post('/scheduler/run-messages
 export const runFollowups      = ()         => api.post('/scheduler/run-followups');
 export const getSchedules      = ()         => api.get('/schedules');
 export const updateSchedules   = (rows)     => api.put('/schedules', rows);
-export const getMessages       = ()         => api.get('/messages');
+export const getMessages       = (params)   => api.get('/messages', { params });
+export const getMessage        = (id)       => api.get(`/messages/${id}`);
 export const saveMessage       = (data)     => api.post('/messages', data);
+export const updateMessageTemplate = (id, data) => api.put(`/messages/${id}`, data);
+export const duplicateMessage  = (id)       => api.post(`/messages/${id}/duplicate`);
+export const archiveMessage    = (id)       => api.post(`/messages/${id}/archive`);
+export const deleteMessage     = (id)       => api.delete(`/messages/${id}`);
 
 // ── HubSpot ──────────────────────────────────────────────────
 export const syncHubSpot       = (id, data) => api.post(`/hubspot/sync/${id}`, data);

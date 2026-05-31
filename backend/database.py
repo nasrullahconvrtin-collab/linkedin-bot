@@ -1921,24 +1921,100 @@ def db_upsert_schedules(rows: list[dict]) -> list[dict]:
     return db_get_schedules()
 
 
-def db_get_message_templates() -> list[dict]:
-    return (
-        supabase.table("message_templates")
-        .select("*")
-        .order("created_at", desc=True)
-        .execute()
-        .data or []
-    )
-
-
-def db_upsert_message_template(data: dict) -> dict | None:
+def _template_payload(data: dict) -> dict:
+    message_type = data.get("message_type") or data.get("type") or "initial"
+    status = data.get("status") or ("active" if data.get("active", True) else "archived")
     payload = {
         "name": data["name"],
         "subject": data.get("subject"),
-        "body": data["body"],
-        "message_type": data.get("message_type", "initial"),
-        "active": data.get("active", True),
+        "body": data.get("body") or "",
+        "message_type": message_type,
+        "type": data.get("type") or message_type,
+        "category": data.get("category"),
+        "folder": data.get("folder"),
+        "tags": data.get("tags") or [],
+        "status": status,
+        "active": status != "archived" and bool(data.get("active", True)),
+        "sequence": data.get("sequence") or [],
+        "variables": data.get("variables") or [],
+        "custom_fields": data.get("custom_fields") or {},
+        "created_by": data.get("created_by") or "LinkedFlow",
         "updated_at": _utc_now(),
     }
-    result = supabase.table("message_templates").upsert(payload, on_conflict="name").execute()
+    if data.get("id"):
+        payload["id"] = data["id"]
+    return payload
+
+
+def db_get_message_templates(
+    search: str | None = None,
+    message_type: str | None = None,
+    status: str | None = None,
+    include_archived: bool = False,
+) -> list[dict]:
+    query = supabase.table("message_templates").select("*")
+    if message_type:
+        query = query.eq("type", message_type)
+    if status:
+        query = query.eq("status", status)
+    elif not include_archived:
+        query = query.neq("status", "archived")
+    rows = query.order("updated_at", desc=True).execute().data or []
+    if search:
+        needle = search.lower()
+        rows = [
+            row for row in rows
+            if needle in (row.get("name") or "").lower()
+            or needle in (row.get("body") or "").lower()
+            or needle in (row.get("category") or "").lower()
+            or any(needle in str(tag).lower() for tag in (row.get("tags") or []))
+        ]
+    return rows
+
+
+def db_get_message_template(template_id: str) -> dict | None:
+    result = supabase.table("message_templates").select("*").eq("id", template_id).limit(1).execute()
     return result.data[0] if result.data else None
+
+
+def db_upsert_message_template(data: dict) -> dict | None:
+    payload = _template_payload(data)
+    if payload.get("id"):
+        result = (
+            supabase.table("message_templates")
+            .update(payload)
+            .eq("id", payload["id"])
+            .execute()
+        )
+    else:
+        result = supabase.table("message_templates").upsert(payload, on_conflict="name").execute()
+    return result.data[0] if result.data else None
+
+
+def db_duplicate_message_template(template_id: str) -> dict | None:
+    row = db_get_message_template(template_id)
+    if not row:
+        return None
+    row.pop("id", None)
+    row["name"] = f"{row.get('name') or 'Template'} Copy {datetime.utcnow().strftime('%H%M%S')}"
+    row["usage_count"] = 0
+    row["last_used_at"] = None
+    row["created_at"] = _utc_now()
+    row["updated_at"] = _utc_now()
+    result = supabase.table("message_templates").insert(row).execute()
+    return result.data[0] if result.data else None
+
+
+def db_archive_message_template(template_id: str) -> dict | None:
+    result = (
+        supabase.table("message_templates")
+        .update({"status": "archived", "active": False, "updated_at": _utc_now()})
+        .eq("id", template_id)
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
+def db_delete_message_template(template_id: str) -> bool:
+    supabase.table("message_templates").delete().eq("id", template_id).execute()
+    return True
