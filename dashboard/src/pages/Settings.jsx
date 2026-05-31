@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import {
   Globe, Loader2, Check, Shield, Clock, Bell, Save, Copy,
   ToggleLeft, ToggleRight, Play, Activity, Download, MonitorDown,
+  Moon, Sun, Palette,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
+import { useApp } from '../context/AppContext';
 import {
   getStats, runConnections, checkAcceptances, runMessages, runFollowups,
   getSchedules, updateSchedules,
@@ -74,6 +76,7 @@ function Section({ title, icon: Icon, children }) {
 }
 
 export default function Settings() {
+  const { theme, setTheme } = useApp();
   const [testing,  setTesting]  = useState(false);
   const [tested,   setTested]   = useState(null);
 
@@ -271,6 +274,40 @@ export default function Settings() {
               <span className="w-2 h-2 rounded-full bg-[#22c55e]" />
               Deployed on Railway · Supabase database
             </div>
+          </div>
+        </Section>
+
+        {/* Appearance */}
+        <Section title="Appearance" icon={Palette}>
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { key: 'dark', label: 'Dark', description: 'Focused workspace for daily outreach', icon: Moon },
+              { key: 'light', label: 'Light', description: 'Cleaner bright mode for daylight work', icon: Sun },
+            ].map(option => {
+              const Icon = option.icon;
+              const active = theme === option.key;
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => setTheme(option.key)}
+                  className={`theme-option text-left rounded-xl border p-4 transition-all ${
+                    active
+                      ? 'border-[#6366f1] bg-[#6366f1]/10 shadow-lg shadow-indigo-500/10'
+                      : 'border-[#2a2a2a] bg-[#111111] hover:border-[#6366f1]/50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="w-10 h-10 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] flex items-center justify-center text-[#6366f1]">
+                      <Icon size={18} />
+                    </div>
+                    {active && <Check size={16} className="text-[#6366f1]" />}
+                  </div>
+                  <p className="text-white font-semibold text-sm">{option.label}</p>
+                  <p className="text-[#6b7280] text-xs mt-1 leading-5">{option.description}</p>
+                </button>
+              );
+            })}
           </div>
         </Section>
 

@@ -69,24 +69,33 @@ function RequireAuth({ children }) {
     : <Navigate to="/login" replace />;
 }
 
+function ThemedToaster() {
+  const toastStyle = {
+    background: 'var(--card)',
+    color: 'var(--text-primary)',
+    border: '1px solid var(--border)',
+    borderRadius: '14px',
+    fontSize: '14px',
+    boxShadow: 'var(--shadow-lg)',
+  };
+
+  return (
+    <Toaster
+      position="top-right"
+      toastOptions={{
+        style: toastStyle,
+        success: { iconTheme: { primary: '#22c55e', secondary: 'var(--card)' } },
+        error:   { iconTheme: { primary: '#ef4444', secondary: 'var(--card)' } },
+      }}
+    />
+  );
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
     <BrowserRouter>
-      <Toaster
-        position="top-right"
-        toastOptions={{
-          style: {
-            background: '#1a1a1a',
-            color: '#ffffff',
-            border: '1px solid #2a2a2a',
-            borderRadius: '12px',
-            fontSize: '14px',
-          },
-          success: { iconTheme: { primary: '#22c55e', secondary: '#1a1a1a' } },
-          error:   { iconTheme: { primary: '#ef4444', secondary: '#1a1a1a' } },
-        }}
-      />
+      <ThemedToaster />
       <Routes>
         <Route path="/login" element={<Login />} />
 

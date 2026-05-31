@@ -87,6 +87,13 @@ export function AppProvider({ children }) {
   const [profiles,      setProfiles]      = useState([]);
   const [wsConnected,   setWsConnected]   = useState(false);
   const [unreadReplies, setUnreadReplies] = useState(0);
+  const [theme,         setThemeState]     = useState(() => localStorage.getItem('lf_theme') || 'dark');
+
+  const setTheme = useCallback((nextTheme) => {
+    const safeTheme = nextTheme === 'light' ? 'light' : 'dark';
+    localStorage.setItem('lf_theme', safeTheme);
+    setThemeState(safeTheme);
+  }, []);
 
   const fetchStats = useCallback(async () => {
     try { setStats(await getStats()); } catch {}
@@ -131,9 +138,14 @@ export function AppProvider({ children }) {
     checkStartupTasks();
   }, []);
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+  }, [theme]);
+
   return (
     <Ctx.Provider value={{
-      stats, campaigns, profiles, wsConnected, unreadReplies,
+      stats, campaigns, profiles, wsConnected, unreadReplies, theme, setTheme,
       fetchStats, fetchCampaigns, fetchProfiles,
     }}>
       {children}
