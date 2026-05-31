@@ -563,14 +563,19 @@ def db_enrich_profile(profile: dict) -> dict:
     today = date.today().isoformat()
     enriched = dict(profile)
     enriched.update(_profile_job_stats(profile_key))
-    enriched["active_campaign_count"] = (
-        supabase.table("campaigns")
-        .select("id", count="exact")
-        .eq("profile_key", profile_key)
-        .in_("status", ["active", "running"])
-        .execute()
-        .count or 0
-    )
+    try:
+        enriched["active_campaign_count"] = (
+            supabase.table("campaigns")
+            .select("id", count="exact")
+            .eq("profile_key", profile_key)
+            .in_("status", ["active", "running"])
+            .execute()
+            .count or 0
+        )
+    except Exception as exc:
+        if "profile_key" not in str(exc):
+            raise
+        enriched["active_campaign_count"] = 0
     enriched["invitations_sent_today"] = _count_rows(
         "prospects", assigned_account=profile_key, connection_sent_date=today
     )
@@ -1158,10 +1163,14 @@ def db_delete_profile(profile_key: str) -> bool:
         "updated_at": _utc_now(),
         "error_message": "Cancelled because profile was deleted",
     }).eq("profile_key", profile_key).in_("status", ["pending", "retrying"]).execute()
-    supabase.table("campaigns").update({
-        "status": "paused",
-        "paused_at": _utc_now(),
-    }).eq("profile_key", profile_key).eq("status", "running").execute()
+    try:
+        supabase.table("campaigns").update({
+            "status": "paused",
+            "paused_at": _utc_now(),
+        }).eq("profile_key", profile_key).eq("status", "running").execute()
+    except Exception as exc:
+        if "profile_key" not in str(exc):
+            raise
     result = supabase.table("linkedin_profiles").delete().eq("profile_key", profile_key).execute()
     return bool(result.data)
 
