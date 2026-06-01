@@ -3,10 +3,12 @@ import { AlertTriangle, Briefcase, Clock, Loader2, RefreshCw, Send, XCircle } fr
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
 import StatusBadge from '../components/StatusBadge';
-import { cancelJob, getJobs, getReadyForMessage } from '../services/api';
+import { cancelJob, getInmailReady, getJobs, getMessageReady, getReadyForMessage } from '../services/api';
 
 const TABS = [
   ['jobs', 'Job Queue', Briefcase],
+  ['inmail', 'InMail Ready', Send],
+  ['message', 'Message Ready', Send],
   ['ready', 'Ready For Message', Send],
 ];
 
@@ -29,6 +31,8 @@ function Metric({ label, value, icon: Icon, color }) {
 export default function Queue() {
   const [tab, setTab] = useState('jobs');
   const [jobs, setJobs] = useState([]);
+  const [inmailReady, setInmailReady] = useState([]);
+  const [messageReady, setMessageReady] = useState([]);
   const [ready, setReady] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -36,10 +40,14 @@ export default function Queue() {
     setLoading(true);
     Promise.all([
       getJobs({ limit: 250 }).catch(() => ({ jobs: [] })),
+      getInmailReady({ limit: 500 }).catch(() => ({ prospects: [] })),
+      getMessageReady({ limit: 500 }).catch(() => ({ prospects: [] })),
       getReadyForMessage({ limit: 500 }).catch(() => ({ prospects: [] })),
     ])
-      .then(([jobData, readyData]) => {
+      .then(([jobData, inmailData, messageData, readyData]) => {
         setJobs(jobData.jobs || []);
+        setInmailReady(inmailData.prospects || []);
+        setMessageReady(messageData.prospects || []);
         setReady(readyData.prospects || []);
       })
       .catch(err => toast.error(err.message))
@@ -53,7 +61,9 @@ export default function Queue() {
     running: jobs.filter(j => ['claimed', 'running'].includes(j.status)).length,
     failed: jobs.filter(j => j.status === 'failed').length,
     ready: ready.length,
-  }), [jobs, ready]);
+    inmail: inmailReady.length,
+    message: messageReady.length,
+  }), [inmailReady, jobs, messageReady, ready]);
 
   const cancel = async (job) => {
     if (!confirm(`Cancel ${job.job_type} job?`)) return;
@@ -82,7 +92,8 @@ export default function Queue() {
         <Metric label="Pending Jobs" value={metrics.pending} icon={Clock} color="#6366f1" />
         <Metric label="Running Jobs" value={metrics.running} icon={Loader2} color="#22c55e" />
         <Metric label="Failed Jobs" value={metrics.failed} icon={AlertTriangle} color="#ef4444" />
-        <Metric label="Ready For Message" value={metrics.ready} icon={Send} color="#f59e0b" />
+        <Metric label="InMail Ready" value={metrics.inmail} icon={Send} color="#0ea5e9" />
+        <Metric label="Message Ready" value={metrics.message} icon={Send} color="#06b6d4" />
       </div>
 
       <div className="flex gap-1 bg-[#111111] rounded-xl p-1 border border-[#2a2a2a] w-fit mb-5">
@@ -144,9 +155,9 @@ export default function Queue() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#1f1f1f]">
-              {ready.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-[#6b7280]">No prospects ready for first message.</td></tr>
-              ) : ready.map(p => (
+              {(tab === 'inmail' ? inmailReady : tab === 'message' ? messageReady : ready).length === 0 ? (
+                <tr><td colSpan={6} className="px-4 py-10 text-center text-[#6b7280]">No prospects in this queue.</td></tr>
+              ) : (tab === 'inmail' ? inmailReady : tab === 'message' ? messageReady : ready).map(p => (
                 <tr key={p.id} className="hover:bg-[#111111]">
                   <td className="px-4 py-3 text-white font-medium">{[p.first_name, p.last_name].filter(Boolean).join(' ') || p.linkedin_url}</td>
                   <td className="px-4 py-3 text-[#9ca3af]">{p.company || '-'}</td>

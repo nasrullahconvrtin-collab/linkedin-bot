@@ -6,6 +6,7 @@ import StatusBadge from '../components/StatusBadge';
 import { bulkImportProspects, getNeedsPersonalization, updateProspect } from '../services/api';
 
 const EDIT_FIELDS = [
+  ['inmail_subject', 'InMail Subject'],
   ['inmail_message', 'InMail Message'],
   ['initial_message', 'Initial Message'],
   ['followup_1', 'Follow-up 1'],
@@ -57,7 +58,8 @@ export default function NeedsPersonalization() {
       toast.error('Initial Message is required before marking Ready to Send');
       return;
     }
-    patch.status = 'Ready to Send';
+    patch.status = 'Ready To Send';
+    patch.ready_to_send = true;
     setSaving(s => ({ ...s, [p.id]: true }));
     try {
       await updateProspect(p.id, patch);

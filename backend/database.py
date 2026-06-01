@@ -493,6 +493,28 @@ def db_get_ready_for_message_queue(limit: int = 500, offset: int = 0) -> tuple[l
     return rows, result.count or len(rows)
 
 
+def db_get_inmail_ready_queue(limit: int = 500, offset: int = 0) -> tuple[list[dict], int]:
+    result = (
+        supabase.table("prospects")
+        .select("*", count="exact")
+        .eq("status", "inmail_available")
+        .range(offset, offset + limit - 1)
+        .execute()
+    )
+    return result.data or [], result.count or 0
+
+
+def db_get_message_ready_queue(limit: int = 500, offset: int = 0) -> tuple[list[dict], int]:
+    result = (
+        supabase.table("prospects")
+        .select("*", count="exact")
+        .eq("status", "message_ready")
+        .range(offset, offset + limit - 1)
+        .execute()
+    )
+    return result.data or [], result.count or 0
+
+
 # ── Activity Log ──────────────────────────────────────────────────────────────
 
 def db_log_activity(
@@ -1697,6 +1719,68 @@ def db_apply_completed_job_result(job: dict, result: dict) -> None:
             profile_key=job.get("profile_key"),
             campaign_id=job.get("campaign_id"),
         )
+    elif task_type == "check_messageability" and status == "inmail_available":
+        db_update_prospect(prospect_id, {
+            "status": "inmail_available",
+            "messageability_status": "inmail_available",
+            "inmail_status": "available",
+            "personalization_status": "needs_inmail_copy",
+            "ready_to_send": False,
+            "last_messageability_checked_at": _utc_now(),
+            "next_steps": "Review InMail subject/body and mark Ready To Send",
+            "last_action_at": _utc_now(),
+        })
+        db_log_activity(prospect_id, "check_messageability", "inmail_available", "Moved to InMail Ready queue")
+    elif task_type == "check_messageability" and status in ("normal_message_available", "already_connected", "connection_accepted", "ready_for_message"):
+        db_mark_prospect_connected(
+            prospect_id,
+            f"Messageability check returned {status}",
+            profile_key=job.get("profile_key"),
+            campaign_id=job.get("campaign_id"),
+        )
+        db_update_prospect(prospect_id, {
+            "status": "message_ready",
+            "messageability_status": "normal_message_available",
+            "personalization_status": "needs_message_copy",
+            "ready_to_send": False,
+            "last_messageability_checked_at": _utc_now(),
+            "next_steps": "Review message and mark Ready To Send",
+            "last_action_at": _utc_now(),
+        })
+        db_log_activity(prospect_id, "check_messageability", status, "Moved to Message Ready queue")
+    elif task_type == "check_messageability" and status == "invitation_sent":
+        db_update_prospect(prospect_id, {
+            "status": "waiting_connection_acceptance",
+            "messageability_status": "not_messageable",
+            "connection_sent_date": today,
+            "invitation_sent_at": _utc_now(),
+            "connection_status": "invitation_sent",
+            "next_steps": "Wait for connection acceptance",
+            "last_action_at": _utc_now(),
+        })
+        db_mark_invitation_sent(prospect or {"id": prospect_id}, job.get("profile_key"), job.get("campaign_id"))
+        db_log_activity(prospect_id, "check_messageability", "invitation_sent", "No message/InMail path; invitation fallback sent")
+    elif task_type == "send_prepared_inmail" and status == "inmail_sent":
+        db_update_prospect(prospect_id, {
+            "status": "Sent",
+            "inmail_status": "sent",
+            "inmail_sent_at": _utc_now(),
+            "ready_to_send": False,
+            "personalization_status": "sent",
+            "last_action_at": _utc_now(),
+            "next_steps": "Follow-up scheduling pending campaign delay",
+        })
+        db_log_activity(prospect_id, "send_inmail", "sent", "Prepared InMail sent")
+    elif task_type == "send_prepared_message" and status == "message_sent":
+        db_update_prospect(prospect_id, {
+            "status": "Sent",
+            "message_sent_date": today,
+            "ready_to_send": False,
+            "personalization_status": "sent",
+            "last_action_at": _utc_now(),
+            "next_steps": "Follow-up scheduling pending campaign delay",
+        })
+        db_log_activity(prospect_id, "send_message", "prepared_sent", "Prepared message sent")
     elif task_type == "send_connection" and status == "sent":
         db_update_prospect(prospect_id, {
             "status": "Connection Request Sent",

@@ -363,6 +363,127 @@ async def send_message(page, linkedin_url: str, message: str,
         return {"status": "error", "message": err_str[:200]}
 
 
+async def detect_messageability(page, linkedin_url: str, profile_key: str = "profile_1") -> dict:
+    """Open a profile and classify the available communication path without sending copy."""
+    logger.info("Detecting messageability for %s", linkedin_url)
+    try:
+        response = await page.goto(linkedin_url, wait_until="domcontentloaded", timeout=30000)
+        await page.wait_for_timeout(3000)
+
+        err = await _check_url_errors(page, profile_key)
+        if err:
+            return err
+        if response and response.status == 404:
+            return {"status": "not_found", "message": "Profile not found (404)"}
+        err = await _check_content_errors(page)
+        if err:
+            return err
+
+        clicked = await _js_click_button_by_text(page, "Message")
+        if not clicked:
+            clicked = await page.evaluate("""
+                () => {
+                    const els = document.querySelectorAll('button, a');
+                    for (const el of els) {
+                        if (el.textContent.trim() === 'Message') {
+                            el.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+            """)
+        if not clicked:
+            return {"status": "not_messageable", "message": "No Message button found"}
+
+        await page.wait_for_timeout(2500)
+        state = await page.evaluate("""
+            () => {
+                const subject = document.querySelector(
+                    'input[name="subject"], input[placeholder*="Subject" i], input[aria-label*="subject" i]'
+                );
+                const body = document.querySelector(
+                    'textarea[name="message"], textarea, div[role="textbox"], div[contenteditable="true"], .msg-form__contenteditable'
+                );
+                if (subject && body) return 'inmail_available';
+                if (body) return 'normal_message_available';
+                return 'not_messageable';
+            }
+        """)
+        return {"status": state, "message": f"Detected {state}"}
+    except Exception as e:
+        err_str = str(e)
+        if "Timeout" in err_str:
+            return {"status": "failed_with_reason", "message": "Timeout detecting messageability"}
+        if "net::ERR" in err_str:
+            return {"status": "failed_with_reason", "message": "Network error detecting messageability"}
+        return {"status": "failed_with_reason", "message": err_str[:200]}
+
+
+async def send_inmail(page, linkedin_url: str, subject: str, message: str,
+                      profile_key: str = "profile_1") -> dict:
+    """Send a user-prepared InMail. Does not generate or modify copy."""
+    logger.info("Sending prepared InMail to %s", linkedin_url)
+    try:
+        response = await page.goto(linkedin_url, wait_until="domcontentloaded", timeout=30000)
+        await page.wait_for_timeout(3000)
+        err = await _check_url_errors(page, profile_key)
+        if err:
+            return err
+        if response and response.status == 404:
+            return {"status": "not_found", "message": "Profile not found (404)"}
+
+        clicked = await _js_click_button_by_text(page, "Message")
+        if not clicked:
+            return {"status": "failed_with_reason", "message": "Message/InMail button not found"}
+        await page.wait_for_timeout(2500)
+
+        filled = await page.evaluate("""({ subject, message }) => {
+            const subjectInput = document.querySelector(
+                'input[name="subject"], input[placeholder*="Subject" i], input[aria-label*="subject" i]'
+            );
+            const bodyInput = document.querySelector(
+                'textarea[name="message"], textarea, div[role="textbox"], div[contenteditable="true"], .msg-form__contenteditable'
+            );
+            if (!subjectInput || !bodyInput) return false;
+            subjectInput.focus();
+            subjectInput.value = subject;
+            subjectInput.dispatchEvent(new Event('input', { bubbles: true }));
+            bodyInput.focus();
+            if ('value' in bodyInput) {
+                bodyInput.value = message;
+                bodyInput.dispatchEvent(new Event('input', { bubbles: true }));
+            } else {
+                bodyInput.textContent = message;
+                bodyInput.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: message }));
+            }
+            return true;
+        }""", {"subject": subject, "message": message})
+        if not filled:
+            return {"status": "failed_with_reason", "message": "InMail subject/body fields not found"}
+
+        await page.wait_for_timeout(1000)
+        sent = await page.evaluate("""
+            () => {
+                const buttons = document.querySelectorAll('button');
+                for (const btn of buttons) {
+                    const txt = btn.textContent.trim();
+                    if ((txt === 'Send' || txt === 'Send message') && !btn.disabled) {
+                        btn.click();
+                        return true;
+                    }
+                }
+                return false;
+            }
+        """)
+        if not sent:
+            return {"status": "failed_with_reason", "message": "InMail Send button not found"}
+        await page.wait_for_timeout(2000)
+        return {"status": "inmail_sent", "message": "Prepared InMail sent"}
+    except Exception as e:
+        return {"status": "failed_with_reason", "message": str(e)[:200]}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ACTION 5: Check for replies
 # ─────────────────────────────────────────────────────────────────────────────

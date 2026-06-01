@@ -247,6 +247,28 @@ async def needs_personalization_root(limit: int = Query(500, ge=1, le=1000), off
         raise HTTPException(500, str(e))
 
 
+@app.get("/inmail-ready", tags=["Prospects"])
+async def inmail_ready_root(limit: int = Query(500, ge=1, le=1000), offset: int = Query(0, ge=0)):
+    """Prospects where LinkedIn InMail is available but user review is still required."""
+    try:
+        prospects, total = db.db_get_inmail_ready_queue(limit=limit, offset=offset)
+        return {"prospects": prospects, "total": total}
+    except Exception as e:
+        logger.error(f"inmail_ready: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.get("/message-ready", tags=["Prospects"])
+async def message_ready_root(limit: int = Query(500, ge=1, le=1000), offset: int = Query(0, ge=0)):
+    """Prospects where normal LinkedIn messaging is available but user review is still required."""
+    try:
+        prospects, total = db.db_get_message_ready_queue(limit=limit, offset=offset)
+        return {"prospects": prospects, "total": total}
+    except Exception as e:
+        logger.error(f"message_ready: {e}")
+        raise HTTPException(500, str(e))
+
+
 @app.get("/ready-for-message", tags=["Prospects"])
 async def ready_for_message_queue(limit: int = Query(500, ge=1, le=1000), offset: int = Query(0, ge=0)):
     """Global queue of connected prospects ready for first message but not messaged yet."""
@@ -739,17 +761,16 @@ async def update_prospect(prospect_id: str, body: ProspectUpdate):
         if not updated:
             raise HTTPException(404, "Prospect not found or no changes")
         if (
-            (data.get("initial_message") or "").strip()
-            and updated.get("status") in ("Needs Personalization", "Connection Accepted")
+            ((data.get("initial_message") or "").strip() or (data.get("inmail_message") or "").strip())
+            and (data.get("ready_to_send") is True or data.get("status") in ("Ready to Send", "Ready To Send"))
             and not updated.get("message_sent_date")
         ):
             updated = db.db_update_prospect(prospect_id, {
-                "status": "Ready to Send",
-                "next_steps": "Ready for initial message",
+                "status": "Ready To Send",
+                "ready_to_send": True,
+                "personalization_status": "approved",
+                "next_steps": "Approved for agent send",
             }) or updated
-            queued = db.db_advance_connected_campaign_enrollments(prospect_id)
-            if not queued:
-                db.db_create_initial_message_job_if_ready(updated, reason="message_personalized")
         return updated
     except HTTPException:
         raise
@@ -1131,12 +1152,13 @@ async def run_connections() -> SchedulerResponse:
         pending = db.db_get_pending_prospects()
         queued = 0
         for prospect in pending:
-            if _queue_job_for_prospect("send_connections", prospect, {
+            if _queue_job_for_prospect("check_messageability", prospect, {
                 "linkedin_url": prospect.get("linkedin_url", ""),
                 "note": (prospect.get("inmail_message") or "")[:300],
+                "fallback": "invitation",
             }):
                 queued += 1
-        return SchedulerResponse(queued=queued, agents_available=manager.connected_count(), message=f"Created {queued} pending connection job(s)")
+        return SchedulerResponse(queued=queued, agents_available=manager.connected_count(), message=f"Created {queued} messageability check job(s)")
     except Exception as e:
         logger.error(f"run_connections: {e}")
         raise HTTPException(500, str(e))
@@ -1145,21 +1167,29 @@ async def run_connections() -> SchedulerResponse:
 @app.post("/scheduler/run-messages", tags=["Scheduler"])
 async def run_messages() -> SchedulerResponse:
     try:
-        ready = db.db_get_prospects_by_status("Ready to Send")
+        ready = (db.db_get_prospects_by_status("Ready to Send") or []) + (db.db_get_prospects_by_status("Ready To Send") or [])
         queued = 0
         for prospect in ready:
-            if not (prospect.get("initial_message") or "").strip():
+            has_inmail = (prospect.get("inmail_subject") or "").strip() and (prospect.get("inmail_message") or "").strip()
+            initial = (prospect.get("initial_message") or "").strip()
+            if not has_inmail and not initial:
                 continue
-            job = db.db_queue_ready_prospect_initial_message(prospect, reason="scheduler_run_messages")
-            if not job:
-                job = _queue_job_for_prospect("send_messages", prospect, {
+            if has_inmail and (prospect.get("messageability_status") == "inmail_available" or prospect.get("inmail_status") == "available"):
+                job = _queue_job_for_prospect("send_prepared_inmail", prospect, {
                     "linkedin_url": prospect.get("linkedin_url", ""),
-                    "message": prospect.get("initial_message", ""),
+                    "subject": prospect.get("inmail_subject", ""),
+                    "message": prospect.get("inmail_message", ""),
+                    "message_type": "inmail",
+                })
+            else:
+                job = _queue_job_for_prospect("send_prepared_message", prospect, {
+                    "linkedin_url": prospect.get("linkedin_url", ""),
+                    "message": initial,
                     "message_type": "initial",
                 })
             if job:
                 queued += 1
-        return SchedulerResponse(queued=queued, agents_available=manager.connected_count(), message=f"Created {queued} pending initial message job(s)")
+        return SchedulerResponse(queued=queued, agents_available=manager.connected_count(), message=f"Created {queued} prepared send job(s)")
     except Exception as e:
         logger.error(f"run_messages: {e}")
         raise HTTPException(500, str(e))

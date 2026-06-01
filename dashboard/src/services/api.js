@@ -50,6 +50,8 @@ export const getProspect       = (id)       => api.get(`/prospects/${id}`);
 export const updateProspect    = (id, data) => api.put(`/prospects/${id}`, data);
 export const deleteProspect    = (id)       => api.delete(`/prospects/${id}`);
 export const getNeedsPersonalization = (params) => api.get('/needs-personalization', { params });
+export const getInmailReady = (params) => api.get('/inmail-ready', { params });
+export const getMessageReady = (params) => api.get('/message-ready', { params });
 export const getReadyForMessage = (params) => api.get('/ready-for-message', { params });
 export const bulkImportProspects = (file, campaignId, mode = 'create_or_update', listId = null) => {
   const fd = new FormData();

@@ -23,7 +23,8 @@ import {
 
 const STATUSES = [
   '', 'Connection Request Sent', 'Connection Accepted', 'Needs Personalization',
-  'Ready to Send', 'Initial Message Sent', 'Following Up', 'No Response', 'Replied',
+  'inmail_available', 'message_ready', 'waiting_connection_acceptance', 'Ready To Send',
+  'Ready to Send', 'Sent', 'Follow-Up Ready', 'Initial Message Sent', 'Following Up', 'No Response', 'Replied',
 ];
 
 const blankProspect = {

@@ -28,7 +28,9 @@ from config import WS_BASE_URL
 from agent_config import LOG_DIR, is_paused, load_config, read_state, save_config, write_state
 from linkedin_actions import (
     check_for_reply,
+    detect_messageability,
     detect_accepted_connections,
+    send_inmail,
     send_connection_request,
     send_message,
 )
@@ -247,6 +249,34 @@ class LinkedFlowAgent:
                 "message": payload.get("message", ""),
                 "message_type": payload.get("message_type", "initial"),
             }
+        if job_type == "check_messageability":
+            return {
+                "type": "check_messageability",
+                "job_id": job["id"],
+                "prospect_id": job.get("prospect_id"),
+                "linkedin_url": payload.get("linkedin_url", ""),
+                "note": payload.get("note", ""),
+                "fallback": payload.get("fallback", "invitation"),
+            }
+        if job_type == "send_prepared_message":
+            return {
+                "type": "send_prepared_message",
+                "job_id": job["id"],
+                "prospect_id": job.get("prospect_id"),
+                "linkedin_url": payload.get("linkedin_url", ""),
+                "message": payload.get("message", ""),
+                "message_type": payload.get("message_type", "initial"),
+            }
+        if job_type == "send_prepared_inmail":
+            return {
+                "type": "send_prepared_inmail",
+                "job_id": job["id"],
+                "prospect_id": job.get("prospect_id"),
+                "linkedin_url": payload.get("linkedin_url", ""),
+                "subject": payload.get("subject", ""),
+                "message": payload.get("message", ""),
+                "message_type": "inmail",
+            }
         if job_type == "check_acceptances":
             return {"type": "check_acceptances", "job_id": job["id"], **payload}
         if job_type == "detect_replies":
@@ -277,7 +307,7 @@ class LinkedFlowAgent:
                     "message_type": task.get("message_type"),
                     "message": self.last_task_message,
                 }
-                if status in ("error", "session_expired", "restricted", "limit_reached"):
+                if status in ("error", "failed_with_reason", "session_expired", "restricted", "limit_reached"):
                     await self.api("POST", f"/jobs/{job_id}/fail", {
                         "error_message": self.last_task_message or status,
                         "result": result,
@@ -355,6 +385,43 @@ class LinkedFlowAgent:
         await self.safe_send_heartbeat(ws, session_active=status not in ("session_expired", "restricted"))
         return status
 
+    async def handle_check_messageability(self, ws, task):
+        url = task.get("linkedin_url", "")
+        prospect_id = task.get("prospect_id")
+        if not prospect_id or not url:
+            await self.send_result(ws, task, "failed_with_reason", "Missing prospect_id or linkedin_url")
+            return "failed_with_reason"
+        logger.info("Task: check_messageability %s", url)
+        result = await detect_messageability(self.page, url, self.profile_key)
+        status = result.get("status", "failed_with_reason")
+        message = result.get("message", "")
+        if status == "not_messageable" and task.get("fallback", "invitation") == "invitation":
+            fallback = await send_connection_request(self.page, url, task.get("note", ""), self.profile_key)
+            status = "invitation_sent" if fallback.get("status") == "sent" else fallback.get("status", "failed_with_reason")
+            message = fallback.get("message", message)
+            if status == "invitation_sent":
+                self.daily_sent += 1
+        self.last_task_message = message
+        await self.safe_send_result(ws, task, status, message)
+        await self.safe_send_heartbeat(ws, session_active=status not in ("session_expired", "restricted"))
+        return status
+
+    async def handle_send_prepared_inmail(self, ws, task):
+        url = task.get("linkedin_url", "")
+        subject = task.get("subject", "")
+        message_text = task.get("message", "")
+        prospect_id = task.get("prospect_id")
+        if not prospect_id or not url or not subject or not message_text:
+            await self.send_result(ws, task, "failed_with_reason", "Missing prospect_id, linkedin_url, subject, or message")
+            return "failed_with_reason"
+        result = await send_inmail(self.page, url, subject, message_text, self.profile_key)
+        status = result.get("status", "failed_with_reason")
+        message = result.get("message", "")
+        self.last_task_message = message
+        await self.safe_send_result(ws, task, status, message)
+        await self.safe_send_heartbeat(ws, session_active=status not in ("session_expired", "restricted"))
+        return status
+
     async def handle_check_acceptances(self, ws, task):
         logger.info("Task: check_acceptances")
         urls = await detect_accepted_connections(self.page, self.profile_key)
@@ -396,6 +463,12 @@ class LinkedFlowAgent:
                     return await self.handle_send_connection(ws, task)
                 elif task_type == "send_message":
                     return await self.handle_send_message(ws, task)
+                elif task_type == "check_messageability":
+                    return await self.handle_check_messageability(ws, task)
+                elif task_type == "send_prepared_message":
+                    return await self.handle_send_message(ws, task)
+                elif task_type == "send_prepared_inmail":
+                    return await self.handle_send_prepared_inmail(ws, task)
                 elif task_type == "check_acceptances":
                     return await self.handle_check_acceptances(ws, task)
                 elif task_type == "check_replies":

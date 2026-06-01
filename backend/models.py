@@ -66,6 +66,11 @@ class ProspectCreate(BaseModel):
     status: str = ""
     inmail_subject: Optional[str] = None
     inmail_message: Optional[str] = None
+    messageability_status: Optional[str] = None
+    inmail_status: Optional[str] = None
+    inmail_error: Optional[str] = None
+    ready_to_send: Optional[bool] = False
+    personalization_status: Optional[str] = None
     initial_message: Optional[str] = None
     followup_1: Optional[str] = None
     followup_2: Optional[str] = None
@@ -98,6 +103,14 @@ class ProspectUpdate(BaseModel):
     status: Optional[str] = None
     inmail_subject: Optional[str] = None
     inmail_message: Optional[str] = None
+    messageability_status: Optional[str] = None
+    inmail_status: Optional[str] = None
+    inmail_error: Optional[str] = None
+    last_messageability_checked_at: Optional[str] = None
+    ready_to_send: Optional[bool] = None
+    personalization_status: Optional[str] = None
+    followup_ready_at: Optional[str] = None
+    invitation_sent_at: Optional[str] = None
     initial_message: Optional[str] = None
     followup_1: Optional[str] = None
     followup_2: Optional[str] = None
