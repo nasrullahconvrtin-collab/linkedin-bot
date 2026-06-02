@@ -59,6 +59,7 @@ installer_dist/
 *.exe
 *.msi
 *.zip
+!dashboard/public/downloads/*.zip
 
 # Debug screenshots generated during LinkedIn automation testing
 after_connect.png

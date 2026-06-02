@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Globe, Loader2, Check, Shield, Clock, Bell, Save, Copy,
   ToggleLeft, ToggleRight, Play, Activity,
-  Moon, Sun, Palette, KeyRound, Puzzle,
+  Moon, Sun, Palette, KeyRound, Puzzle, Download,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
@@ -398,10 +398,22 @@ export default function Settings() {
               </div>
             )}
 
+            <div className="flex items-center gap-3">
+              <a
+                href="/downloads/LinkedFlow-Chrome-Extension.zip"
+                download="LinkedFlow-Chrome-Extension.zip"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#111111] border border-[#2a2a2a] hover:border-[#6366f1]/50 text-[#9ca3af] hover:text-white text-sm font-medium transition-all"
+              >
+                <Download size={15} />
+                Download Chrome Extension ZIP
+              </a>
+            </div>
+
             <div className="rounded-xl border border-[#2a2a2a] bg-[#111111] p-4 text-sm text-[#9ca3af] leading-6">
               <p className="text-white font-medium mb-2">Setup steps</p>
               <ol className="list-decimal ml-5 space-y-1">
-                <li>Load the repository folder <span className="font-mono text-[#c7d2fe]">chrome-extension</span> as an unpacked Chrome extension.</li>
+                <li>Download the ZIP above, unzip it to a folder on your computer.</li>
+                <li>Open Chrome → <span className="font-mono text-[#c7d2fe]">chrome://extensions</span> → enable <span className="font-mono text-[#c7d2fe]">Developer mode</span> → click <span className="font-mono text-[#c7d2fe]">Load unpacked</span> → select the unzipped folder.</li>
                 <li>Generate a pairing token here and paste it into the extension popup.</li>
                 <li>Set the LinkedIn profile run mode to <span className="text-white">Chrome Extension</span>.</li>
                 <li>Keep LinkedIn open/logged in. The extension will heartbeat and pull pending jobs.</li>
