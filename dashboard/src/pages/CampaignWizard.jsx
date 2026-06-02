@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import MessageEditorModal from '../components/MessageEditorModal';
+import SequenceBuilder from '../components/SequenceBuilder';
 import VariableMappingPanel, { autoVariableMappings } from '../components/VariableMappingPanel';
 import {
   addProspectsToCampaign,
@@ -157,6 +158,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
   const [importMode, setImportMode] = useState('create_or_update');
   const [messageOverrides, setMessageOverrides] = useState({});
   const [delayOverrides, setDelayOverrides] = useState({});
+  const [customSteps, setCustomSteps] = useState(null); // null = use template steps
   const [messageTemplates, setMessageTemplates] = useState([]);
   const [editorStep, setEditorStep] = useState(null);
   const [variableMappings, setVariableMappings] = useState({});
@@ -225,7 +227,10 @@ export default function CampaignWizard({ onClose, onCreated }) {
   const selectTemplate = async (template) => {
     setSelected(template);
     setCampaignName(template.name);
-    if ((template.steps || []).length) return; // already has steps
+    setCustomSteps(null); // reset any manual edits
+    setMessageOverrides({});
+    setDelayOverrides({});
+    if ((template.steps || []).length) return; // already has steps from list
     setLoadingTemplate(true);
     try {
       const full = await getCampaignTemplate(template.id);
@@ -349,6 +354,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
           delays: delayOverrides,
           variables: availableMessageVariables,
           variable_mappings: variableMappings,
+          custom_steps: customSteps || undefined,
         },
       });
 
@@ -562,92 +568,53 @@ export default function CampaignWizard({ onClose, onCreated }) {
                 )}
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-white font-semibold">Messages and Delays</h3>
-                    <p className="text-[#6b7280] text-xs mt-1">Start from scratch or apply a saved sequence template for this campaign type.</p>
+                    <h3 className="text-white font-semibold">Sequence Builder</h3>
+                    <p className="text-[#6b7280] text-xs mt-1">
+                      Edit messages and delays, reorder steps, or add new steps.
+                      {customSteps && <span className="ml-1 text-[#6366f1]">Custom sequence active.</span>}
+                    </p>
                   </div>
-                  <select
-                    onChange={e => {
-                      if (e.target.value) applySequenceTemplate(e.target.value);
-                      e.target.value = '';
-                    }}
-                    className="bg-[#111111] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm"
-                  >
-                    <option value="">Apply saved sequence template</option>
-                    {messageTemplates
-                      .filter(t => (t.type || t.message_type) === 'message_sequence' || (t.sequence || []).length)
-                      .map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  </select>
+                  <div className="flex items-center gap-2">
+                    {customSteps && (
+                      <button
+                        type="button"
+                        onClick={() => { setCustomSteps(null); setMessageOverrides({}); setDelayOverrides({}); }}
+                        className="px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-xs"
+                      >
+                        Reset to template
+                      </button>
+                    )}
+                    <select
+                      onChange={e => {
+                        if (e.target.value) applySequenceTemplate(e.target.value);
+                        e.target.value = '';
+                      }}
+                      className="bg-[#111111] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm"
+                    >
+                      <option value="">Apply saved message template</option>
+                      {messageTemplates
+                        .filter(t => (t.type || t.message_type) === 'message_sequence' || (t.sequence || []).length)
+                        .map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </div>
                 </div>
-                {steps.map(s => {
-                  const isMessage = s.action_type === 'message' || s.action_type === 'follow-up message';
-                  const isWait = s.action_type === 'wait';
-                  return (
-                    <div key={s.id} className="rounded-xl bg-[#111111] border border-[#2a2a2a] p-4">
-                      <div className="flex items-center justify-between mb-3">
-                        <p className="text-white text-sm font-medium">{s.label}</p>
-                        <span className="text-xs text-[#6b7280]">Step {s.step_order}</span>
-                      </div>
-                      {isMessage && (
-                        <div className="space-y-2">
-                          <textarea
-                            rows={4}
-                            value={messageOverrides[String(s.step_order)] ?? s.config?.message ?? ''}
-                            onChange={e => setMessageOverrides(m => ({ ...m, [String(s.step_order)]: e.target.value }))}
-                            placeholder={`Use variables like {{first_name}} or {{recent_post}}. Leave blank to use prospect fields.`}
-                            className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm placeholder-[#4b5563] focus:outline-none focus:border-[#6366f1]"
-                          />
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setEditorStep(s)}
-                              className="px-3 py-2 rounded-lg bg-[#6366f1] text-white text-xs font-medium"
-                            >
-                              Open rich editor
-                            </button>
-                            <select
-                              onChange={e => {
-                                const template = messageTemplates.find(t => t.id === e.target.value);
-                                if (template) {
-                                  setMessageOverrides(m => ({ ...m, [String(s.step_order)]: template.body || '' }));
-                                  toast.success('Template loaded into this step');
-                                }
-                                e.target.value = '';
-                              }}
-                              className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-2 py-2 text-white text-xs"
-                            >
-                              <option value="">Load saved template</option>
-                              {messageTemplates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                            </select>
-                          </div>
-                        </div>
-                      )}
-                      {isWait && (
-                        <div className="space-y-2">
-                          {s.config?.until === 'connected' ? (
-                            <div className="rounded-lg border border-[#2a2a2a] bg-[#0a0a0a] px-3 py-2 text-sm text-[#9ca3af]">
-                              Acceptance based wait
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-3">
-                              <input
-                                type="number"
-                                min="0"
-                                value={delayOverrides[String(s.step_order)]?.days ?? s.config?.days ?? 0}
-                                onChange={e => setDelayOverrides(d => ({
-                                  ...d,
-                                  [String(s.step_order)]: { days: Number(e.target.value), working_days: 0 },
-                                }))}
-                                className="w-28 bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm"
-                              />
-                              <span className="text-sm text-[#9ca3af]">day(s)</span>
-                            </div>
-                          )}
-                          <p className="text-xs text-[#6b7280]">{waitStepHelp(s)}</p>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+
+                <SequenceBuilder
+                  steps={customSteps ?? steps}
+                  messageOverrides={messageOverrides}
+                  delayOverrides={delayOverrides}
+                  onChangeMessage={(key, val) => setMessageOverrides(m => ({ ...m, [key]: val }))}
+                  onChangeDelay={(key, val) => setDelayOverrides(d => ({ ...d, [key]: val }))}
+                  onChangeSteps={(newSteps) => setCustomSteps(newSteps)}
+                  messageTemplates={messageTemplates}
+                  availableVariables={availableMessageVariables}
+                />
+
+                {(customSteps ?? steps).length === 0 && !loadingTemplate && (
+                  <p className="text-xs text-[#6b7280] text-center pt-2">
+                    No steps loaded. Go back to step 1 and select a template, or add steps manually above.
+                  </p>
+                )}
               </div>
             )}
 
