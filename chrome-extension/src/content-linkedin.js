@@ -117,6 +117,27 @@ async function sendConnection(note = '') {
   return { status: 'error', message: 'Send button not found in connection dialog' };
 }
 
+function fillContentEditable(box, text) {
+  // Reliable cross-Chromium text insertion into contenteditable divs.
+  // execCommand('insertText') is deprecated and broken in newer Chromium builds.
+  box.focus();
+  // Clear existing content first
+  const sel = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(box);
+  sel.removeAllRanges();
+  sel.addRange(range);
+  // Insert via DataTransfer (works in all MV3 contexts)
+  const dt = new DataTransfer();
+  dt.setData('text/plain', text);
+  box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  // Fallback: if paste event didn't populate, set innerText directly
+  if (!box.innerText.trim()) {
+    box.innerText = text;
+    box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+  }
+}
+
 async function sendPreparedMessage(message) {
   await ensureTop();
   if (!message) return { status: 'failed_with_reason', message: 'Message text is empty' };
@@ -127,9 +148,7 @@ async function sendPreparedMessage(message) {
   await sleep(1500);
   const box = document.querySelector('div[role="textbox"], [contenteditable="true"]');
   if (!box) return { status: 'failed_with_reason', message: 'Message input not found' };
-  box.focus();
-  document.execCommand('insertText', false, message);
-  box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: message }));
+  fillContentEditable(box, message);
   await sleep(800);
   const send = Array.from(document.querySelectorAll('button')).find(btn => {
     const txt = textOf(btn);
@@ -152,8 +171,7 @@ async function sendPreparedInmail(subject, message) {
   if (!subjectInput || !body) return { status: 'failed_with_reason', message: 'InMail composer fields not found' };
   subjectInput.value = subject;
   subjectInput.dispatchEvent(new Event('input', { bubbles: true }));
-  body.focus();
-  document.execCommand('insertText', false, message);
+  fillContentEditable(body, message);
   await sleep(800);
   const send = Array.from(document.querySelectorAll('button')).find(btn => textOf(btn) === 'Send' || /send/i.test(btn.getAttribute('aria-label') || ''));
   if (!send) return { status: 'failed_with_reason', message: 'InMail send button not found' };

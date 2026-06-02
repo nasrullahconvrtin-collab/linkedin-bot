@@ -6,7 +6,13 @@ const EXT_VERSION = '0.1.0';
 chrome.runtime.onInstalled.addListener(async () => {
   const cfg = await getConfig();
   if (!cfg.extensionId) await saveConfig({ extensionId: extensionId() });
-  chrome.alarms.create('linkedflow_tick', { periodInMinutes: 0.25 });
+  // MV3 enforces a minimum alarm interval of 1 minute — 0.25 (15s) is silently throttled.
+  chrome.alarms.create('linkedflow_tick', { periodInMinutes: 1 });
+});
+
+// Re-create alarm on service worker startup in case it was cleared
+chrome.alarms.get('linkedflow_tick', (alarm) => {
+  if (!alarm) chrome.alarms.create('linkedflow_tick', { periodInMinutes: 1 });
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {

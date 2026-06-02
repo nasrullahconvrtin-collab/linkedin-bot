@@ -69,9 +69,16 @@ app = FastAPI(
     version="1.0.0",
 )
 
+_ALLOWED_ORIGINS = [o.strip() for o in os.getenv(
+    "ALLOWED_ORIGINS",
+    "https://linkedflow-dashboard.vercel.app,http://localhost:5173,http://localhost:3000",
+).split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # Credentials + wildcard "*" is rejected by browsers per the CORS spec.
+    # Use an explicit allowlist instead; add origins via the ALLOWED_ORIGINS env var.
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -191,7 +198,11 @@ def _profile_can_queue(profile_key: str) -> tuple[bool, str]:
         return True, ""
     if profile.get("enabled") is False:
         return False, "profile disabled"
-    if int(profile.get("daily_sent") or 0) >= 25:
+    # Respect per-profile daily limit stored in DB; fall back to env var then hardcoded 25.
+    db_limit = profile.get("daily_limit")
+    env_limit = int(os.getenv("DAILY_CONNECTION_LIMIT", "25"))
+    daily_limit = int(db_limit) if db_limit is not None else env_limit
+    if int(profile.get("daily_sent") or 0) >= daily_limit:
         return False, "daily limit reached"
     return True, ""
 
@@ -206,7 +217,15 @@ def _campaign_is_active(campaign_id: str | None) -> bool:
 def _inside_sending_window() -> bool:
     start = os.getenv("SEND_WINDOW_START", "08:00")
     end = os.getenv("SEND_WINDOW_END", "20:00")
-    now = datetime.now().strftime("%H:%M")
+    # Railway runs in UTC. Use SEND_WINDOW_TZ env var (e.g. "Asia/Karachi") to shift
+    # the window to the user's local timezone so jobs don't fire at wrong hours.
+    tz_name = os.getenv("SEND_WINDOW_TZ", "UTC")
+    try:
+        import zoneinfo
+        tz = zoneinfo.ZoneInfo(tz_name)
+        now = datetime.now(tz).strftime("%H:%M")
+    except Exception:
+        now = datetime.utcnow().strftime("%H:%M")
     return start <= now <= end if start <= end else (now >= start or now <= end)
 
 
@@ -1470,6 +1489,15 @@ async def health():
         "status":           "ok",
         "executors_online": _online_executor_count(),
     }
+
+
+@app.get("/ping", tags=["Health"])
+async def ping():
+    """Lightweight keep-alive endpoint.
+    The Chrome Extension heartbeats every 60 s, but if no extension is paired
+    Railway will still sleep the service on the free tier.  Point an external
+    uptime monitor (e.g. UptimeRobot free tier) at /ping to keep it awake."""
+    return {"ok": True}
 
 
 @app.get("/", tags=["Health"])
