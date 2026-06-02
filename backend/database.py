@@ -151,6 +151,8 @@ def db_delete_campaign(campaign_id: str):
     # prospects, because prospects can belong to other lists/campaigns.
     supabase.table("jobs").delete().eq("campaign_id", campaign_id).in_("status", ["pending", "retrying", "failed", "cancelled"]).execute()
     supabase.table("campaign_enrollments").delete().eq("campaign_id", campaign_id).execute()
+    # Null out prospects.campaign_id to satisfy the FK constraint before deleting the campaign.
+    supabase.table("prospects").update({"campaign_id": None}).eq("campaign_id", campaign_id).execute()
     supabase.table("campaigns").delete().eq("id", campaign_id).execute()
 
 

@@ -12,6 +12,7 @@ import {
   createProspect,
   createCampaignFromTemplate,
   getCampaignTemplates,
+  getCampaignTemplate,
   getCampaignVariables,
   getProfiles,
   getProspectListMembers,
@@ -162,6 +163,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
   const [launchNow, setLaunchNow] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadingTemplate, setLoadingTemplate] = useState(false);
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -217,6 +219,23 @@ export default function CampaignWizard({ onClose, onCreated }) {
       .reduce((sum, l) => sum + Number(l.prospect_count || 0), 0);
     return selectedIds.length + listCount + (csvMeta?.count || 0);
   }, [csvMeta, lists, selectedIds.length, selectedListIds]);
+
+  // Fetch full template (with steps) when user selects one.
+  // The list endpoint returns templates without steps; the single endpoint includes them.
+  const selectTemplate = async (template) => {
+    setSelected(template);
+    setCampaignName(template.name);
+    if ((template.steps || []).length) return; // already has steps
+    setLoadingTemplate(true);
+    try {
+      const full = await getCampaignTemplate(template.id);
+      setSelected(full);
+    } catch {
+      // fall back to whatever the list gave us
+    } finally {
+      setLoadingTemplate(false);
+    }
+  };
 
   const handleCSV = (file) => {
     if (!file) return;
@@ -397,10 +416,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
                     key={template.id}
                     template={template}
                     selected={selected?.id === template.id}
-                    onSelect={(template) => {
-                      setSelected(template);
-                      setCampaignName(template.name);
-                    }}
+                    onSelect={selectTemplate}
                   />
                 ))}
               </div>
@@ -539,6 +555,11 @@ export default function CampaignWizard({ onClose, onCreated }) {
 
             {step === 2 && (
               <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5 space-y-4">
+                {loadingTemplate && (
+                  <div className="flex items-center gap-2 text-[#6b7280] text-sm py-2">
+                    <Loader2 size={15} className="animate-spin" /> Loading sequence steps…
+                  </div>
+                )}
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                   <div>
                     <h3 className="text-white font-semibold">Messages and Delays</h3>

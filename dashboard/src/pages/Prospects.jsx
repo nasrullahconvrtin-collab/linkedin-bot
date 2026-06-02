@@ -85,6 +85,12 @@ export default function Prospects() {
     getCampaigns().then(setCampaigns).catch(() => {});
   }, []);
 
+  // Prevent background scroll while the side panel is open
+  useEffect(() => {
+    document.body.style.overflow = panel ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
+  }, [panel]);
+
   useEffect(() => {
     const t = setTimeout(loadRows, 250);
     return () => clearTimeout(t);
@@ -401,7 +407,7 @@ export default function Prospects() {
 
       {panel && (
         <div className="fixed inset-0 z-50 flex">
-          <div className="flex-1 bg-black/50 backdrop-blur-sm" onClick={() => setPanel(null)} />
+          <div className="flex-1 bg-black/60" onClick={() => setPanel(null)} />
           <div className="w-full max-w-2xl bg-[#111111] border-l border-[#2a2a2a] h-full overflow-y-auto shadow-2xl">
             <div className="sticky top-0 bg-[#111111] border-b border-[#2a2a2a] px-6 py-4 flex items-center justify-between">
               <h2 className="text-white font-semibold">{panel.mode === 'new' ? 'Add Prospect' : 'Edit Prospect'}</h2>
