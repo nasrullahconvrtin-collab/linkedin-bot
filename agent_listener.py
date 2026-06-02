@@ -19,13 +19,23 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from logging.handlers import TimedRotatingFileHandler
-from pathlib import Path
 
 import websockets
 from playwright.async_api import async_playwright
 
 from config import WS_BASE_URL
-from agent_config import LOG_DIR, is_paused, load_config, read_state, save_config, write_state
+from agent_config import (
+    LOG_DIR,
+    add_local_profile,
+    is_paused,
+    load_config,
+    profile_user_data_dir,
+    read_state,
+    remove_local_profile,
+    save_config,
+    set_active_profile,
+    write_state,
+)
 from linkedin_actions import (
     check_for_reply,
     detect_messageability,
@@ -66,7 +76,7 @@ class LinkedFlowAgent:
     def __init__(self, profile_key: str | None = None):
         self.config = load_config()
         if profile_key:
-            self.config["profile_key"] = profile_key
+            self.config = set_active_profile(profile_key, self.config)
         profile_key = self.config.get("profile_key", "profile_1")
         self.profile_key = profile_key
         self.backend_url = self.config.get("backend_url", API_BASE_URL).rstrip("/")
@@ -83,7 +93,7 @@ class LinkedFlowAgent:
         self.profile_display_name = ""
 
     async def start_browser(self, playwright):
-        user_data_dir = Path(self.config.get("user_data_dir"))
+        user_data_dir = profile_user_data_dir(self.profile_key)
         user_data_dir.mkdir(parents=True, exist_ok=True)
         args = ["--start-maximized"]
         if self.config.get("minimized_on_launch", True):
@@ -211,6 +221,8 @@ class LinkedFlowAgent:
 
     async def sync_profile_settings(self):
         """Pull dashboard profile settings so enable/disable changes affect the local agent."""
+        if await self.sync_profile_commands():
+            return
         try:
             profile = await self.api("GET", f"/profiles/{self.profile_key}")
         except Exception as exc:
@@ -224,10 +236,48 @@ class LinkedFlowAgent:
             profile_enabled=self.profile_enabled,
             profile_display_name=self.profile_display_name,
         )
-        local = load_config()
-        local["profile_key"] = self.profile_key
+        local = add_local_profile(self.profile_key, load_config())
+        local = set_active_profile(self.profile_key, local)
         local["display_name"] = self.profile_display_name
         save_config(local)
+
+    async def sync_profile_commands(self) -> bool:
+        """Handle backend commands for local-only actions such as clearing a deleted profile session."""
+        try:
+            data = await self.api("GET", f"/profiles/{self.profile_key}/commands")
+        except Exception:
+            return False
+
+        handled_delete = False
+        for command in data.get("commands", []):
+            command_id = command.get("id")
+            name = command.get("command")
+            payload = command.get("payload") or {}
+            if name == "profile_deleted":
+                delete_local = bool(payload.get("delete_local_session"))
+                logger.info(
+                    "Profile %s was deleted in dashboard; delete_local_session=%s",
+                    self.profile_key,
+                    delete_local,
+                )
+                await self.close_browser()
+                remove_local_profile(self.profile_key, delete_browser_data=delete_local)
+                write_state(
+                    state="Profile Deleted",
+                    connected=False,
+                    profile_key=self.profile_key,
+                    local_session_deleted=delete_local,
+                    browser_profile=str(profile_user_data_dir(self.profile_key)),
+                )
+                self.profile_enabled = False
+                handled_delete = True
+                self.stop_event.set()
+            if command_id:
+                try:
+                    await self.api("POST", f"/profiles/{self.profile_key}/commands/{command_id}/complete")
+                except Exception as exc:
+                    logger.warning("Could not mark profile command complete: %s", exc)
+        return handled_delete
 
     def task_from_job(self, job):
         payload = job.get("payload") or {}

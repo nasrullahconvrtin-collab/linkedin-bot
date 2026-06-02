@@ -14,10 +14,13 @@ from agent_config import (
     CONFIG_FILE,
     LOG_DIR,
     PROFILE_DIR,
+    clear_browser_profile,
     is_paused,
     load_config,
+    profile_user_data_dir,
     read_state,
     save_config,
+    set_active_profile,
     set_paused,
 )
 
@@ -292,7 +295,7 @@ class ControlPanel:
         backend_profiles = {p.get("profile_key"): p for p in self.profiles}
         for profile_key in sorted(configured | set(backend_profiles)):
             p = backend_profiles.get(profile_key, {})
-            folder = str(PROFILE_DIR / profile_key)
+            folder = str(profile_user_data_dir(profile_key))
             current_job = next((j.get("job_type") for j in self.jobs if j.get("profile_key") == profile_key and j.get("status") in ("claimed", "running")), "None")
             login = "Login required" if state.get("state") == "Needs LinkedIn Login" and profile_key == self.config.get("profile_key") else "Unknown"
             if Path(folder).exists():
@@ -311,8 +314,59 @@ class ControlPanel:
         actions.pack(anchor="w", padx=22, pady=12)
         self.button(actions, "Open Browser", self.tray_app.start_agent).pack(side="left", padx=6)
         self.button(actions, "Test Login", lambda: messagebox.showinfo("LinkedFlow Agent", read_state().get("state", "Unknown"))).pack(side="left", padx=6)
+        self.button(actions, "Open Profile Folder", lambda: self.open_selected_profile_folder(tree)).pack(side="left", padx=6)
+        self.button(actions, "Clear Session", lambda: self.clear_selected_profile_session(tree)).pack(side="left", padx=6)
+        self.button(actions, "Reset Account", lambda: self.reset_selected_profile(tree)).pack(side="left", padx=6)
         self.button(actions, "Add LinkedIn Account", lambda: messagebox.showinfo("Coming soon", "Add account setup will be added next. Add profiles in the web dashboard for now.")).pack(side="left", padx=6)
         self.button(actions, "Remove/Disable Account", lambda: messagebox.showinfo("Coming soon", "Account disable/remove is managed in the dashboard for now.")).pack(side="left", padx=6)
+
+    def selected_profile_key(self, tree):
+        selected = tree.selection()
+        if not selected:
+            messagebox.showwarning("LinkedFlow Agent", "Select a LinkedIn account first.")
+            return None
+        return tree.item(selected[0], "values")[0]
+
+    def open_selected_profile_folder(self, tree):
+        profile_key = self.selected_profile_key(tree)
+        if not profile_key:
+            return
+        folder = profile_user_data_dir(profile_key)
+        folder.mkdir(parents=True, exist_ok=True)
+        if os.name == "nt":
+            os.startfile(str(folder))
+        else:
+            webbrowser.open(str(folder))
+
+    def clear_selected_profile_session(self, tree):
+        profile_key = self.selected_profile_key(tree)
+        if not profile_key:
+            return
+        if not messagebox.askyesno(
+            "Clear LinkedIn session",
+            f"Delete local browser cookies/session for {profile_key}? This only affects this profile folder and LinkedIn will require login again.",
+        ):
+            return
+        if profile_key == self.config.get("profile_key") and self.tray_app.is_running():
+            self.tray_app.stop_agent()
+        clear_browser_profile(profile_key)
+        messagebox.showinfo("LinkedFlow Agent", f"Cleared local session for {profile_key}.")
+        self.refresh_all()
+
+    def reset_selected_profile(self, tree):
+        profile_key = self.selected_profile_key(tree)
+        if not profile_key:
+            return
+        if not messagebox.askyesno(
+            "Reset LinkedIn account",
+            f"Reset {profile_key}? The local browser profile will be cleared and this account will require LinkedIn login again.",
+        ):
+            return
+        if profile_key == self.config.get("profile_key") and self.tray_app.is_running():
+            self.tray_app.stop_agent()
+        clear_browser_profile(profile_key)
+        messagebox.showinfo("LinkedFlow Agent", f"Reset complete for {profile_key}.")
+        self.refresh_all()
 
     def page_activity(self):
         header = tk.Frame(self.content, bg=BG)
@@ -434,10 +488,8 @@ class ControlPanel:
 
         def save():
             config = load_config()
-            config["profile_key"] = fields["profile_key"].get().strip() or "profile_1"
+            config = set_active_profile(fields["profile_key"].get().strip() or "profile_1", config)
             config["display_name"] = fields["display_name"].get().strip() or config["profile_key"]
-            config["user_data_dir"] = str(PROFILE_DIR / config["profile_key"])
-            config["profiles"] = sorted(set((config.get("profiles") or []) + [config["profile_key"]]))
             config["backend_url"] = fields["backend_url"].get().strip()
             config["agent_token"] = fields["agent_token"].get().strip()
             try:

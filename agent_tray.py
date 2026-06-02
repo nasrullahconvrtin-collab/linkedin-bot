@@ -23,13 +23,16 @@ from PIL import Image, ImageDraw
 from agent_config import (
     BACKUP_DIR,
     LOG_DIR,
+    clear_browser_profile,
     export_browser_profile,
     export_config,
+    profile_user_data_dir,
     read_state,
     set_paused,
     is_paused,
     load_config,
     save_config,
+    set_active_profile,
 )
 
 
@@ -176,12 +179,7 @@ class TrayApp:
         was_running = self.is_running()
         if was_running:
             self.stop_agent()
-        self.config["profile_key"] = profile_key
-        self.config["user_data_dir"] = str(Path(self.config.get("user_data_dir", "")).parent / profile_key)
-        profiles = set(self.config.get("profiles") or [])
-        profiles.add(profile_key)
-        self.config["profiles"] = sorted(profiles)
-        save_config(self.config)
+        self.config = set_active_profile(profile_key, self.config)
         if was_running:
             self.start_agent()
         self.notify("LinkedFlow Agent", f"Switched to {profile_key}")
@@ -189,6 +187,28 @@ class TrayApp:
 
     def add_account_placeholder(self, *_):
         self.notify("LinkedFlow Agent", "Add account setup is coming soon. Add profiles in the web dashboard for now.")
+
+    def open_profile_folder(self, profile_key=None):
+        profile_key = profile_key or self.config.get("profile_key", "profile_1")
+        folder = profile_user_data_dir(profile_key)
+        folder.mkdir(parents=True, exist_ok=True)
+        if os.name == "nt":
+            os.startfile(str(folder))
+        else:
+            webbrowser.open(str(folder))
+
+    def clear_current_session(self, *_):
+        profile = self.config.get("profile_key", "profile_1")
+        was_running = self.is_running()
+        if was_running:
+            self.stop_agent()
+        clear_browser_profile(profile)
+        self.notify("LinkedFlow Agent", f"Cleared local LinkedIn session for {profile}. Login will be required next time.")
+        if was_running:
+            self.start_agent()
+
+    def reset_current_account(self, *_):
+        self.clear_current_session()
 
     def proxy_placeholder(self, *_):
         self.notify("LinkedFlow Agent", "Proxy settings are coming soon. No proxy was changed.")
@@ -245,6 +265,9 @@ class TrayApp:
             pystray.MenuItem("Run on Cloud...", self.cloud_placeholder),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Backup Browser Profile", self.backup_browser_profile),
+            pystray.MenuItem("Open Profile Folder", self.open_profile_folder),
+            pystray.MenuItem("Clear Session for This Profile", self.clear_current_session),
+            pystray.MenuItem("Reset This LinkedIn Account", self.reset_current_account),
             pystray.MenuItem("Export Agent Config", self.backup_config),
             pystray.MenuItem("Open Backups", self.open_backups),
             pystray.Menu.SEPARATOR,

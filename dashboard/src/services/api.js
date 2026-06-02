@@ -73,7 +73,7 @@ export const getProfiles       = ()         => api.get('/profiles');
 export const getProfile        = (key)      => api.get(`/profiles/${key}`);
 export const createProfile     = (data)     => api.post('/profiles', data);
 export const updateProfile     = (key, data)=> api.put(`/profiles/${key}`, data);
-export const deleteProfile     = (key)      => api.delete(`/profiles/${key}`);
+export const deleteProfile     = (key, options = {}) => api.delete(`/profiles/${key}`, { params: options });
 
 // ── Stats ────────────────────────────────────────────────────
 export const getStats          = ()         => api.get('/stats');

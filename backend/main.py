@@ -901,17 +901,46 @@ async def update_profile(profile_key: str, body: LinkedInProfileUpdate):
 
 
 @app.delete("/profiles/{profile_key}", tags=["LinkedIn Profiles"])
-async def delete_profile(profile_key: str):
-    """Delete a profile record and cancel pending profile jobs; local browser data remains local."""
+async def delete_profile(profile_key: str, delete_local_session: bool = Query(False)):
+    """Delete a profile record and optionally ask the local agent to clear only that profile's browser data."""
     try:
-        deleted = db.db_delete_profile(profile_key)
+        deleted = db.db_delete_profile(profile_key, delete_local_session=delete_local_session)
         if not deleted:
             raise HTTPException(404, "Profile not found")
-        return {"deleted": True, "profile_key": profile_key}
+        return {
+            "deleted": True,
+            "profile_key": profile_key,
+            "delete_local_session_requested": bool(delete_local_session),
+        }
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"delete_profile: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.get("/profiles/{profile_key}/commands", tags=["LinkedIn Profiles"])
+async def get_profile_commands(profile_key: str):
+    """Return pending local-agent commands for one LinkedIn profile."""
+    try:
+        return {"commands": db.db_get_profile_commands(profile_key)}
+    except Exception as e:
+        logger.error(f"get_profile_commands: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.post("/profiles/{profile_key}/commands/{command_id}/complete", tags=["LinkedIn Profiles"])
+async def complete_profile_command(profile_key: str, command_id: str):
+    """Mark a local-agent profile command handled."""
+    try:
+        command = db.db_complete_profile_command(profile_key, command_id)
+        if not command:
+            raise HTTPException(404, "Command not found")
+        return command
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"complete_profile_command: {e}")
         raise HTTPException(500, str(e))
 
 

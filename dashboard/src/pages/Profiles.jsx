@@ -43,6 +43,15 @@ function statusColor(status) {
   return 'text-[#9ca3af]';
 }
 
+function nextProfileKey(profiles) {
+  const used = new Set((profiles || []).map(p => p.profile_key));
+  for (let i = 1; i <= 99; i += 1) {
+    const key = `profile_${i}`;
+    if (!used.has(key)) return key;
+  }
+  return `profile_${Date.now()}`;
+}
+
 export default function Profiles() {
   const { profiles, fetchProfiles } = useApp();
   const [tab, setTab] = useState('overview');
@@ -81,7 +90,7 @@ export default function Profiles() {
       }
       setModal(false);
       setEditing(null);
-      setKey('profile_1');
+      setKey(nextProfileKey(profiles));
       setName('');
       fetchProfiles();
     } catch (e) {
@@ -99,10 +108,15 @@ export default function Profiles() {
   };
 
   const removeProfile = async (profile) => {
-    if (!confirm(`Delete ${profile.profile_key}? This removes the dashboard profile record and cancels pending jobs, but keeps local browser/session files on the agent machine.`)) return;
+    const deleteLocalSession = confirm(
+      `Also delete the local browser/session folder for ${profile.profile_key} on the agent machine?\n\nChoose OK if you want this LinkedIn account to require login again. Choose Cancel to keep local cookies/session files.`
+    );
+    if (!confirm(
+      `Delete ${profile.profile_key}?\n\nThis removes the dashboard profile record, cancels pending jobs for this profile, and ${deleteLocalSession ? 'asks the local agent to clear only this profile session folder.' : 'keeps local browser/session files.'}`
+    )) return;
     try {
-      await deleteProfile(profile.profile_key);
-      toast.success('Profile deleted');
+      await deleteProfile(profile.profile_key, { delete_local_session: deleteLocalSession });
+      toast.success(deleteLocalSession ? 'Profile deleted. Local session deletion queued for the agent.' : 'Profile deleted');
       fetchProfiles();
     } catch (e) {
       toast.error(e.message);
@@ -139,7 +153,7 @@ export default function Profiles() {
           </p>
         </div>
         <button
-          onClick={() => { setEditing(null); setKey('profile_1'); setName(''); setModal(true); }}
+          onClick={() => { setEditing(null); setKey(nextProfileKey(profiles)); setName(''); setModal(true); }}
           className="flex items-center gap-2 px-4 py-2.5 bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-xl font-medium text-sm transition-colors shadow-lg shadow-indigo-500/20"
         >
           <Plus size={16} /> Add Profile
@@ -341,12 +355,18 @@ export default function Profiles() {
             <form onSubmit={handleCreate} className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-[#9ca3af] mb-1.5">Profile Key</label>
-                <select value={key} disabled={!!editing} onChange={e => setKey(e.target.value)}
-                  className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-[#6366f1]">
-                  {['profile_1','profile_2','profile_3','profile_4','profile_5'].map(k => (
-                    <option key={k} value={k}>{k}</option>
-                  ))}
-                </select>
+                <input
+                  value={key}
+                  disabled={!!editing}
+                  onChange={e => setKey(e.target.value.replace(/[^A-Za-z0-9_.-]/g, '_'))}
+                  placeholder="profile_2"
+                  className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+                />
+                {!editing && (
+                  <p className="text-[#6b7280] text-xs mt-2">
+                    A fresh isolated browser folder will be created for this key on the desktop agent.
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-medium text-[#9ca3af] mb-1.5">Display Name</label>

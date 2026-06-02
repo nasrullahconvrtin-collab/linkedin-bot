@@ -727,6 +727,40 @@ def db_get_profile(profile_key: str) -> dict | None:
 
 # ── Jobs ─────────────────────────────────────────────────────────────────────
 
+def db_create_profile_command(profile_key: str, command: str, payload: dict | None = None) -> dict | None:
+    data = {
+        "profile_key": profile_key,
+        "command": command,
+        "payload": payload or {},
+        "status": "pending",
+    }
+    result = supabase.table("agent_profile_commands").insert(data).execute()
+    return result.data[0] if result.data else None
+
+
+def db_get_profile_commands(profile_key: str) -> list[dict]:
+    result = (
+        supabase.table("agent_profile_commands")
+        .select("*")
+        .eq("profile_key", profile_key)
+        .eq("status", "pending")
+        .order("created_at")
+        .execute()
+    )
+    return result.data or []
+
+
+def db_complete_profile_command(profile_key: str, command_id: str) -> dict | None:
+    result = (
+        supabase.table("agent_profile_commands")
+        .update({"status": "completed", "handled_at": _utc_now()})
+        .eq("id", command_id)
+        .eq("profile_key", profile_key)
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -1178,7 +1212,15 @@ def db_upsert_enrollment(campaign: dict, prospect: dict) -> dict | None:
     return result.data[0] if result.data else None
 
 
-def db_delete_profile(profile_key: str) -> bool:
+def db_delete_profile(profile_key: str, delete_local_session: bool = False) -> bool:
+    try:
+        db_create_profile_command(
+            profile_key,
+            "profile_deleted",
+            {"delete_local_session": bool(delete_local_session)},
+        )
+    except Exception as exc:
+        logger.warning("Could not queue local profile deletion command for %s: %s", profile_key, exc)
     # Disable related running work first. Historical jobs/activity stay for audit.
     supabase.table("jobs").update({
         "status": "cancelled",
