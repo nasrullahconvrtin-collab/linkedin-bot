@@ -2,14 +2,14 @@ import { useState, useEffect } from 'react';
 import {
   Globe, Loader2, Check, Shield, Clock, Bell, Save, Copy,
   ToggleLeft, ToggleRight, Play, Activity, Download, MonitorDown,
-  Moon, Sun, Palette,
+  Moon, Sun, Palette, KeyRound, Puzzle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
 import { useApp } from '../context/AppContext';
 import {
   getStats, runConnections, checkAcceptances, runMessages, runFollowups,
-  getSchedules, updateSchedules,
+  getSchedules, updateSchedules, createExtensionPairToken,
 } from '../services/api';
 
 // Strip BOM that Windows UTF-8 can inject into env vars
@@ -76,9 +76,12 @@ function Section({ title, icon: Icon, children }) {
 }
 
 export default function Settings() {
-  const { theme, setTheme } = useApp();
+  const { profiles, theme, setTheme } = useApp();
   const [testing,  setTesting]  = useState(false);
   const [tested,   setTested]   = useState(null);
+  const [pairProfile, setPairProfile] = useState('');
+  const [pairToken, setPairToken] = useState(null);
+  const [pairing, setPairing] = useState(false);
 
   // Sending limits — persisted to localStorage
   const initLimits = loadLimits();
@@ -195,6 +198,27 @@ export default function Settings() {
     } finally {
       setTesting(false);
     }
+  };
+
+  const generateExtensionToken = async () => {
+    setPairing(true);
+    try {
+      const res = await createExtensionPairToken(pairProfile || null);
+      setPairToken(res);
+      toast.success('Extension pairing token created');
+    } catch (err) {
+      toast.error(err.message || 'Could not create pairing token');
+    } finally {
+      setPairing(false);
+    }
+  };
+
+  const copyPairToken = () => {
+    const token = pairToken?.token;
+    if (!token) return;
+    navigator.clipboard.writeText(token)
+      .then(() => toast.success('Pairing token copied'))
+      .catch(() => toast.error('Copy failed'));
   };
 
   const changePw = (e) => {
@@ -346,6 +370,83 @@ export default function Settings() {
                   <p className="text-xs text-[#6b7280] truncate">LinkedFlowAgent-Windows.zip</p>
                 </div>
               </div>
+            </div>
+          </div>
+        </Section>
+
+        {/* Chrome Extension Executor */}
+        <Section title="Chrome Extension Executor" icon={Puzzle}>
+          <div className="space-y-4">
+            <div className="rounded-xl border border-[#2a2a2a] bg-[#111111] p-4">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-xl border border-[#2a2a2a] bg-[#0a0a0a] flex items-center justify-center shrink-0 text-[#818cf8]">
+                  <Puzzle size={22} />
+                </div>
+                <div>
+                  <h3 className="text-white font-semibold">Use Chrome as the executor</h3>
+                  <p className="text-[#9ca3af] text-sm mt-2 leading-5">
+                    The extension pulls the same backend queue jobs as the Windows Agent, using the LinkedIn session already logged into Chrome.
+                    Campaigns, templates, ready queues, InMail workflow, and statuses stay unchanged.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-[#9ca3af] mb-1.5">Pair with profile</label>
+              <select
+                value={pairProfile}
+                onChange={e => setPairProfile(e.target.value)}
+                className="w-full bg-[#111111] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+              >
+                <option value="">Let extension create/select profile</option>
+                {profiles.map(p => (
+                  <option key={p.profile_key} value={p.profile_key}>
+                    {p.display_name || p.profile_key} - {p.profile_key}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={generateExtensionToken}
+                disabled={pairing}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#6366f1] hover:bg-[#4f46e5] text-white text-sm font-medium disabled:opacity-50"
+              >
+                {pairing ? <Loader2 size={15} className="animate-spin" /> : <KeyRound size={15} />}
+                Generate Pairing Token
+              </button>
+              {pairToken?.expires_at && (
+                <span className="text-xs text-[#6b7280]">
+                  Expires {new Date(pairToken.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              )}
+            </div>
+
+            {pairToken?.token && (
+              <div className="rounded-xl border border-[#2a2a2a] bg-[#0d0d0d] p-4">
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <p className="text-xs text-[#6b7280]">Paste this token into the LinkedFlow Chrome Extension popup</p>
+                  <button
+                    onClick={copyPairToken}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-xs"
+                  >
+                    <Copy size={12} /> Copy
+                  </button>
+                </div>
+                <code className="block text-sm text-white font-mono break-all">{pairToken.token}</code>
+              </div>
+            )}
+
+            <div className="rounded-xl border border-[#2a2a2a] bg-[#111111] p-4 text-sm text-[#9ca3af] leading-6">
+              <p className="text-white font-medium mb-2">Setup steps</p>
+              <ol className="list-decimal ml-5 space-y-1">
+                <li>Load the repository folder <span className="font-mono text-[#c7d2fe]">chrome-extension</span> as an unpacked Chrome extension.</li>
+                <li>Generate a pairing token here and paste it into the extension popup.</li>
+                <li>Set the LinkedIn profile run mode to <span className="text-white">Chrome Extension</span>.</li>
+                <li>Keep LinkedIn open/logged in. The extension will heartbeat and pull pending jobs.</li>
+              </ol>
             </div>
           </div>
         </Section>

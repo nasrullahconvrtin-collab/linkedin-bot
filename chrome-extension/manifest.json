@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "LinkedFlow Executor",
+  "description": "Executes LinkedFlow queue jobs inside the user's logged-in LinkedIn Chrome session.",
+  "version": "0.1.0",
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_title": "LinkedFlow"
+  },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "js": ["src/content-linkedin.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": ["alarms", "storage", "tabs", "scripting"],
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "https://linkedin-bot-backend-production.up.railway.app/*"
+  ]
+}

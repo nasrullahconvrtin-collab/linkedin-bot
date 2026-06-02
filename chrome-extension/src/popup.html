@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>LinkedFlow</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="logo">LF</div>
+        <div>
+          <h1>LinkedFlow</h1>
+          <p id="status">Checking...</p>
+        </div>
+      </header>
+
+      <section class="card">
+        <label>Backend URL</label>
+        <input id="backendUrl" />
+        <label>Pairing token</label>
+        <input id="token" placeholder="Paste token from Settings" />
+        <label>Profile key</label>
+        <input id="profileKey" placeholder="profile_1 or ext_account" />
+        <button id="connect">Connect to LinkedFlow</button>
+      </section>
+
+      <section class="card grid">
+        <div><span>Profile</span><strong id="profile">-</strong></div>
+        <div><span>Current job</span><strong id="job">None</strong></div>
+        <div><span>Last sync</span><strong id="sync">Never</strong></div>
+        <div><span>Error</span><strong id="error">None</strong></div>
+      </section>
+
+      <section class="actions">
+        <button id="syncNow">Sync Now</button>
+        <button id="pause">Pause Automation</button>
+        <button id="dashboard">Open Dashboard</button>
+        <button id="clear" class="danger">Clear Local Extension State</button>
+      </section>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

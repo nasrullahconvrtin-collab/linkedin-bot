@@ -75,6 +75,12 @@ export const createProfile     = (data)     => api.post('/profiles', data);
 export const updateProfile     = (key, data)=> api.put(`/profiles/${key}`, data);
 export const deleteProfile     = (key, options = {}) => api.delete(`/profiles/${key}`, { params: options });
 
+// Chrome Extension executor
+export const createExtensionPairToken = (profile_key = null) =>
+  api.post('/extension/pair-token', profile_key ? { profile_key } : {});
+export const getExtensionPendingJobs = (profile_key, limit = 5) =>
+  api.get('/extension/jobs/pending', { params: { profile_key, limit } });
+
 // ── Stats ────────────────────────────────────────────────────
 export const getStats          = ()         => api.get('/stats');
 export const getCampaignStats  = (id)       => api.get(`/stats/campaign/${id}`);

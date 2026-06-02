@@ -181,6 +181,7 @@ class ActivityLogResponse(BaseModel):
 class LinkedInProfileCreate(BaseModel):
     profile_key: str
     display_name: str
+    run_mode: Optional[str] = "windows_agent"
 
 
 class LinkedInProfileUpdate(BaseModel):
@@ -190,10 +191,61 @@ class LinkedInProfileUpdate(BaseModel):
     daily_sent: Optional[int] = None
     last_active: Optional[str] = None
     runtime_mode: Optional[str] = None
+    run_mode: Optional[str] = None
     proxy_settings: Optional[dict] = None
     session_status: Optional[str] = None
     local_state: Optional[str] = None
     last_job_result: Optional[dict] = None
+    extension_id: Optional[str] = None
+    extension_status: Optional[str] = None
+    last_extension_heartbeat: Optional[str] = None
+    paired_at: Optional[str] = None
+    linkedin_login_status: Optional[str] = None
+    extension_version: Optional[str] = None
+    automation_paused: Optional[bool] = None
+
+
+class ExtensionPairTokenCreate(BaseModel):
+    profile_key: Optional[str] = None
+
+
+class ExtensionPairRequest(BaseModel):
+    token: str
+    extension_id: Optional[str] = None
+    profile_key: Optional[str] = None
+    display_name: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    current_url: Optional[str] = None
+    linkedin_login_status: Optional[str] = "unknown"
+    extension_version: Optional[str] = None
+
+
+class ExtensionHeartbeat(BaseModel):
+    profile_key: str
+    extension_id: Optional[str] = None
+    display_name: Optional[str] = None
+    current_url: Optional[str] = None
+    session_active: bool = True
+    extension_status: Optional[str] = "online"
+    linkedin_login_status: Optional[str] = "unknown"
+    extension_version: Optional[str] = None
+    local_state: Optional[str] = None
+    automation_paused: Optional[bool] = None
+
+
+class ExtensionJobClaim(BaseModel):
+    profile_key: str
+
+
+class ExtensionProfileState(BaseModel):
+    profile_key: str
+    extension_id: Optional[str] = None
+    display_name: Optional[str] = None
+    current_url: Optional[str] = None
+    linkedin_login_status: Optional[str] = None
+    extension_status: Optional[str] = None
+    local_state: Optional[str] = None
+    automation_paused: Optional[bool] = None
 
 
 # ── Dashboard Stats ───────────────────────────────────────────────────────────

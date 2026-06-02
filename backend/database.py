@@ -4,9 +4,11 @@ All functions are synchronous (supabase-py uses the sync client by default).
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
+import secrets
 from datetime import date, datetime, timedelta, timezone
 
 from dotenv import load_dotenv
@@ -619,7 +621,13 @@ def db_enrich_profile(profile: dict) -> dict:
     except Exception:
         enriched["accepted_today"] = 0
     enriched.setdefault("runtime_mode", "local")
+    enriched.setdefault("run_mode", enriched.get("runtime_mode") or "windows_agent")
+    if enriched["run_mode"] == "local":
+        enriched["run_mode"] = "windows_agent"
     enriched.setdefault("session_status", "unknown")
+    enriched.setdefault("extension_status", "offline")
+    enriched.setdefault("linkedin_login_status", "unknown")
+    enriched.setdefault("automation_paused", False)
     return enriched
 
 
@@ -636,23 +644,41 @@ def db_get_all_profiles() -> list[dict]:
     return [db_enrich_profile(p) for p in profiles]
 
 
-def db_create_profile(profile_key: str, display_name: str) -> dict | None:
+def db_create_profile(profile_key: str, display_name: str, run_mode: str | None = None) -> dict | None:
+    run_mode = run_mode or "windows_agent"
     data = {
         "profile_key": profile_key,
         "display_name": display_name,
         "session_active": False,
         "daily_sent": 0,
+        "runtime_mode": "chrome_extension" if run_mode == "chrome_extension" else "local",
+        "run_mode": run_mode,
     }
-    result = supabase.table("linkedin_profiles").insert(data).execute()
+    try:
+        result = supabase.table("linkedin_profiles").insert(data).execute()
+    except Exception as exc:
+        if "run_mode" not in str(exc):
+            raise
+        fallback = dict(data)
+        fallback.pop("run_mode", None)
+        result = supabase.table("linkedin_profiles").insert(fallback).execute()
     return db_enrich_profile(result.data[0]) if result.data else None
 
 
 PROFILE_RUNTIME_FIELDS = {
     "runtime_mode",
+    "run_mode",
     "proxy_settings",
     "session_status",
     "local_state",
     "last_job_result",
+    "extension_id",
+    "extension_status",
+    "last_extension_heartbeat",
+    "paired_at",
+    "linkedin_login_status",
+    "extension_version",
+    "automation_paused",
 }
 
 
@@ -727,6 +753,94 @@ def db_get_profile(profile_key: str) -> dict | None:
 
 
 # ── Jobs ─────────────────────────────────────────────────────────────────────
+
+def _extension_token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def db_create_extension_pair_token(profile_key: str | None = None) -> dict:
+    token = secrets.token_urlsafe(24)
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+    result = supabase.table("extension_pairing_tokens").insert({
+        "token_hash": _extension_token_hash(token),
+        "profile_key": profile_key,
+        "status": "pending",
+        "expires_at": expires_at,
+    }).execute()
+    saved = result.data[0] if result.data else {}
+    return {
+        "token": token,
+        "token_id": saved.get("id"),
+        "profile_key": profile_key,
+        "expires_at": saved.get("expires_at") or expires_at,
+    }
+
+
+def db_pair_extension(data: dict) -> dict | None:
+    token = data.get("token") or ""
+    extension_id = data.get("extension_id") or secrets.token_urlsafe(16)
+    now = _utc_now()
+    found = (
+        supabase.table("extension_pairing_tokens")
+        .select("*")
+        .eq("token_hash", _extension_token_hash(token))
+        .eq("status", "pending")
+        .gte("expires_at", now)
+        .limit(1)
+        .execute()
+        .data or []
+    )
+    if not found:
+        return None
+
+    pair = found[0]
+    profile_key = data.get("profile_key") or pair.get("profile_key") or f"ext_{extension_id[:10]}"
+    display_name = data.get("display_name") or profile_key
+    profile = db_upsert_profile(profile_key, {
+        "profile_key": profile_key,
+        "display_name": display_name,
+        "enabled": True,
+        "session_active": True,
+        "runtime_mode": "chrome_extension",
+        "run_mode": "chrome_extension",
+        "extension_id": extension_id,
+        "extension_status": "online",
+        "last_extension_heartbeat": now,
+        "last_active": now,
+        "paired_at": now,
+        "linkedin_login_status": data.get("linkedin_login_status") or "unknown",
+        "extension_version": data.get("extension_version"),
+        "local_state": data.get("linkedin_url") or data.get("current_url"),
+    })
+    supabase.table("extension_pairing_tokens").update({
+        "status": "used",
+        "used_at": now,
+        "extension_id": extension_id,
+    }).eq("id", pair["id"]).execute()
+    return profile
+
+
+def db_extension_heartbeat(data: dict) -> dict | None:
+    profile_key = data.get("profile_key")
+    if not profile_key:
+        return None
+    now = _utc_now()
+    return db_upsert_profile(profile_key, {
+        "profile_key": profile_key,
+        "display_name": data.get("display_name") or profile_key,
+        "session_active": data.get("session_active", True),
+        "last_active": now,
+        "runtime_mode": "chrome_extension",
+        "run_mode": "chrome_extension",
+        "extension_id": data.get("extension_id"),
+        "extension_status": data.get("extension_status") or "online",
+        "last_extension_heartbeat": now,
+        "linkedin_login_status": data.get("linkedin_login_status") or "unknown",
+        "extension_version": data.get("extension_version"),
+        "local_state": data.get("current_url") or data.get("local_state"),
+        "automation_paused": data.get("automation_paused"),
+    })
+
 
 def db_create_profile_command(profile_key: str, command: str, payload: dict | None = None) -> dict | None:
     data = {
@@ -1833,6 +1947,16 @@ def db_apply_completed_job_result(job: dict, result: dict) -> None:
             "last_action_at": _utc_now(),
         })
         db_mark_invitation_sent(prospect or {"id": prospect_id}, job.get("profile_key"), job.get("campaign_id"))
+        db_log_activity(prospect_id, "send_connection", "sent", "Connection request sent by executor")
+    elif task_type == "send_connection" and status == "pending":
+        db_update_prospect(prospect_id, {
+            "status": "Connection Request Sent",
+            "next_steps": "Connection request already pending; check acceptance",
+            "connection_status": "invitation_pending",
+            "last_action_at": _utc_now(),
+        })
+        db_mark_invitation_sent(prospect or {"id": prospect_id}, job.get("profile_key"), job.get("campaign_id"))
+        db_log_activity(prospect_id, "send_connection", "pending", "LinkedIn already showed a pending invitation")
     elif task_type == "send_message" and status == "message_sent" and message_type == "initial":
         db_update_prospect(prospect_id, {
             "status": "Initial Message Sent",

@@ -7,6 +7,7 @@ import {
   Globe2,
   Loader2,
   Plus,
+  Puzzle,
   Server,
   ToggleLeft,
   ToggleRight,
@@ -59,6 +60,7 @@ export default function Profiles() {
   const [editing, setEditing] = useState(null);
   const [key, setKey] = useState('profile_1');
   const [name, setName] = useState('');
+  const [runMode, setRunMode] = useState('windows_agent');
   const [loading, setLoading] = useState(false);
   const [toggling, setToggling] = useState({});
   const [jobs, setJobs] = useState([]);
@@ -82,16 +84,17 @@ export default function Profiles() {
     setLoading(true);
     try {
       if (editing) {
-        await updateProfile(editing.profile_key, { display_name: name });
+        await updateProfile(editing.profile_key, { display_name: name, run_mode: runMode });
         toast.success(`Profile ${editing.profile_key} updated`);
       } else {
-        await createProfile({ profile_key: key, display_name: name });
+        await createProfile({ profile_key: key, display_name: name, run_mode: runMode });
         toast.success(`Profile ${key} added`);
       }
       setModal(false);
       setEditing(null);
       setKey(nextProfileKey(profiles));
       setName('');
+      setRunMode('windows_agent');
       fetchProfiles();
     } catch (e) {
       toast.error(e.message);
@@ -104,6 +107,7 @@ export default function Profiles() {
     setEditing(profile);
     setKey(profile.profile_key);
     setName(profile.display_name || '');
+    setRunMode(profile.run_mode || (profile.runtime_mode === 'chrome_extension' ? 'chrome_extension' : 'windows_agent'));
     setModal(true);
   };
 
@@ -153,7 +157,7 @@ export default function Profiles() {
           </p>
         </div>
         <button
-          onClick={() => { setEditing(null); setKey(nextProfileKey(profiles)); setName(''); setModal(true); }}
+          onClick={() => { setEditing(null); setKey(nextProfileKey(profiles)); setName(''); setRunMode('windows_agent'); setModal(true); }}
           className="flex items-center gap-2 px-4 py-2.5 bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-xl font-medium text-sm transition-colors shadow-lg shadow-indigo-500/20"
         >
           <Plus size={16} /> Add Profile
@@ -248,6 +252,15 @@ export default function Profiles() {
             const activeJobs = profileJobs.filter(j => ['pending', 'retrying', 'claimed', 'running'].includes(j.status));
             const runningJob = profileJobs.find(j => ['claimed', 'running'].includes(j.status));
             const lastJob = profileJobs[0];
+            const mode = p.run_mode || (p.runtime_mode === 'chrome_extension' ? 'chrome_extension' : 'windows_agent');
+            const modeLabel = mode === 'chrome_extension'
+              ? 'Chrome Extension'
+              : mode === 'cloud_agent'
+                ? 'Cloud Agent'
+                : 'Windows Agent';
+            const modeIcon = mode === 'chrome_extension' ? Puzzle : mode === 'cloud_agent' ? Cloud : Briefcase;
+            const ModeIcon = modeIcon;
+            const heartbeat = mode === 'chrome_extension' ? p.last_extension_heartbeat || p.last_active : p.last_active;
 
             return (
               <div key={p.profile_key} className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5 space-y-4">
@@ -275,7 +288,7 @@ export default function Profiles() {
                   </div>
                   <div className="rounded-lg border border-[#2a2a2a] bg-[#111111] p-3">
                     <p className="text-[#6b7280]">Heartbeat</p>
-                    <p className="text-white font-medium mt-1">{timeAgo(p.last_active)}</p>
+                    <p className="text-white font-medium mt-1">{timeAgo(heartbeat)}</p>
                   </div>
                 </div>
 
@@ -310,7 +323,11 @@ export default function Profiles() {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-[#6b7280]">Runtime</span>
-                    <span className="text-white flex items-center gap-1"><Briefcase size={12} /> Local</span>
+                    <span className="text-white flex items-center gap-1"><ModeIcon size={12} /> {modeLabel}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#6b7280]">LinkedIn login</span>
+                    <span className="text-white">{p.linkedin_login_status || p.session_status || 'unknown'}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-[#6b7280]">Cloud / proxy</span>
@@ -377,6 +394,21 @@ export default function Profiles() {
                   placeholder="e.g. John Smith"
                   className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm placeholder-[#4b5563] focus:outline-none focus:border-[#6366f1]"
                 />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#9ca3af] mb-1.5">Execution Mode</label>
+                <select
+                  value={runMode}
+                  onChange={e => setRunMode(e.target.value)}
+                  className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+                >
+                  <option value="windows_agent">Windows Agent (legacy)</option>
+                  <option value="chrome_extension">Chrome Extension</option>
+                  <option value="cloud_agent" disabled>Cloud Agent - Coming Soon</option>
+                </select>
+                <p className="text-[#6b7280] text-xs mt-2">
+                  This controls which executor pulls jobs for this LinkedIn account. Campaign logic and queues stay the same.
+                </p>
               </div>
               <div className="flex gap-3 pt-1">
                 <button type="button" onClick={() => { setModal(false); setEditing(null); }}

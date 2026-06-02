@@ -129,6 +129,8 @@ export default function Dashboard() {
                   const running = p.current_job || profileJobs.find(j => ['claimed', 'running'].includes(j.status));
                   const failed = p.failed_jobs ?? profileJobs.filter(j => j.status === 'failed').length;
                   const lastJob = p.last_job || profileJobs[0];
+                  const mode = p.run_mode || (p.runtime_mode === 'chrome_extension' ? 'chrome_extension' : 'windows_agent');
+                  const modeLabel = mode === 'chrome_extension' ? 'Chrome Extension' : mode === 'cloud_agent' ? 'Cloud Agent' : 'Windows Agent';
                   return (
                     <div key={p.profile_key} className="rounded-xl bg-[#111111] border border-[#2a2a2a] p-3">
                       <div className="flex items-center justify-between gap-3">
@@ -136,7 +138,7 @@ export default function Dashboard() {
                           <span className={`w-2 h-2 rounded-full shrink-0 ${p.session_active ? 'bg-[#22c55e] animate-pulse' : 'bg-[#4b5563]'}`} />
                           <div className="min-w-0">
                             <p className="text-white text-sm font-medium truncate">{p.display_name || p.profile_key}</p>
-                            <p className="text-[#6b7280] text-xs">{p.profile_key} - {p.runtime_mode || 'local'} - {(p.enabled ?? true) ? 'Enabled' : 'Disabled'}</p>
+                            <p className="text-[#6b7280] text-xs">{p.profile_key} - {modeLabel} - {(p.enabled ?? true) ? 'Enabled' : 'Disabled'}</p>
                           </div>
                         </div>
                         <div className="w-16 h-1.5 bg-[#2a2a2a] rounded-full overflow-hidden shrink-0">
