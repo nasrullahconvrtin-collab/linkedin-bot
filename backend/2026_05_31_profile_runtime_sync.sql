@@ -1,9 +1,9 @@
--- Profile runtime metadata for dashboard <-> local agent synchronization.
+-- Profile runtime metadata for dashboard <-> executor synchronization.
 -- Safe to run multiple times.
 
 alter table public.linkedin_profiles
   add column if not exists enabled boolean not null default true,
-  add column if not exists runtime_mode text not null default 'local',
+  add column if not exists runtime_mode text not null default 'chrome_extension',
   add column if not exists proxy_settings jsonb not null default '{}'::jsonb,
   add column if not exists session_status text,
   add column if not exists local_state text,

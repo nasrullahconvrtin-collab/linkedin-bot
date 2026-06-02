@@ -1,5 +1,5 @@
 alter table public.linkedin_profiles
-  add column if not exists run_mode text not null default 'windows_agent',
+  add column if not exists run_mode text not null default 'chrome_extension',
   add column if not exists extension_id text null,
   add column if not exists extension_status text null,
   add column if not exists last_extension_heartbeat timestamptz null,
@@ -12,7 +12,7 @@ update public.linkedin_profiles
 set run_mode = case
   when runtime_mode in ('chrome_extension', 'extension') then 'chrome_extension'
   when runtime_mode in ('cloud_agent', 'cloud') then 'cloud_agent'
-  else 'windows_agent'
+  else 'chrome_extension'
 end
 where run_mode is null or run_mode = 'windows_agent';
 

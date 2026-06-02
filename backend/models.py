@@ -181,7 +181,7 @@ class ActivityLogResponse(BaseModel):
 class LinkedInProfileCreate(BaseModel):
     profile_key: str
     display_name: str
-    run_mode: Optional[str] = "windows_agent"
+    run_mode: Optional[str] = "chrome_extension"
 
 
 class LinkedInProfileUpdate(BaseModel):

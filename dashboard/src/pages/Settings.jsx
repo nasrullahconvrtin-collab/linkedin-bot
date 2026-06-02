@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   Globe, Loader2, Check, Shield, Clock, Bell, Save, Copy,
-  ToggleLeft, ToggleRight, Play, Activity, Download, MonitorDown,
+  ToggleLeft, ToggleRight, Play, Activity,
   Moon, Sun, Palette, KeyRound, Puzzle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -16,8 +16,6 @@ import {
 const _rawApiUrl = import.meta.env.VITE_API_URL || '';
 const API_URL = _rawApiUrl.replace(/^﻿/, '').trim()
   || 'https://linkedin-bot-backend-production.up.railway.app';
-const AGENT_DOWNLOAD_URL = (import.meta.env.VITE_AGENT_DOWNLOAD_URL || '').replace(/^ï»¿/, '').trim()
-  || 'https://github.com/nasrullahconvrtin-collab/linkedin-bot/releases/latest/download/LinkedFlowAgent-Windows.zip';
 
 // ── Default schedule ─────────────────────────────────────────────────────────
 const SCHEDULE_DEFAULTS = [
@@ -246,7 +244,7 @@ export default function Settings() {
     }).join('\n');
 
     const tasks = enabled.map(s => {
-      return `Use the cloud scheduler for "${s.label}" at ${s.time}. Keep LinkedFlow Agent running so it can pull queued jobs.`;
+      return `Use the cloud scheduler for "${s.label}" at ${s.time}. Keep Chrome with the LinkedFlow Extension running so it can pull queued jobs.`;
     }).join('\n');
 
     return `# LinkedFlow cloud scheduler\n${tasks}\n\n# Cron note\n${cron}`;
@@ -335,45 +333,6 @@ export default function Settings() {
           </div>
         </Section>
 
-        {/* Agent Download */}
-        <Section title="LinkedFlow Agent" icon={MonitorDown}>
-          <div className="rounded-xl border border-[#2a2a2a] bg-[#111111] p-4">
-            <div className="flex items-start gap-4">
-              <div className="w-12 h-12 rounded-xl border border-[#2a2a2a] bg-[#0a0a0a] flex items-center justify-center shrink-0">
-                <div className="grid grid-cols-2 gap-0.5 w-6 h-6">
-                  <span className="bg-[#60a5fa] rounded-[2px]" />
-                  <span className="bg-[#60a5fa] rounded-[2px]" />
-                  <span className="bg-[#60a5fa] rounded-[2px]" />
-                  <span className="bg-[#60a5fa] rounded-[2px]" />
-                </div>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h3 className="text-white font-semibold">Windows Agent ZIP</h3>
-                  <span className="text-[11px] px-2 py-0.5 rounded-full border border-[#60a5fa]/20 bg-[#60a5fa]/10 text-[#93c5fd]">
-                    Windows .exe
-                  </span>
-                  <span className="text-[11px] px-2 py-0.5 rounded-full border border-[#2a2a2a] text-[#6b7280]">
-                    Windows only for now
-                  </span>
-                </div>
-                <p className="text-[#9ca3af] text-sm mt-2 leading-5">
-                  Download the packaged local agent for another Windows PC. It includes the agent app and bundled browser runtime, so users do not need Python or terminal commands.
-                </p>
-                <div className="flex items-center gap-3 mt-4">
-                  <a
-                    href={AGENT_DOWNLOAD_URL}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#6366f1] hover:bg-[#4f46e5] text-white text-sm font-medium transition-colors"
-                  >
-                    <Download size={15} /> Download Windows Agent
-                  </a>
-                  <p className="text-xs text-[#6b7280] truncate">LinkedFlowAgent-Windows.zip</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </Section>
-
         {/* Chrome Extension Executor */}
         <Section title="Chrome Extension Executor" icon={Puzzle}>
           <div className="space-y-4">
@@ -385,7 +344,7 @@ export default function Settings() {
                 <div>
                   <h3 className="text-white font-semibold">Use Chrome as the executor</h3>
                   <p className="text-[#9ca3af] text-sm mt-2 leading-5">
-                    The extension pulls the same backend queue jobs as the Windows Agent, using the LinkedIn session already logged into Chrome.
+                    The extension pulls backend queue jobs using the LinkedIn session already logged into Chrome.
                     Campaigns, templates, ready queues, InMail workflow, and statuses stay unchanged.
                   </p>
                 </div>
@@ -488,7 +447,7 @@ export default function Settings() {
 
             <div className="flex items-center justify-between pt-1">
               <p className="text-xs text-[#6b7280]">
-                Saved locally · Agent delays configured in config.py
+                Saved locally · queue creation is controlled by the cloud scheduler
               </p>
               <button
                 onClick={saveLimits}

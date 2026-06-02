@@ -60,7 +60,7 @@ export default function Profiles() {
   const [editing, setEditing] = useState(null);
   const [key, setKey] = useState('profile_1');
   const [name, setName] = useState('');
-  const [runMode, setRunMode] = useState('windows_agent');
+  const [runMode, setRunMode] = useState('chrome_extension');
   const [loading, setLoading] = useState(false);
   const [toggling, setToggling] = useState({});
   const [jobs, setJobs] = useState([]);
@@ -94,7 +94,7 @@ export default function Profiles() {
       setEditing(null);
       setKey(nextProfileKey(profiles));
       setName('');
-      setRunMode('windows_agent');
+      setRunMode('chrome_extension');
       fetchProfiles();
     } catch (e) {
       toast.error(e.message);
@@ -107,20 +107,17 @@ export default function Profiles() {
     setEditing(profile);
     setKey(profile.profile_key);
     setName(profile.display_name || '');
-    setRunMode(profile.run_mode || (profile.runtime_mode === 'chrome_extension' ? 'chrome_extension' : 'windows_agent'));
+    setRunMode(profile.run_mode || 'chrome_extension');
     setModal(true);
   };
 
   const removeProfile = async (profile) => {
-    const deleteLocalSession = confirm(
-      `Also delete the local browser/session folder for ${profile.profile_key} on the agent machine?\n\nChoose OK if you want this LinkedIn account to require login again. Choose Cancel to keep local cookies/session files.`
-    );
     if (!confirm(
-      `Delete ${profile.profile_key}?\n\nThis removes the dashboard profile record, cancels pending jobs for this profile, and ${deleteLocalSession ? 'asks the local agent to clear only this profile session folder.' : 'keeps local browser/session files.'}`
+      `Delete ${profile.profile_key}?\n\nThis removes the dashboard profile record and cancels pending jobs for this profile. Chrome/LinkedIn cookies are managed by the user's Chrome profile and are not deleted from here.`
     )) return;
     try {
-      await deleteProfile(profile.profile_key, { delete_local_session: deleteLocalSession });
-      toast.success(deleteLocalSession ? 'Profile deleted. Local session deletion queued for the agent.' : 'Profile deleted');
+      await deleteProfile(profile.profile_key);
+      toast.success('Profile deleted');
       fetchProfiles();
     } catch (e) {
       toast.error(e.message);
@@ -153,11 +150,11 @@ export default function Profiles() {
         <div>
           <h1 className="text-white text-2xl font-bold">Profiles</h1>
           <p className="text-[#6b7280] text-sm mt-1">
-            LinkedIn accounts, agent status, local runtime, proxies, and cloud runner options.
+            LinkedIn accounts, Chrome Extension status, runtime mode, proxies, and cloud runner options.
           </p>
         </div>
         <button
-          onClick={() => { setEditing(null); setKey(nextProfileKey(profiles)); setName(''); setRunMode('windows_agent'); setModal(true); }}
+          onClick={() => { setEditing(null); setKey(nextProfileKey(profiles)); setName(''); setRunMode('chrome_extension'); setModal(true); }}
           className="flex items-center gap-2 px-4 py-2.5 bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-xl font-medium text-sm transition-colors shadow-lg shadow-indigo-500/20"
         >
           <Plus size={16} /> Add Profile
@@ -166,7 +163,7 @@ export default function Profiles() {
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         {[
-          { label: 'Online agents', value: jobStats.online, icon: Wifi, color: '#22c55e' },
+          { label: 'Online executors', value: jobStats.online, icon: Wifi, color: '#22c55e' },
           { label: 'Pending jobs', value: jobStats.pending, icon: Activity, color: '#6366f1' },
           { label: 'Running jobs', value: jobStats.running, icon: Server, color: '#f59e0b' },
           { label: 'Failed jobs', value: jobStats.failed, icon: AlertTriangle, color: '#ef4444' },
@@ -212,7 +209,7 @@ export default function Profiles() {
               </div>
             </div>
             <div className="rounded-lg border border-[#2a2a2a] bg-[#111111] p-4 text-sm text-[#9ca3af] leading-6">
-              Current mode is local browser execution. Cloud mode will later let a Windows VPS keep the agent online without relying on this laptop.
+              Current mode is Chrome Extension execution. Cloud mode will later keep execution online without relying on this laptop.
             </div>
             <button disabled className="mt-4 px-4 py-2.5 rounded-xl border border-[#2a2a2a] text-[#6b7280] text-sm cursor-not-allowed">
               Configure Cloud Runner - Coming Soon
@@ -252,12 +249,12 @@ export default function Profiles() {
             const activeJobs = profileJobs.filter(j => ['pending', 'retrying', 'claimed', 'running'].includes(j.status));
             const runningJob = profileJobs.find(j => ['claimed', 'running'].includes(j.status));
             const lastJob = profileJobs[0];
-            const mode = p.run_mode || (p.runtime_mode === 'chrome_extension' ? 'chrome_extension' : 'windows_agent');
+            const mode = p.run_mode || 'chrome_extension';
             const modeLabel = mode === 'chrome_extension'
               ? 'Chrome Extension'
               : mode === 'cloud_agent'
                 ? 'Cloud Agent'
-                : 'Windows Agent';
+                : 'Chrome Extension';
             const modeIcon = mode === 'chrome_extension' ? Puzzle : mode === 'cloud_agent' ? Cloud : Briefcase;
             const ModeIcon = modeIcon;
             const heartbeat = mode === 'chrome_extension' ? p.last_extension_heartbeat || p.last_active : p.last_active;
@@ -281,7 +278,7 @@ export default function Profiles() {
 
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="rounded-lg border border-[#2a2a2a] bg-[#111111] p-3">
-                    <p className="text-[#6b7280]">Agent</p>
+                    <p className="text-[#6b7280]">Executor</p>
                     <p className={`font-medium mt-1 ${online ? 'text-[#22c55e]' : 'text-[#ef4444]'}`}>
                       {online ? 'Online' : 'Offline'}
                     </p>
@@ -381,7 +378,7 @@ export default function Profiles() {
                 />
                 {!editing && (
                   <p className="text-[#6b7280] text-xs mt-2">
-                    A fresh isolated browser folder will be created for this key on the desktop agent.
+                    Pair this key from the Chrome Extension popup to attach it to a LinkedIn browser session.
                   </p>
                 )}
               </div>
@@ -402,7 +399,6 @@ export default function Profiles() {
                   onChange={e => setRunMode(e.target.value)}
                   className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-[#6366f1]"
                 >
-                  <option value="windows_agent">Windows Agent (legacy)</option>
                   <option value="chrome_extension">Chrome Extension</option>
                   <option value="cloud_agent" disabled>Cloud Agent - Coming Soon</option>
                 </select>

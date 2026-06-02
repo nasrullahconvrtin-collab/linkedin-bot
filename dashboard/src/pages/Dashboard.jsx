@@ -65,7 +65,7 @@ export default function Dashboard() {
     { title: 'Needs Personalization', value: stats?.needs_personalization, icon: Sparkles, color: '#06b6d4' },
     { title: 'Ready For Message', value: stats?.ready_for_message, icon: MessageSquare, color: '#f59e0b' },
     { title: 'Pending Jobs', value: stats?.pending_jobs, icon: Briefcase, color: '#6366f1' },
-    { title: 'Online Agents', value: stats?.online_agents, icon: Wifi, color: '#22c55e' },
+    { title: 'Online Executors', value: stats?.online_agents, icon: Wifi, color: '#22c55e' },
     { title: 'Failed Jobs', value: stats?.failed_jobs, icon: AlertTriangle, color: '#ef4444' },
   ];
 
@@ -129,8 +129,8 @@ export default function Dashboard() {
                   const running = p.current_job || profileJobs.find(j => ['claimed', 'running'].includes(j.status));
                   const failed = p.failed_jobs ?? profileJobs.filter(j => j.status === 'failed').length;
                   const lastJob = p.last_job || profileJobs[0];
-                  const mode = p.run_mode || (p.runtime_mode === 'chrome_extension' ? 'chrome_extension' : 'windows_agent');
-                  const modeLabel = mode === 'chrome_extension' ? 'Chrome Extension' : mode === 'cloud_agent' ? 'Cloud Agent' : 'Windows Agent';
+                  const mode = p.run_mode || 'chrome_extension';
+                  const modeLabel = mode === 'cloud_agent' ? 'Cloud Agent' : 'Chrome Extension';
                   return (
                     <div key={p.profile_key} className="rounded-xl bg-[#111111] border border-[#2a2a2a] p-3">
                       <div className="flex items-center justify-between gap-3">

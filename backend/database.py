@@ -620,10 +620,10 @@ def db_enrich_profile(profile: dict) -> dict:
         )
     except Exception:
         enriched["accepted_today"] = 0
-    enriched.setdefault("runtime_mode", "local")
-    enriched.setdefault("run_mode", enriched.get("runtime_mode") or "windows_agent")
-    if enriched["run_mode"] == "local":
-        enriched["run_mode"] = "windows_agent"
+    enriched.setdefault("runtime_mode", "chrome_extension")
+    enriched.setdefault("run_mode", enriched.get("runtime_mode") or "chrome_extension")
+    if enriched["run_mode"] in ("local", "windows_agent"):
+        enriched["run_mode"] = "chrome_extension"
     enriched.setdefault("session_status", "unknown")
     enriched.setdefault("extension_status", "offline")
     enriched.setdefault("linkedin_login_status", "unknown")
@@ -645,13 +645,15 @@ def db_get_all_profiles() -> list[dict]:
 
 
 def db_create_profile(profile_key: str, display_name: str, run_mode: str | None = None) -> dict | None:
-    run_mode = run_mode or "windows_agent"
+    run_mode = run_mode or "chrome_extension"
+    if run_mode == "windows_agent":
+        run_mode = "chrome_extension"
     data = {
         "profile_key": profile_key,
         "display_name": display_name,
         "session_active": False,
         "daily_sent": 0,
-        "runtime_mode": "chrome_extension" if run_mode == "chrome_extension" else "local",
+        "runtime_mode": "cloud_agent" if run_mode == "cloud_agent" else "chrome_extension",
         "run_mode": run_mode,
     }
     try:
@@ -840,40 +842,6 @@ def db_extension_heartbeat(data: dict) -> dict | None:
         "local_state": data.get("current_url") or data.get("local_state"),
         "automation_paused": data.get("automation_paused"),
     })
-
-
-def db_create_profile_command(profile_key: str, command: str, payload: dict | None = None) -> dict | None:
-    data = {
-        "profile_key": profile_key,
-        "command": command,
-        "payload": payload or {},
-        "status": "pending",
-    }
-    result = supabase.table("agent_profile_commands").insert(data).execute()
-    return result.data[0] if result.data else None
-
-
-def db_get_profile_commands(profile_key: str) -> list[dict]:
-    result = (
-        supabase.table("agent_profile_commands")
-        .select("*")
-        .eq("profile_key", profile_key)
-        .eq("status", "pending")
-        .order("created_at")
-        .execute()
-    )
-    return result.data or []
-
-
-def db_complete_profile_command(profile_key: str, command_id: str) -> dict | None:
-    result = (
-        supabase.table("agent_profile_commands")
-        .update({"status": "completed", "handled_at": _utc_now()})
-        .eq("id", command_id)
-        .eq("profile_key", profile_key)
-        .execute()
-    )
-    return result.data[0] if result.data else None
 
 
 def _utc_now() -> str:
@@ -1327,15 +1295,7 @@ def db_upsert_enrollment(campaign: dict, prospect: dict) -> dict | None:
     return result.data[0] if result.data else None
 
 
-def db_delete_profile(profile_key: str, delete_local_session: bool = False) -> bool:
-    try:
-        db_create_profile_command(
-            profile_key,
-            "profile_deleted",
-            {"delete_local_session": bool(delete_local_session)},
-        )
-    except Exception as exc:
-        logger.warning("Could not queue local profile deletion command for %s: %s", profile_key, exc)
+def db_delete_profile(profile_key: str) -> bool:
     # Disable related running work first. Historical jobs/activity stay for audit.
     supabase.table("jobs").update({
         "status": "cancelled",

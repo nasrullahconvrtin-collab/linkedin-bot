@@ -5,7 +5,6 @@ import {
   runConnections, checkAcceptances, runMessages, runFollowups,
   getSchedules,
 } from '../services/api';
-import wsService from '../services/websocket';
 
 const Ctx = createContext(null);
 
@@ -85,7 +84,6 @@ export function AppProvider({ children }) {
   const [stats,         setStats]         = useState(null);
   const [campaigns,     setCampaigns]     = useState([]);
   const [profiles,      setProfiles]      = useState([]);
-  const [wsConnected,   setWsConnected]   = useState(false);
   const [unreadReplies, setUnreadReplies] = useState(0);
   const [theme,         setThemeState]     = useState(() => localStorage.getItem('lf_theme') || 'dark');
 
@@ -118,19 +116,9 @@ export function AppProvider({ children }) {
   useEffect(() => {
     fetchStats(); fetchCampaigns(); fetchProfiles(); fetchReplies();
     const s = setInterval(fetchStats,   60_000);
+    const p = setInterval(fetchProfiles, 30_000);
     const r = setInterval(fetchReplies, 30_000);
-    return () => { clearInterval(s); clearInterval(r); };
-  }, []);
-
-  // WebSocket
-  useEffect(() => {
-    wsService.connect();
-    const unsub = wsService.onMessage((msg) => {
-      if (msg.type === 'connection_status') setWsConnected(msg.connected);
-      if (msg.type === 'replied')           { setUnreadReplies(p => p + 1); fetchStats(); }
-      if (msg.type === 'result' || msg.type === 'accepted') fetchStats();
-    });
-    return () => { unsub(); wsService.disconnect(); };
+    return () => { clearInterval(s); clearInterval(p); clearInterval(r); };
   }, []);
 
   // Auto-start overdue tasks when dashboard loads
@@ -143,9 +131,11 @@ export function AppProvider({ children }) {
     document.documentElement.style.colorScheme = theme;
   }, [theme]);
 
+  const executorConnected = profiles.some(p => p.session_active);
+
   return (
     <Ctx.Provider value={{
-      stats, campaigns, profiles, wsConnected, unreadReplies, theme, setTheme,
+      stats, campaigns, profiles, wsConnected: executorConnected, unreadReplies, theme, setTheme,
       fetchStats, fetchCampaigns, fetchProfiles,
     }}>
       {children}

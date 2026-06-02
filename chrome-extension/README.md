@@ -1,7 +1,8 @@
 # LinkedFlow Chrome Extension Executor
 
 This extension is an MVP executor for the existing LinkedFlow backend queue.
-It does not replace campaigns, prospects, templates, queues, or the Windows Agent.
+It does not replace campaigns, prospects, templates, queues, or campaign logic.
+It is the local execution layer for LinkedIn actions.
 
 ## Install During MVP
 

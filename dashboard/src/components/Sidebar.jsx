@@ -147,7 +147,7 @@ export default function Sidebar({ collapsed = false, onToggle }) {
         ))}
       </nav>
 
-      {/* Agent status */}
+      {/* Executor status */}
       <div className="p-4 border-t border-[#2a2a2a]">
         <button
           onClick={onToggle}
@@ -160,7 +160,7 @@ export default function Sidebar({ collapsed = false, onToggle }) {
         <div className={`status-pill flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-[#1a1a1a] ${collapsed ? 'justify-center' : ''}`}>
           <span className={`w-2 h-2 rounded-full shrink-0 ${wsConnected ? 'bg-[#22c55e] animate-pulse' : 'bg-[#ef4444]'}`} />
           <span className={`text-xs font-medium ${wsConnected ? 'text-[#22c55e]' : 'text-[#ef4444]'} ${collapsed ? 'sr-only' : ''}`}>
-            {wsConnected ? 'Agent Connected' : 'Agent Offline'}
+            {wsConnected ? 'Extension Online' : 'Extension Offline'}
           </span>
         </div>
       </div>
