@@ -628,6 +628,7 @@ def db_get_all_profiles() -> list[dict]:
     profiles = (
         supabase.table("linkedin_profiles")
         .select("*")
+        .neq("profile_key", "dashboard")
         .order("profile_key")
         .execute()
         .data or []

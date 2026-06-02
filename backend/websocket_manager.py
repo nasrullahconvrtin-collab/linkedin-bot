@@ -30,18 +30,20 @@ class WebSocketManager:
     async def connect(self, profile_key: str, websocket: WebSocket):
         await websocket.accept()
         self.connected_agents[profile_key] = websocket
-        db.db_upsert_profile(profile_key, {
-            "session_active": True,
-            "last_active": datetime.now(timezone.utc).isoformat(),
-        })
+        if profile_key != "dashboard":
+            db.db_upsert_profile(profile_key, {
+                "session_active": True,
+                "last_active": datetime.now(timezone.utc).isoformat(),
+            })
         logger.info(f"[WS] Agent connected: {profile_key}")
 
     def disconnect(self, profile_key: str):
         self.connected_agents.pop(profile_key, None)
-        try:
-            db.db_update_profile(profile_key, {"session_active": False})
-        except Exception:
-            pass
+        if profile_key != "dashboard":
+            try:
+                db.db_update_profile(profile_key, {"session_active": False})
+            except Exception:
+                pass
         logger.info(f"[WS] Agent disconnected: {profile_key}")
 
     def is_connected(self, profile_key: str) -> bool:
@@ -130,6 +132,8 @@ class WebSocketManager:
     # ── Internal result handlers (all sync — DB calls are sync) ──────────────
 
     def _handle_heartbeat(self, profile_key: str, data: dict):
+        if profile_key == "dashboard":
+            return
         db.db_upsert_profile(profile_key, {
             "daily_sent":     data.get("daily_sent", 0),
             "session_active": data.get("session_active", True),
