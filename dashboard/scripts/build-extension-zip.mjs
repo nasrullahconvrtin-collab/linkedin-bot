@@ -15,6 +15,14 @@ const extDir     = join(repoRoot, 'chrome-extension');
 const outDir     = join(__dirname, '..', 'public', 'downloads');
 const outZip     = join(outDir, 'LinkedFlow-Chrome-Extension.zip');
 
+// On Vercel the monorepo root may not be available — skip gracefully so the
+// previously committed ZIP is used instead of failing the whole build.
+import { existsSync } from 'fs';
+if (!existsSync(extDir)) {
+  console.log('ℹ️  chrome-extension/ not found (Vercel build context) — using committed ZIP.');
+  process.exit(0);
+}
+
 mkdirSync(outDir, { recursive: true });
 
 // Pure-JS ZIP writer (no external deps needed)
