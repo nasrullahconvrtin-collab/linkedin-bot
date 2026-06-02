@@ -77,7 +77,7 @@ const chunks  = [];
 for (const { full, rel } of files) {
   const { readFileSync } = await import('fs');
   const data     = readFileSync(full);
-  const nameBuf  = Buffer.from(`chrome-extension/${rel}`);
+  const nameBuf  = Buffer.from(rel);  // no extra folder prefix — manifest.json sits at ZIP root
   const crc      = crc32(data);
   const { date, time } = dosDateTime();
 
