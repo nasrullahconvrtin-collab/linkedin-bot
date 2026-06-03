@@ -92,8 +92,20 @@ async function detectMessageability() {
 async function sendConnection(note = '') {
   await ensureTop();
   if (isLoginRequired()) return { status: 'session_expired', message: 'LinkedIn login required' };
-  if (hasNormalMessage()) return { status: 'connected', message: 'Already connected' };
+
+  // Check for 1st degree connection indicator in the page
+  const degreeText = document.body.innerText || '';
+  const has1st = document.querySelector('[aria-label*="1st"]') ||
+    Array.from(document.querySelectorAll('span')).some(el =>
+      el.textContent.trim() === '1st' || el.textContent.trim() === '1st degree connection'
+    );
+  if (has1st || hasNormalMessage()) return { status: 'connected', message: 'Already connected' };
   if (hasPendingInvite()) return { status: 'pending', message: 'Connection request already pending' };
+
+  // Also check for "Following" or "Message" buttons that indicate connection
+  const allButtons = Array.from(document.querySelectorAll('button')).map(b => b.textContent.trim());
+  if (allButtons.includes('Message')) return { status: 'connected', message: 'Already connected (Message button found)' };
+  if (allButtons.includes('Following')) return { status: 'connected', message: 'Already following/connected' };
 
   let clicked = clickButtonByText('Connect');
   if (!clicked && clickButtonByText('More')) {
