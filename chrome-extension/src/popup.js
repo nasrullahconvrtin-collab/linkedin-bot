@@ -50,6 +50,11 @@ $('pause').addEventListener('click', async () => {
   render();
 });
 
+$('closeTab').addEventListener('click', async () => {
+  await chrome.runtime.sendMessage({ type: 'close_automation_tab' });
+  render();
+});
+
 $('dashboard').addEventListener('click', () => chrome.tabs.create({ url: 'https://linkedflow-dashboard.vercel.app/settings' }));
 
 $('clear').addEventListener('click', async () => {

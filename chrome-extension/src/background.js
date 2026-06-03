@@ -3,14 +3,80 @@ import { getConfig, saveConfig, extensionId } from './storage.js';
 
 const EXT_VERSION = '0.1.0';
 
+// ── Dedicated automation tab ──────────────────────────────────────────────────
+// We keep ONE hidden tab that the extension owns entirely.
+// The user's LinkedIn tab is NEVER navigated or touched.
+let automationTabId = null;
+
+async function getAutomationTab(url) {
+  // Check if our dedicated tab is still alive
+  if (automationTabId !== null) {
+    try {
+      const tab = await chrome.tabs.get(automationTabId);
+      if (tab && !tab.url?.startsWith(url || 'https://www.linkedin.com')) {
+        await chrome.tabs.update(automationTabId, { url: url || 'https://www.linkedin.com/feed/' });
+      } else if (tab && url && !tab.url?.startsWith(url)) {
+        await chrome.tabs.update(automationTabId, { url });
+      }
+      return tab;
+    } catch {
+      // Tab was closed — clear the id and create a new one
+      automationTabId = null;
+    }
+  }
+  // Create a new background tab
+  const tab = await chrome.tabs.create({
+    url: url || 'https://www.linkedin.com/feed/',
+    active: false,   // ← never steals focus from the user
+    pinned: false,
+  });
+  automationTabId = tab.id;
+  return tab;
+}
+
+async function navigateAutomationTab(url) {
+  const tab = await getAutomationTab(url);
+  if (!tab.url?.startsWith(url)) {
+    await chrome.tabs.update(tab.id, { url });
+  }
+  return tab;
+}
+
+async function waitForTab(tabId) {
+  for (let i = 0; i < 60; i += 1) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab.status === 'complete') return true;
+    } catch { return false; }
+    await new Promise(r => setTimeout(r, 500));
+  }
+  return false;
+}
+
+async function contentAction(url, type, payload = {}) {
+  const tab = await navigateAutomationTab(url);
+  const ready = await waitForTab(tab.id);
+  if (!ready) return { status: 'error', message: 'Tab did not load in time' };
+  // Small extra delay so LinkedIn React finishes rendering
+  await new Promise(r => setTimeout(r, 1200));
+  try {
+    return await chrome.tabs.sendMessage(tab.id, { type, ...payload });
+  } catch {
+    // Content script not yet injected — inject it then retry
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['src/content-linkedin.js'] });
+    await new Promise(r => setTimeout(r, 400));
+    return await chrome.tabs.sendMessage(tab.id, { type, ...payload });
+  }
+}
+
+// ── Alarm setup ───────────────────────────────────────────────────────────────
+
 chrome.runtime.onInstalled.addListener(async () => {
   const cfg = await getConfig();
   if (!cfg.extensionId) await saveConfig({ extensionId: extensionId() });
-  // MV3 enforces a minimum alarm interval of 1 minute — 0.25 (15s) is silently throttled.
   chrome.alarms.create('linkedflow_tick', { periodInMinutes: 1 });
 });
 
-// Re-create alarm on service worker startup in case it was cleared
 chrome.alarms.get('linkedflow_tick', (alarm) => {
   if (!alarm) chrome.alarms.create('linkedflow_tick', { periodInMinutes: 1 });
 });
@@ -24,35 +90,37 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     tick().then(sendResponse).catch(err => sendResponse({ ok: false, error: String(err.message || err) }));
     return true;
   }
+  if (msg?.type === 'close_automation_tab') {
+    if (automationTabId !== null) {
+      chrome.tabs.remove(automationTabId).catch(() => {});
+      automationTabId = null;
+    }
+    sendResponse({ ok: true });
+    return true;
+  }
 });
 
-async function getLinkedInTab(url) {
-  const tabs = await chrome.tabs.query({ url: 'https://www.linkedin.com/*' });
-  if (tabs.length) {
-    if (url && !tabs[0].url?.startsWith(url)) await chrome.tabs.update(tabs[0].id, { url, active: false });
-    return tabs[0];
-  }
-  return await chrome.tabs.create({ url: url || 'https://www.linkedin.com/feed/', active: false });
+// ── Heartbeat ─────────────────────────────────────────────────────────────────
+// Uses the automation tab — never touches the user's LinkedIn tab.
+
+async function heartbeatOnce(cfg) {
+  const state = await contentAction('https://www.linkedin.com/feed/', 'account_state');
+  await heartbeat({
+    profile_key: cfg.profileKey,
+    extension_id: cfg.extensionId,
+    display_name: state.displayName || cfg.displayName || cfg.profileKey,
+    current_url: state.currentUrl,
+    session_active: state.loginStatus === 'logged_in',
+    linkedin_login_status: state.loginStatus,
+    extension_status: cfg.paused ? 'paused' : 'online',
+    extension_version: EXT_VERSION,
+    automation_paused: Boolean(cfg.paused),
+  });
+  await saveConfig({ displayName: state.displayName || cfg.displayName, lastSync: new Date().toISOString(), lastError: '' });
+  return state;
 }
 
-async function waitForTab(tabId) {
-  for (let i = 0; i < 30; i += 1) {
-    const tab = await chrome.tabs.get(tabId);
-    if (tab.status === 'complete') return;
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
-}
-
-async function contentAction(url, type, payload = {}) {
-  const tab = await getLinkedInTab(url);
-  await waitForTab(tab.id);
-  try {
-    return await chrome.tabs.sendMessage(tab.id, { type, ...payload });
-  } catch {
-    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['src/content-linkedin.js'] });
-    return await chrome.tabs.sendMessage(tab.id, { type, ...payload });
-  }
-}
+// ── Job execution ─────────────────────────────────────────────────────────────
 
 function taskFromJob(job) {
   const payload = job.payload || {};
@@ -77,23 +145,6 @@ function taskFromJob(job) {
   return { type: job.job_type, reportType: job.job_type, url: payload.linkedin_url };
 }
 
-async function heartbeatOnce(cfg) {
-  const state = await contentAction('https://www.linkedin.com/feed/', 'account_state');
-  await heartbeat({
-    profile_key: cfg.profileKey,
-    extension_id: cfg.extensionId,
-    display_name: state.displayName || cfg.displayName || cfg.profileKey,
-    current_url: state.currentUrl,
-    session_active: state.loginStatus === 'logged_in',
-    linkedin_login_status: state.loginStatus,
-    extension_status: cfg.paused ? 'paused' : 'online',
-    extension_version: EXT_VERSION,
-    automation_paused: Boolean(cfg.paused),
-  });
-  await saveConfig({ displayName: state.displayName || cfg.displayName, lastSync: new Date().toISOString(), lastError: '' });
-  return state;
-}
-
 async function runJob(job, cfg) {
   const task = taskFromJob(job);
   await saveConfig({ currentJob: `${job.job_type} ${job.id}` });
@@ -101,7 +152,8 @@ async function runJob(job, cfg) {
   await startJob(job.id);
   let result;
   if (task.type === 'visit_profile') {
-    await getLinkedInTab(task.url);
+    await navigateAutomationTab(task.url);
+    await waitForTab(automationTabId);
     result = { status: 'completed', message: 'Profile visited' };
   } else {
     result = await contentAction(task.url, task.type, task);
@@ -124,6 +176,8 @@ async function runJob(job, cfg) {
   }
   await saveConfig({ currentJob: '', lastSync: new Date().toISOString(), lastError: '' });
 }
+
+// ── Main tick ─────────────────────────────────────────────────────────────────
 
 export async function tick() {
   const cfg = await getConfig();
