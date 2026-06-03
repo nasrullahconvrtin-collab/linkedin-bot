@@ -250,8 +250,26 @@ def db_create_prospect_for_campaign(campaign_id: str, data: dict) -> dict | None
     return prospect
 
 
+def _normalise_linkedin_url(url: str) -> str:
+    """Ensure LinkedIn URL has https://www. prefix."""
+    url = url.strip()
+    if not url:
+        return url
+    if url.startswith("https://"):
+        return url
+    if url.startswith("http://"):
+        return "https://" + url[7:]
+    if url.startswith("www.linkedin.com"):
+        return "https://" + url
+    if url.startswith("linkedin.com"):
+        return "https://www." + url
+    return url
+
+
 def db_create_or_update_prospect(data: dict) -> tuple[str, dict | None]:
     """Create/update by linkedin_url, then email. Returns ('created'|'updated'|'skipped', row)."""
+    if data.get("linkedin_url"):
+        data["linkedin_url"] = _normalise_linkedin_url(data["linkedin_url"])
     linkedin_url = (data.get("linkedin_url") or "").strip()
     email = (data.get("email") or "").strip()
     if not linkedin_url and not email:
@@ -366,6 +384,8 @@ def db_get_prospect_enrollments(prospect_id: str) -> list[dict]:
 
 
 def db_update_prospect(prospect_id: str, data: dict) -> dict | None:
+    if data.get("linkedin_url"):
+        data["linkedin_url"] = _normalise_linkedin_url(data["linkedin_url"])
     clean = {k: v for k, v in data.items() if v is not None}
     if not clean:
         return None
