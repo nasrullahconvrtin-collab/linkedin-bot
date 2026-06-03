@@ -2,51 +2,73 @@ import { heartbeat, pendingJobs, claimJob, startJob, completeJob, failJob } from
 import { getConfig, saveConfig, extensionId } from './storage.js';
 
 const EXT_VERSION = '0.1.0';
+const STORAGE_TAB_KEY  = 'lf_auto_tab_id';
+const STORAGE_WIN_KEY  = 'lf_auto_win_id';
 
-// ── Dedicated automation tab ──────────────────────────────────────────────────
-// We keep ONE hidden tab that the extension owns entirely.
-// The user's LinkedIn tab is NEVER navigated or touched.
-let automationTabId = null;
+// ── Dedicated invisible automation window + tab ───────────────────────────────
+// We create ONE minimized Chrome window that never appears in the user's
+// main window tab bar. The service worker may restart (MV3), so we persist
+// the tab/window IDs in chrome.storage.local and reuse them across restarts.
 
-async function getAutomationTab(url) {
-  // Check if our dedicated tab is still alive
-  if (automationTabId !== null) {
-    try {
-      const tab = await chrome.tabs.get(automationTabId);
-      if (tab && !tab.url?.startsWith(url || 'https://www.linkedin.com')) {
-        await chrome.tabs.update(automationTabId, { url: url || 'https://www.linkedin.com/feed/' });
-      } else if (tab && url && !tab.url?.startsWith(url)) {
-        await chrome.tabs.update(automationTabId, { url });
-      }
-      return tab;
-    } catch {
-      // Tab was closed — clear the id and create a new one
-      automationTabId = null;
+async function getSavedIds() {
+  const data = await chrome.storage.local.get([STORAGE_TAB_KEY, STORAGE_WIN_KEY]);
+  return { tabId: data[STORAGE_TAB_KEY] || null, winId: data[STORAGE_WIN_KEY] || null };
+}
+
+async function saveIds(tabId, winId) {
+  await chrome.storage.local.set({ [STORAGE_TAB_KEY]: tabId, [STORAGE_WIN_KEY]: winId });
+}
+
+async function clearIds() {
+  await chrome.storage.local.remove([STORAGE_TAB_KEY, STORAGE_WIN_KEY]);
+}
+
+async function isTabAlive(tabId) {
+  if (!tabId) return false;
+  try { await chrome.tabs.get(tabId); return true; } catch { return false; }
+}
+
+async function getAutomationTab(targetUrl) {
+  const { tabId, winId } = await getSavedIds();
+
+  // Reuse existing tab if still alive
+  if (await isTabAlive(tabId)) {
+    const tab = await chrome.tabs.get(tabId);
+    const dest = targetUrl || 'https://www.linkedin.com/feed/';
+    if (!tab.url?.startsWith(dest)) {
+      await chrome.tabs.update(tabId, { url: dest });
     }
+    return await chrome.tabs.get(tabId);
   }
-  // Create a new background tab
-  const tab = await chrome.tabs.create({
-    url: url || 'https://www.linkedin.com/feed/',
-    active: false,   // ← never steals focus from the user
-    pinned: false,
+
+  // Create a new minimized window — tabs inside are invisible in the main Chrome window
+  const dest = targetUrl || 'https://www.linkedin.com/feed/';
+  const win = await chrome.windows.create({
+    url: dest,
+    state: 'minimized',   // ← window is minimized, not visible in taskbar during use
+    focused: false,
+    type: 'normal',
   });
-  automationTabId = tab.id;
-  return tab;
+  const newTab = win.tabs[0];
+  await saveIds(newTab.id, win.id);
+  return newTab;
 }
 
 async function navigateAutomationTab(url) {
   const tab = await getAutomationTab(url);
-  if (!tab.url?.startsWith(url)) {
-    await chrome.tabs.update(tab.id, { url });
+  const dest = url || 'https://www.linkedin.com/feed/';
+  if (!tab.url?.startsWith(dest)) {
+    await chrome.tabs.update(tab.id, { url: dest });
+    return await chrome.tabs.get(tab.id);
   }
   return tab;
 }
 
 async function waitForTab(tabId) {
-  for (let i = 0; i < 60; i += 1) {
+  for (let i = 0; i < 60; i++) {
     try {
-      const tab = await chrome.tabs.get(tabId);
-      if (tab.status === 'complete') return true;
+      const t = await chrome.tabs.get(tabId);
+      if (t.status === 'complete') return true;
     } catch { return false; }
     await new Promise(r => setTimeout(r, 500));
   }
@@ -56,17 +78,23 @@ async function waitForTab(tabId) {
 async function contentAction(url, type, payload = {}) {
   const tab = await navigateAutomationTab(url);
   const ready = await waitForTab(tab.id);
-  if (!ready) return { status: 'error', message: 'Tab did not load in time' };
-  // Small extra delay so LinkedIn React finishes rendering
-  await new Promise(r => setTimeout(r, 1200));
+  if (!ready) return { status: 'error', message: 'Automation tab did not load in time' };
+  // Wait for LinkedIn React to finish rendering
+  await new Promise(r => setTimeout(r, 1500));
   try {
     return await chrome.tabs.sendMessage(tab.id, { type, ...payload });
   } catch {
-    // Content script not yet injected — inject it then retry
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['src/content-linkedin.js'] });
-    await new Promise(r => setTimeout(r, 400));
+    await new Promise(r => setTimeout(r, 500));
     return await chrome.tabs.sendMessage(tab.id, { type, ...payload });
   }
+}
+
+async function closeAutomationWindow() {
+  const { tabId, winId } = await getSavedIds();
+  if (winId) { try { await chrome.windows.remove(winId); } catch {} }
+  else if (tabId) { try { await chrome.tabs.remove(tabId); } catch {} }
+  await clearIds();
 }
 
 // ── Alarm setup ───────────────────────────────────────────────────────────────
@@ -91,11 +119,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg?.type === 'close_automation_tab') {
-    if (automationTabId !== null) {
-      chrome.tabs.remove(automationTabId).catch(() => {});
-      automationTabId = null;
-    }
-    sendResponse({ ok: true });
+    closeAutomationWindow().then(() => sendResponse({ ok: true }));
     return true;
   }
 });
@@ -152,8 +176,8 @@ async function runJob(job, cfg) {
   await startJob(job.id);
   let result;
   if (task.type === 'visit_profile') {
-    await navigateAutomationTab(task.url);
-    await waitForTab(automationTabId);
+    const vtab = await navigateAutomationTab(task.url);
+    await waitForTab(vtab.id);
     result = { status: 'completed', message: 'Profile visited' };
   } else {
     result = await contentAction(task.url, task.type, task);
