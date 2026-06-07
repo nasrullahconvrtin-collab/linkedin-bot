@@ -6,6 +6,8 @@ import {
 import toast from 'react-hot-toast';
 import MessageEditorModal from '../components/MessageEditorModal';
 import SequenceBuilder from '../components/SequenceBuilder';
+import { ReactFlowProvider } from 'reactflow';
+import SequenceFlowBuilder from '../components/SequenceFlowBuilder';
 import VariableMappingPanel, { autoVariableMappings } from '../components/VariableMappingPanel';
 import {
   addProspectsToCampaign,
@@ -159,6 +161,8 @@ export default function CampaignWizard({ onClose, onCreated }) {
   const [messageOverrides, setMessageOverrides] = useState({});
   const [delayOverrides, setDelayOverrides] = useState({});
   const [customSteps, setCustomSteps] = useState(null); // null = use template steps
+  const [flowBuilderMode, setFlowBuilderMode] = useState(false);
+  const [flowSequence, setFlowSequence] = useState(null);
   const [messageTemplates, setMessageTemplates] = useState([]);
   const [editorStep, setEditorStep] = useState(null);
   const [variableMappings, setVariableMappings] = useState({});
@@ -355,6 +359,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
           variables: availableMessageVariables,
           variable_mappings: variableMappings,
           custom_steps: customSteps || undefined,
+          flow_sequence: flowSequence || undefined,
         },
       });
 
@@ -566,54 +571,82 @@ export default function CampaignWizard({ onClose, onCreated }) {
                     <Loader2 size={15} className="animate-spin" /> Loading sequence steps…
                   </div>
                 )}
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+
+                {/* Mode toggle */}
+                <div className="flex items-center justify-between gap-3">
                   <div>
                     <h3 className="text-white font-semibold">Sequence Builder</h3>
-                    <p className="text-[#6b7280] text-xs mt-1">
-                      Edit messages and delays, reorder steps, or add new steps.
-                      {customSteps && <span className="ml-1 text-[#6366f1]">Custom sequence active.</span>}
-                    </p>
+                    <p className="text-[#6b7280] text-xs mt-1">Build your automation flow step by step.</p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {customSteps && (
-                      <button
-                        type="button"
-                        onClick={() => { setCustomSteps(null); setMessageOverrides({}); setDelayOverrides({}); }}
-                        className="px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-xs"
-                      >
-                        Reset to template
-                      </button>
-                    )}
-                    <select
-                      onChange={e => {
-                        if (e.target.value) applySequenceTemplate(e.target.value);
-                        e.target.value = '';
-                      }}
-                      className="bg-[#111111] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm"
+                  <div className="flex items-center gap-1 bg-[#111111] border border-[#2a2a2a] rounded-lg p-1">
+                    <button
+                      onClick={() => setFlowBuilderMode(false)}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${!flowBuilderMode ? 'bg-[#6366f1] text-white' : 'text-[#9ca3af] hover:text-white'}`}
                     >
-                      <option value="">Apply saved message template</option>
-                      {messageTemplates
-                        .filter(t => (t.type || t.message_type) === 'message_sequence' || (t.sequence || []).length)
-                        .map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
+                      Simple
+                    </button>
+                    <button
+                      onClick={() => setFlowBuilderMode(true)}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${flowBuilderMode ? 'bg-[#6366f1] text-white' : 'text-[#9ca3af] hover:text-white'}`}
+                    >
+                      ⚡ Visual Flow
+                    </button>
                   </div>
                 </div>
 
-                <SequenceBuilder
-                  steps={customSteps ?? steps}
-                  messageOverrides={messageOverrides}
-                  delayOverrides={delayOverrides}
-                  onChangeMessage={(key, val) => setMessageOverrides(m => ({ ...m, [key]: val }))}
-                  onChangeDelay={(key, val) => setDelayOverrides(d => ({ ...d, [key]: val }))}
-                  onChangeSteps={(newSteps) => setCustomSteps(newSteps)}
-                  messageTemplates={messageTemplates}
-                  availableVariables={availableMessageVariables}
-                />
+                {/* Simple builder */}
+                {!flowBuilderMode && (
+                  <>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        {customSteps && (
+                          <button type="button"
+                            onClick={() => { setCustomSteps(null); setMessageOverrides({}); setDelayOverrides({}); }}
+                            className="px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-xs">
+                            Reset to template
+                          </button>
+                        )}
+                      </div>
+                      <select
+                        onChange={e => { if (e.target.value) applySequenceTemplate(e.target.value); e.target.value = ''; }}
+                        className="bg-[#111111] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm"
+                      >
+                        <option value="">Apply saved message template</option>
+                        {messageTemplates.filter(t => (t.type || t.message_type) === 'message_sequence' || (t.sequence || []).length)
+                          .map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                    </div>
+                    <SequenceBuilder
+                      steps={customSteps ?? steps}
+                      messageOverrides={messageOverrides}
+                      delayOverrides={delayOverrides}
+                      onChangeMessage={(key, val) => setMessageOverrides(m => ({ ...m, [key]: val }))}
+                      onChangeDelay={(key, val) => setDelayOverrides(d => ({ ...d, [key]: val }))}
+                      onChangeSteps={setCustomSteps}
+                      messageTemplates={messageTemplates}
+                      availableVariables={availableMessageVariables}
+                    />
+                    {(customSteps ?? steps).length === 0 && !loadingTemplate && (
+                      <p className="text-xs text-[#6b7280] text-center pt-2">
+                        No steps loaded — select a template on step 1, or switch to Visual Flow to build from scratch.
+                      </p>
+                    )}
+                  </>
+                )}
 
-                {(customSteps ?? steps).length === 0 && !loadingTemplate && (
-                  <p className="text-xs text-[#6b7280] text-center pt-2">
-                    No steps loaded. Go back to step 1 and select a template, or add steps manually above.
-                  </p>
+                {/* Visual flow builder */}
+                {flowBuilderMode && (
+                  <ReactFlowProvider>
+                    <SequenceFlowBuilder
+                      initialNodes={flowSequence?.nodes}
+                      initialEdges={flowSequence?.edges}
+                      onSave={(seq) => { setFlowSequence(seq); toast.success('Sequence saved to campaign'); }}
+                      onSaveTemplate={async (payload) => {
+                        const saved = await saveMessage({ ...payload, message_type: 'flow_sequence', type: 'flow_sequence', body: JSON.stringify(payload) });
+                        setMessageTemplates(t => [saved, ...t.filter(x => x.id !== saved.id)]);
+                      }}
+                    />
+                  </ReactFlowProvider>
                 )}
               </div>
             )}
