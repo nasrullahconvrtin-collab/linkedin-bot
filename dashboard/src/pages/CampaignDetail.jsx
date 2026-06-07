@@ -3,9 +3,11 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Upload, FileText, X, Loader2, CheckCircle, AlertCircle, Rocket, Pause, Archive, Plus, UserPlus, Trash2 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import toast from 'react-hot-toast';
+import { ReactFlowProvider } from 'reactflow';
 import Layout from '../components/Layout';
 import MessageEditorModal from '../components/MessageEditorModal';
 import ProspectTable from '../components/ProspectTable';
+import SequenceFlowBuilder from '../components/SequenceFlowBuilder';
 import StatusBadge from '../components/StatusBadge';
 import {
   addProspectsToCampaign,
@@ -520,6 +522,28 @@ export default function CampaignDetail() {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {tab === 'sequence' && (campaign?.sequence_config?.flow_sequence?.nodes || []).length > 0 && (
+        <div className="space-y-3 mb-4">
+          <div>
+            <h3 className="text-white font-semibold">Visual Sequence</h3>
+            <p className="text-[#6b7280] text-xs mt-1">This campaign was built with the visual flow builder. Edit it here — changes apply to future steps.</p>
+          </div>
+          <ReactFlowProvider>
+            <SequenceFlowBuilder
+              initialNodes={campaign.sequence_config.flow_sequence.nodes}
+              initialEdges={campaign.sequence_config.flow_sequence.edges}
+              onSave={async (seq) => {
+                await saveSequenceConfig({ flow_sequence: seq });
+              }}
+              onSaveTemplate={async (payload) => {
+                const saved = await saveMessage({ ...payload, message_type: 'flow_sequence', type: 'flow_sequence', body: JSON.stringify(payload) });
+                setMessageTemplates(t => [saved, ...t.filter(x => x.id !== saved.id)]);
+              }}
+            />
+          </ReactFlowProvider>
         </div>
       )}
 

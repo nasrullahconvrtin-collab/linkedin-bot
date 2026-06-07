@@ -4,8 +4,6 @@ import {
   MessageSquare, Rocket, Send, X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import MessageEditorModal from '../components/MessageEditorModal';
-import SequenceBuilder from '../components/SequenceBuilder';
 import { ReactFlowProvider } from 'reactflow';
 import SequenceFlowBuilder from '../components/SequenceFlowBuilder';
 import VariableMappingPanel, { autoVariableMappings } from '../components/VariableMappingPanel';
@@ -127,10 +125,8 @@ export default function CampaignWizard({ onClose, onCreated }) {
   const [messageOverrides, setMessageOverrides] = useState({});
   const [delayOverrides, setDelayOverrides] = useState({});
   const [customSteps, setCustomSteps] = useState(null); // null = use template steps
-  const [flowBuilderMode, setFlowBuilderMode] = useState(true);
   const [flowSequence, setFlowSequence] = useState(null);
   const [messageTemplates, setMessageTemplates] = useState([]);
-  const [editorStep, setEditorStep] = useState(null);
   const [variableMappings, setVariableMappings] = useState({});
   const [launchNow, setLaunchNow] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -257,25 +253,6 @@ export default function CampaignWizard({ onClose, onCreated }) {
     return true;
   };
 
-  const applySequenceTemplate = (templateId) => {
-    const template = messageTemplates.find(t => t.id === templateId);
-    if (!template) return;
-    const sequenceMessages = (template.sequence || []).filter(s => s.body);
-    if (!sequenceMessages.length && template.body) {
-      const messageSteps = steps.filter(s => s.action_type === 'message' || s.action_type === 'follow-up message');
-      if (messageSteps[0]) setMessageOverrides(m => ({ ...m, [String(messageSteps[0].step_order)]: template.body }));
-      toast.success('Template applied to first message step');
-      return;
-    }
-    const messageSteps = steps.filter(s => s.action_type === 'message' || s.action_type === 'follow-up message');
-    const nextMessages = { ...messageOverrides };
-    messageSteps.forEach((step, index) => {
-      if (sequenceMessages[index]?.body) nextMessages[String(step.step_order)] = sequenceMessages[index].body;
-    });
-    setMessageOverrides(nextMessages);
-    toast.success('Sequence template applied');
-  };
-
   const addManualProspect = async () => {
     const payload = {
       ...manualProspect,
@@ -361,17 +338,17 @@ export default function CampaignWizard({ onClose, onCreated }) {
         <div className="flex items-start justify-between gap-4 mb-6">
           <div>
             <h1 className="text-white text-2xl font-bold">Start Campaign</h1>
-            <p className="text-[#6b7280] text-sm mt-1">Choose a reusable sequence, select prospects, edit timing, then save or launch.</p>
+            <p className="text-[#6b7280] text-sm mt-1">Set up your campaign, add prospects, build the sequence, then save or launch.</p>
           </div>
           <button onClick={onClose} className="p-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white">
             <X size={18} />
           </button>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-5">
+        <div className={`grid grid-cols-1 gap-5 ${step === 2 ? '' : 'xl:grid-cols-[1fr_360px]'}`}>
           <div className="space-y-5">
             <div className="flex gap-1 bg-[#111111] rounded-xl p-1 w-fit border border-[#2a2a2a]">
-              {['Sequence', 'Prospects', 'Review'].map((label, index) => (
+              {['Setup', 'Prospects', 'Sequence', 'Review'].map((label, index) => (
                 <button
                   key={label}
                   onClick={() => setStep(index)}
@@ -384,8 +361,36 @@ export default function CampaignWizard({ onClose, onCreated }) {
               ))}
             </div>
 
-            {loading && step === 0 && (
+            {loading && (
               <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-10 text-center text-[#6b7280]">Loading…</div>
+            )}
+
+            {step === 0 && !loading && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
+                  <label className="text-xs text-[#9ca3af]">Campaign Name</label>
+                  <input
+                    value={campaignName}
+                    onChange={e => setCampaignName(e.target.value)}
+                    placeholder="Q3 founder outreach"
+                    className="mt-2 w-full bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+                  />
+                  <p className="text-[#6b7280] text-xs mt-2">Give your campaign a name you'll recognize later.</p>
+                </div>
+                <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
+                  <label className="text-xs text-[#9ca3af]">LinkedIn Profile</label>
+                  <select
+                    value={profileKey}
+                    onChange={e => setProfileKey(e.target.value)}
+                    className="mt-2 w-full bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+                  >
+                    {(profiles.length ? profiles : [{ profile_key: 'profile_1', display_name: 'profile_1' }]).map(p => (
+                      <option key={p.profile_key} value={p.profile_key}>{p.display_name || p.profile_key}</option>
+                    ))}
+                  </select>
+                  <p className="text-[#6b7280] text-xs mt-2">One campaign runs through one LinkedIn account.</p>
+                </div>
+              </div>
             )}
 
             {step === 1 && (
@@ -519,94 +524,27 @@ export default function CampaignWizard({ onClose, onCreated }) {
               </div>
             )}
 
-            {step === 0 && !loading && (
-              <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5 space-y-4">
-                {loadingTemplate && (
-                  <div className="flex items-center gap-2 text-[#6b7280] text-sm py-2">
-                    <Loader2 size={15} className="animate-spin" /> Loading sequence steps…
-                  </div>
-                )}
-
-                {/* Mode toggle */}
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-white font-semibold">Sequence Builder</h3>
-                    <p className="text-[#6b7280] text-xs mt-1">Build your automation flow step by step.</p>
-                  </div>
-                  <div className="flex items-center gap-1 bg-[#111111] border border-[#2a2a2a] rounded-lg p-1">
-                    <button
-                      onClick={() => setFlowBuilderMode(false)}
-                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${!flowBuilderMode ? 'bg-[#6366f1] text-white' : 'text-[#9ca3af] hover:text-white'}`}
-                    >
-                      Simple
-                    </button>
-                    <button
-                      onClick={() => setFlowBuilderMode(true)}
-                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${flowBuilderMode ? 'bg-[#6366f1] text-white' : 'text-[#9ca3af] hover:text-white'}`}
-                    >
-                      ⚡ Visual Flow
-                    </button>
-                  </div>
+            {step === 2 && (
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-white font-semibold">Sequence Builder</h3>
+                  <p className="text-[#6b7280] text-xs mt-1">Build your automation flow visually — add a step, connect it, configure it.</p>
                 </div>
-
-                {/* Simple builder */}
-                {!flowBuilderMode && (
-                  <>
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        {customSteps && (
-                          <button type="button"
-                            onClick={() => { setCustomSteps(null); setMessageOverrides({}); setDelayOverrides({}); }}
-                            className="px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-xs">
-                            Reset to template
-                          </button>
-                        )}
-                      </div>
-                      <select
-                        onChange={e => { if (e.target.value) applySequenceTemplate(e.target.value); e.target.value = ''; }}
-                        className="bg-[#111111] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm"
-                      >
-                        <option value="">Apply saved message template</option>
-                        {messageTemplates.filter(t => (t.type || t.message_type) === 'message_sequence' || (t.sequence || []).length)
-                          .map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                      </select>
-                    </div>
-                    <SequenceBuilder
-                      steps={customSteps ?? steps}
-                      messageOverrides={messageOverrides}
-                      delayOverrides={delayOverrides}
-                      onChangeMessage={(key, val) => setMessageOverrides(m => ({ ...m, [key]: val }))}
-                      onChangeDelay={(key, val) => setDelayOverrides(d => ({ ...d, [key]: val }))}
-                      onChangeSteps={setCustomSteps}
-                      messageTemplates={messageTemplates}
-                      availableVariables={availableMessageVariables}
-                    />
-                    {(customSteps ?? steps).length === 0 && !loadingTemplate && (
-                      <p className="text-xs text-[#6b7280] text-center pt-2">
-                        No steps loaded — select a template on step 1, or switch to Visual Flow to build from scratch.
-                      </p>
-                    )}
-                  </>
-                )}
-
-                {/* Visual flow builder */}
-                {flowBuilderMode && (
-                  <ReactFlowProvider>
-                    <SequenceFlowBuilder
-                      initialNodes={flowSequence?.nodes}
-                      initialEdges={flowSequence?.edges}
-                      onSave={(seq) => { setFlowSequence(seq); toast.success('Sequence saved to campaign'); }}
-                      onSaveTemplate={async (payload) => {
-                        const saved = await saveMessage({ ...payload, message_type: 'flow_sequence', type: 'flow_sequence', body: JSON.stringify(payload) });
-                        setMessageTemplates(t => [saved, ...t.filter(x => x.id !== saved.id)]);
-                      }}
-                    />
-                  </ReactFlowProvider>
-                )}
+                <ReactFlowProvider>
+                  <SequenceFlowBuilder
+                    initialNodes={flowSequence?.nodes}
+                    initialEdges={flowSequence?.edges}
+                    onSave={(seq) => { setFlowSequence(seq); toast.success('Sequence saved to campaign'); }}
+                    onSaveTemplate={async (payload) => {
+                      const saved = await saveMessage({ ...payload, message_type: 'flow_sequence', type: 'flow_sequence', body: JSON.stringify(payload) });
+                      setMessageTemplates(t => [saved, ...t.filter(x => x.id !== saved.id)]);
+                    }}
+                  />
+                </ReactFlowProvider>
               </div>
             )}
 
-            {step === 2 && (
+            {step === 3 && (
               <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-6">
                 <h3 className="text-white font-semibold mb-4">Review</h3>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-5">
@@ -629,8 +567,8 @@ export default function CampaignWizard({ onClose, onCreated }) {
 
             <div className="flex items-center justify-between">
               <button onClick={() => setStep(s => Math.max(0, s - 1))} disabled={step === 0} className="px-4 py-2.5 rounded-xl border border-[#2a2a2a] text-[#9ca3af] disabled:opacity-40">Back</button>
-              {step < 2 ? (
-                <button onClick={() => setStep(s => Math.min(2, s + 1))} className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#6366f1] text-white font-medium text-sm">
+              {step < 3 ? (
+                <button onClick={() => setStep(s => Math.min(3, s + 1))} className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#6366f1] text-white font-medium text-sm">
                   Continue <ArrowRight size={16} />
                 </button>
               ) : (
@@ -642,74 +580,27 @@ export default function CampaignWizard({ onClose, onCreated }) {
             </div>
           </div>
 
-          <div className="space-y-5">
-            <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
-              <label className="text-xs text-[#9ca3af]">Campaign Name</label>
-              <input
-                value={campaignName}
-                onChange={e => setCampaignName(e.target.value)}
-                placeholder="Q3 founder outreach"
-                className="mt-2 w-full bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
-              />
-            </div>
-            <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
-              <label className="text-xs text-[#9ca3af]">LinkedIn Profile</label>
-              <select
-                value={profileKey}
-                onChange={e => setProfileKey(e.target.value)}
-                className="mt-2 w-full bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
-              >
-                {(profiles.length ? profiles : [{ profile_key: 'profile_1', display_name: 'profile_1' }]).map(p => (
-                  <option key={p.profile_key} value={p.profile_key}>{p.display_name || p.profile_key}</option>
-                ))}
-              </select>
-              <p className="text-[#6b7280] text-xs mt-2">One campaign runs through one LinkedIn account.</p>
-            </div>
-            <StepPreview steps={steps} />
-            <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
-              <h3 className="text-white font-semibold mb-3">Variables</h3>
-              <div className="flex flex-wrap gap-1.5">
-                {availableMessageVariables.map(v => (
-                  <span key={v} className="text-xs px-2 py-1 rounded-md bg-[#111111] border border-[#2a2a2a] text-[#9ca3af]">{`{{${v}}}`}</span>
-                ))}
+          {step !== 2 && (
+            <div className="space-y-5">
+              <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
+                <p className="text-[#6b7280] text-xs">Campaign</p>
+                <p className="text-white font-medium mt-1">{campaignName || 'Untitled campaign'}</p>
+                <p className="text-[#6b7280] text-xs mt-3">LinkedIn Profile</p>
+                <p className="text-white text-sm mt-1">{profiles.find(p => p.profile_key === profileKey)?.display_name || profileKey}</p>
+              </div>
+              <StepPreview steps={steps} />
+              <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
+                <h3 className="text-white font-semibold mb-3">Variables</h3>
+                <div className="flex flex-wrap gap-1.5">
+                  {availableMessageVariables.map(v => (
+                    <span key={v} className="text-xs px-2 py-1 rounded-md bg-[#111111] border border-[#2a2a2a] text-[#9ca3af]">{`{{${v}}}`}</span>
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
-      <MessageEditorModal
-        open={!!editorStep}
-        title={editorStep ? `Edit ${editorStep.label}` : 'Edit Message'}
-        value={editorStep ? (messageOverrides[String(editorStep.step_order)] ?? editorStep.config?.message ?? '') : ''}
-        name={editorStep?.label || ''}
-        type={editorStep?.action_type === 'follow-up message' ? 'follow_up' : 'first_message'}
-        templates={messageTemplates}
-        availableVariables={availableMessageVariables}
-        customVariables={csvFields}
-        sampleProspects={prospects.slice(0, 8)}
-        senderVariables={{
-          sender_name: profiles.find(p => p.profile_key === profileKey)?.display_name || profileKey,
-          sender_company: 'LinkedFlow',
-          sender_email: '',
-          sender_phone: '',
-          sender_linkedin: '',
-        }}
-        campaignVariables={{
-          campaign_name: campaignName,
-          campaign_profile: profileKey,
-          campaign_offer: '',
-        }}
-        onClose={() => setEditorStep(null)}
-        onSave={(body) => {
-          setMessageOverrides(m => ({ ...m, [String(editorStep.step_order)]: body }));
-          setEditorStep(null);
-        }}
-        onSaveTemplate={async (payload) => {
-          const saved = await saveMessage(payload);
-          setMessageTemplates(t => [saved, ...t.filter(x => x.id !== saved.id)]);
-          toast.success('Template saved');
-        }}
-      />
     </div>
   );
 }

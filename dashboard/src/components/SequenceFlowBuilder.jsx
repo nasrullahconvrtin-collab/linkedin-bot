@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ReactFlow, {
   addEdge, Background, Controls, MiniMap,
-  useEdgesState, useNodesState, useReactFlow,
+  useEdgesState, useNodesState,
   MarkerType, Handle, Position,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
@@ -14,7 +14,7 @@ import {
   CheckCircle2, Clock, Eye, GitBranch, Mail, MessageSquare,
   MousePointer2, Plus, Save, Send, Settings, Trash2,
   UserCheck, UserPlus, X, XCircle, Zap, AlertTriangle,
-  Database, AtSign, Flag,
+  Database, AtSign, Flag, ThumbsUp,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -22,20 +22,21 @@ import toast from 'react-hot-toast';
 
 export const NODE_TYPES_DEF = [
   // Actions
-  { type: 'visit_profile',        label: 'Visit Profile',         icon: Eye,            color: '#6366f1', category: 'action',   description: 'Visit the prospect LinkedIn profile' },
-  { type: 'follow_profile',       label: 'Follow Profile',        icon: UserPlus,       color: '#8b5cf6', category: 'action',   description: 'Follow the prospect on LinkedIn' },
-  { type: 'send_invitation',      label: 'Send Invitation',       icon: UserCheck,      color: '#7c3aed', category: 'action',   description: 'Send a connection request' },
-  { type: 'check_messageability', label: 'Check Messageability',  icon: GitBranch,      color: '#0891b2', category: 'action',   description: 'Check if InMail or message is available' },
-  { type: 'send_inmail',          label: 'Send InMail',           icon: Mail,           color: '#0e7490', category: 'action',   description: 'Send an InMail (human reviewed)' },
-  { type: 'send_message',         label: 'Send Message',          icon: MessageSquare,  color: '#7c3aed', category: 'action',   description: 'Send a prepared LinkedIn message' },
-  { type: 'check_reply',          label: 'Check Reply',           icon: MessageSquare,  color: '#059669', category: 'action',   description: 'Check if prospect replied' },
+  { type: 'visit_profile',        label: 'Visit Profile',         icon: Eye,            color: '#6366f1', category: 'action',   description: 'Open the prospect profile and record the visit' },
+  { type: 'follow_profile',       label: 'Follow Profile',        icon: UserPlus,       color: '#8b5cf6', category: 'action',   description: 'Click Follow on the prospect profile' },
+  { type: 'endorse_profile',      label: 'Endorse Profile',       icon: ThumbsUp,       color: '#f59e0b', category: 'action',   description: 'Visit profile and endorse a top skill' },
+  { type: 'send_invitation',      label: 'Send Connection Request', icon: UserCheck,    color: '#7c3aed', category: 'action',   description: 'Visit profile, check connection status, then connect — with or without a note' },
+  { type: 'check_messageability', label: 'Check Messageability',  icon: GitBranch,      color: '#0891b2', category: 'action',   description: 'Open Message and detect normal message vs. InMail vs. nothing' },
+  { type: 'send_inmail',          label: 'Send InMail',           icon: Mail,           color: '#0e7490', category: 'action',   description: 'Visit profile, confirm InMail is available, then send subject + message' },
+  { type: 'send_message',         label: 'Send Message',          icon: MessageSquare,  color: '#7c3aed', category: 'action',   description: 'Open the conversation and send a prepared message' },
+  { type: 'check_reply',          label: 'Check Reply',           icon: MessageSquare,  color: '#059669', category: 'action',   description: 'Open messages and check if the prospect replied' },
   // Queue steps
   { type: 'needs_personalization',label: 'Needs Personalization', icon: Settings,       color: '#d97706', category: 'queue',    description: 'Pause — employee writes personalized message' },
   { type: 'ready_to_send',        label: 'Ready to Send',         icon: CheckCircle2,   color: '#16a34a', category: 'queue',    description: 'Employee approved — agent sends next' },
   // Delays
-  { type: 'wait',                 label: 'Wait / Delay',          icon: Clock,          color: '#475569', category: 'delay',    description: 'Wait X days before next step' },
-  { type: 'wait_acceptance',      label: 'Wait for Acceptance',   icon: Clock,          color: '#475569', category: 'delay',    description: 'Wait until connection accepted' },
-  { type: 'wait_reply',          label: 'Wait for Reply',         icon: Clock,          color: '#475569', category: 'delay',    description: 'Wait for InMail response or reply' },
+  { type: 'wait',                 label: 'Wait / Delay',          icon: Clock,          color: '#475569', category: 'delay',    description: 'Pause for a number of days before the next step' },
+  { type: 'wait_acceptance',      label: 'Wait for Acceptance',   icon: Clock,          color: '#475569', category: 'delay',    description: 'Periodically re-check the profile for the Message button (= accepted)' },
+  { type: 'wait_reply',          label: 'Wait for InMail Reply',  icon: Clock,          color: '#475569', category: 'delay',    description: 'Re-check weekly: open profile → Message — if a normal message box appears, continue; otherwise stop' },
   // Control
   { type: 'stop_if_replied',      label: 'Stop if Replied',       icon: XCircle,        color: '#dc2626', category: 'control',  description: 'Stop sequence if prospect replied' },
   { type: 'completed',            label: 'Completed',             icon: Flag,           color: '#16a34a', category: 'control',  description: 'End of sequence — mark completed' },
@@ -116,7 +117,10 @@ function FlowNode({ id, data, selected }) {
               <p>⏱ {data.config.working_days ? `${data.config.working_days} working days` : `${data.config.days || 1} day(s)`}</p>
             )}
             {data.nodeType === 'send_invitation' && (
-              <p>{data.config.add_note ? '📝 With invite note' : '🚫 No note'}</p>
+              <p>{data.config.add_note ? '📝 With invite note' : '🚫 Without note'}</p>
+            )}
+            {data.nodeType === 'endorse_profile' && (
+              <p>👍 {data.config.skill ? `Endorse "${data.config.skill}"` : 'Endorse top skill'}</p>
             )}
             {(data.nodeType === 'send_message' || data.nodeType === 'send_inmail') && data.config.message && (
               <p className="truncate">💬 {data.config.message.slice(0, 40)}…</p>
@@ -143,6 +147,22 @@ function FlowNode({ id, data, selected }) {
 }
 
 const nodeTypes = { flowNode: FlowNode };
+
+// ─── Reusable variable-insert chips for rich message fields ──────────────────
+
+function VarChips({ onInsert, vars = ['first_name', 'last_name', 'company', 'title'] }) {
+  return (
+    <div className="flex flex-wrap gap-1 mt-2">
+      {vars.map(v => (
+        <button key={v} type="button"
+          onClick={() => onInsert(`{{${v}}}`)}
+          className="text-[10px] px-1.5 py-0.5 rounded bg-[#1a1a1a] border border-[#2a2a2a] text-[#9ca3af] hover:text-white">
+          {`{{${v}}}`}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 // ─── Node config panel ────────────────────────────────────────────────────────
 
@@ -171,28 +191,55 @@ function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
           />
         </div>
 
-        {/* Send Invitation config */}
+        {/* Send Invitation / Connection Request config */}
         {node.data.nodeType === 'send_invitation' && (
           <>
-            <div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={!!cfg.add_note} onChange={e => set('add_note', e.target.checked)} />
-                <span className="text-sm text-white">Include invite note (max 300 chars)</span>
-              </label>
+            <p className="text-[11px] text-[#6b7280] -mt-1">
+              Agent visits the profile, checks if already connected or pending — if not, clicks Connect (or More → Connect) and sends.
+            </p>
+            <div className="flex items-center gap-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-1 w-fit">
+              <button type="button" onClick={() => set('add_note', false)}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${!cfg.add_note ? 'bg-[#6366f1] text-white' : 'text-[#9ca3af] hover:text-white'}`}>
+                Without note
+              </button>
+              <button type="button" onClick={() => set('add_note', true)}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${cfg.add_note ? 'bg-[#6366f1] text-white' : 'text-[#9ca3af] hover:text-white'}`}>
+                With invite note
+              </button>
             </div>
             {cfg.add_note && (
               <div>
-                <label className="text-xs text-[#9ca3af]">Note text (use {`{{variables}}`})</label>
+                <label className="text-xs text-[#9ca3af]">Invite note (max 300 chars)</label>
                 <textarea
                   rows={4}
+                  maxLength={300}
                   value={cfg.note || ''}
-                  onChange={e => set('note', e.target.value)}
+                  onChange={e => set('note', e.target.value.slice(0, 300))}
                   placeholder="Hi {{first_name}}, I'd love to connect…"
                   className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1] resize-none"
                 />
+                <VarChips onInsert={(v) => set('note', ((cfg.note || '') + v).slice(0, 300))} />
                 <p className="text-[10px] text-[#6b7280] mt-1">{(cfg.note || '').length}/300 chars</p>
               </div>
             )}
+          </>
+        )}
+
+        {/* Endorse Profile config */}
+        {node.data.nodeType === 'endorse_profile' && (
+          <>
+            <p className="text-[11px] text-[#6b7280] -mt-1">
+              Agent opens the profile's Skills section and endorses a top skill to warm up the relationship before reaching out.
+            </p>
+            <div>
+              <label className="text-xs text-[#9ca3af]">Skill to endorse (optional — leave blank for top skill)</label>
+              <input
+                value={cfg.skill || ''}
+                onChange={e => set('skill', e.target.value)}
+                placeholder="e.g. Sales, Leadership…"
+                className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+              />
+            </div>
           </>
         )}
 
@@ -234,7 +281,10 @@ function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
         {/* Send message config */}
         {(node.data.nodeType === 'send_message') && (
           <div>
-            <label className="text-xs text-[#9ca3af]">Message text (use {`{{variables}}`})</label>
+            <p className="text-[11px] text-[#6b7280] -mt-1 mb-2">
+              Agent opens the profile, clicks Message, types this message into the chat box, and sends it.
+            </p>
+            <label className="text-xs text-[#9ca3af]">Message text</label>
             <textarea
               rows={6}
               value={cfg.message || ''}
@@ -242,21 +292,16 @@ function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
               placeholder="Hi {{first_name}}, following up…"
               className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1] resize-none"
             />
-            <div className="flex flex-wrap gap-1 mt-2">
-              {['first_name','last_name','company','title'].map(v => (
-                <button key={v} type="button"
-                  onClick={() => set('message', (cfg.message || '') + `{{${v}}}`)}
-                  className="text-[10px] px-1.5 py-0.5 rounded bg-[#1a1a1a] border border-[#2a2a2a] text-[#9ca3af] hover:text-white">
-                  {`{{${v}}}`}
-                </button>
-              ))}
-            </div>
+            <VarChips onInsert={(v) => set('message', (cfg.message || '') + v)} />
           </div>
         )}
 
         {/* Send InMail config */}
         {node.data.nodeType === 'send_inmail' && (
           <>
+            <p className="text-[11px] text-[#6b7280] -mt-1">
+              Agent opens the profile, clicks Message — if a Subject + Message composer appears (InMail), it fills both fields and sends. If a normal message box appears instead, or no message option exists, this step is skipped and the flow continues to the next node.
+            </p>
             <div>
               <label className="text-xs text-[#9ca3af]">InMail subject</label>
               <input
@@ -265,6 +310,7 @@ function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
                 placeholder="Quick question about {{company}}"
                 className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
               />
+              <VarChips onInsert={(v) => set('subject', (cfg.subject || '') + v)} />
             </div>
             <div>
               <label className="text-xs text-[#9ca3af]">InMail body</label>
@@ -275,6 +321,7 @@ function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
                 placeholder="Hi {{first_name}}, …"
                 className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1] resize-none"
               />
+              <VarChips onInsert={(v) => set('message', (cfg.message || '') + v)} />
             </div>
             <div>
               <label className="flex items-center gap-2 cursor-pointer">
@@ -286,17 +333,33 @@ function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
           </>
         )}
 
-        {/* Wait for reply config */}
+        {/* Wait for InMail reply / re-check config */}
         {node.data.nodeType === 'wait_reply' && (
-          <div>
-            <label className="text-xs text-[#9ca3af]">Check after X days</label>
-            <input
-              type="number" min="1" max="30"
-              value={cfg.check_after_days || 5}
-              onChange={e => set('check_after_days', Number(e.target.value))}
-              className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
-            />
-          </div>
+          <>
+            <p className="text-[11px] text-[#6b7280] -mt-1">
+              Agent re-checks weekly: opens the profile and clicks Message. If a normal message box now appears, it sends the message below and the flow continues; if not, the sequence ends for this prospect.
+            </p>
+            <div>
+              <label className="text-xs text-[#9ca3af]">Re-check every X days</label>
+              <input
+                type="number" min="1" max="30"
+                value={cfg.check_after_days || 7}
+                onChange={e => set('check_after_days', Number(e.target.value))}
+                className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-[#9ca3af]">Message to send once available</label>
+              <textarea
+                rows={5}
+                value={cfg.message || ''}
+                onChange={e => set('message', e.target.value)}
+                placeholder="Hi {{first_name}}, thanks for connecting…"
+                className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1] resize-none"
+              />
+              <VarChips onInsert={(v) => set('message', (cfg.message || '') + v)} />
+            </div>
+          </>
         )}
 
         {/* Completed config */}
@@ -360,19 +423,70 @@ function EdgeLabelSelector({ edge, onUpdate, onDelete }) {
   );
 }
 
+// ─── Node type picker (the "+" menu) ──────────────────────────────────────────
+
+const CATEGORY_LABELS = {
+  action: 'Actions',
+  queue: 'Review queue',
+  delay: 'Delays',
+  control: 'Control',
+  integration: 'Integrations',
+};
+
+function NodeTypePicker({ onPick, onClose }) {
+  const categories = [...new Set(NODE_TYPES_DEF.map(n => n.category))];
+  return (
+    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70" onClick={onClose}>
+      <div
+        className="bg-[#111111] border border-[#2a2a2a] rounded-2xl shadow-2xl w-[520px] max-w-[92vw] max-h-[82vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#2a2a2a] sticky top-0 bg-[#111111]">
+          <div>
+            <h3 className="text-white font-semibold text-sm">Add a step</h3>
+            <p className="text-[#6b7280] text-xs mt-0.5">Pick what the agent should do next</p>
+          </div>
+          <button onClick={onClose} className="text-[#6b7280] hover:text-white"><X size={18} /></button>
+        </div>
+        <div className="p-4 space-y-4">
+          {categories.map(cat => (
+            <div key={cat}>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-[#4b5563] mb-2 px-1">
+                {CATEGORY_LABELS[cat] || cat}
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {NODE_TYPES_DEF.filter(n => n.category === cat).map(def => {
+                  const Icon = def.icon;
+                  return (
+                    <button
+                      key={def.type}
+                      onClick={() => onPick(def.type)}
+                      className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] hover:border-[#6366f1]/50 hover:bg-[#1a1a1a]/80 text-left transition-colors"
+                    >
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                        style={{ background: def.color + '22' }}>
+                        <Icon size={15} style={{ color: def.color }} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-white text-xs font-medium truncate">{def.label}</p>
+                        <p className="text-[#6b7280] text-[10px] mt-0.5 leading-tight line-clamp-2">{def.description}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main SequenceFlowBuilder ─────────────────────────────────────────────────
 
 let nodeIdCounter = 1;
 function newId() { return `node_${Date.now()}_${nodeIdCounter++}`; }
-
-const INITIAL_NODES = [
-  {
-    id: 'start',
-    type: 'flowNode',
-    position: { x: 200, y: 40 },
-    data: { nodeType: 'send_invitation', label: 'Send Invitation', config: { add_note: false }, onDelete: () => {} },
-  },
-];
 
 export default function SequenceFlowBuilder({
   initialNodes,
@@ -381,7 +495,7 @@ export default function SequenceFlowBuilder({
   onSaveTemplate,
   templateName = '',
 }) {
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes || INITIAL_NODES);
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes && initialNodes.length ? initialNodes : []);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges || []);
   const [selectedNode, setSelectedNode] = useState(null);
   const [selectedEdge, setSelectedEdge]  = useState(null);
@@ -389,8 +503,8 @@ export default function SequenceFlowBuilder({
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [tplName, setTplName] = useState(templateName);
   const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
   const reactFlowWrapper = useRef(null);
-  const { screenToFlowPosition } = useReactFlow();
 
   // Keep onDelete callback fresh on nodes
   const deleteNode = useCallback((id) => {
@@ -406,14 +520,14 @@ export default function SequenceFlowBuilder({
     })));
   }, [deleteNode]);
 
-  // Add node from palette
+  // Add node from the "+" picker
   const addNode = useCallback((nodeType) => {
     const def = NODE_MAP[nodeType];
     const id = newId();
     const lastNode = nodes[nodes.length - 1];
     const pos = lastNode
       ? { x: lastNode.position.x, y: lastNode.position.y + 160 }
-      : { x: 200, y: 200 };
+      : { x: 280, y: 80 };
 
     const newNode = {
       id,
@@ -524,44 +638,10 @@ export default function SequenceFlowBuilder({
     toast.success('Sequence saved to campaign');
   };
 
-  const categories = [...new Set(NODE_TYPES_DEF.map(n => n.category))];
-
   return (
-    <div className="flex h-[calc(100vh-180px)] min-h-[600px] rounded-xl border border-[#2a2a2a] overflow-hidden bg-[#0a0a0a]">
+    <div className="flex h-[calc(100vh-220px)] min-h-[600px] rounded-xl border border-[#2a2a2a] overflow-hidden bg-[#0a0a0a]">
 
-      {/* Left palette */}
-      <div className="w-56 shrink-0 border-r border-[#2a2a2a] bg-[#111111] overflow-y-auto">
-        <div className="px-3 py-3 border-b border-[#2a2a2a]">
-          <p className="text-white text-xs font-semibold">Node Types</p>
-          <p className="text-[#6b7280] text-[10px] mt-0.5">Click to add to canvas</p>
-        </div>
-        {categories.map(cat => (
-          <div key={cat}>
-            <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-[#4b5563]">{cat}</p>
-            {NODE_TYPES_DEF.filter(n => n.category === cat).map(def => {
-              const Icon = def.icon;
-              return (
-                <button
-                  key={def.type}
-                  onClick={() => addNode(def.type)}
-                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#1a1a1a] text-left transition-colors group"
-                >
-                  <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0"
-                    style={{ background: def.color + '22' }}>
-                    <Icon size={12} style={{ color: def.color }} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-white text-xs truncate">{def.label}</p>
-                  </div>
-                  <Plus size={11} className="text-[#4b5563] group-hover:text-white shrink-0 ml-auto" />
-                </button>
-              );
-            })}
-          </div>
-        ))}
-      </div>
-
-      {/* Flow canvas */}
+      {/* Flow canvas — full width board */}
       <div className="flex-1 relative" ref={reactFlowWrapper}>
         <ReactFlow
           nodes={nodes}
@@ -608,14 +688,36 @@ export default function SequenceFlowBuilder({
           </button>
         </div>
 
-        {/* Instructions overlay when empty */}
-        {nodes.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        {/* Empty board: big "+" to add the first step (Dripify-style) */}
+        {nodes.length === 0 ? (
+          <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-center">
-              <p className="text-[#6b7280] text-sm">Click any node type on the left to start building</p>
-              <p className="text-[#4b5563] text-xs mt-1">Connect nodes by dragging from one handle to another</p>
+              <button
+                onClick={() => setShowPicker(true)}
+                className="w-16 h-16 rounded-full bg-[#6366f1] hover:bg-[#4f46e5] text-white flex items-center justify-center mx-auto shadow-lg shadow-[#6366f1]/30 transition-transform hover:scale-105"
+              >
+                <Plus size={28} />
+              </button>
+              <p className="text-white text-sm font-medium mt-4">Start building your sequence</p>
+              <p className="text-[#6b7280] text-xs mt-1">Click + to add the first step — visit, connect, message, wait, and more</p>
             </div>
           </div>
+        ) : (
+          /* Floating "+ Add step" button for subsequent nodes */
+          <button
+            onClick={() => setShowPicker(true)}
+            className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-4 py-2.5 rounded-full bg-[#6366f1] hover:bg-[#4f46e5] text-white text-sm font-medium shadow-lg shadow-[#6366f1]/30 transition-transform hover:scale-105"
+          >
+            <Plus size={16} /> Add Step
+          </button>
+        )}
+
+        {/* Node type picker modal */}
+        {showPicker && (
+          <NodeTypePicker
+            onPick={(type) => { addNode(type); setShowPicker(false); }}
+            onClose={() => setShowPicker(false)}
+          />
         )}
       </div>
 
