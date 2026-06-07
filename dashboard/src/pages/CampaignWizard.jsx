@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowRight, Check, Clock, FileUp, Layers3, Loader2,
+  ArrowRight, Check, Clock, FileUp, Loader2,
   MessageSquare, Rocket, Send, X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -83,40 +83,6 @@ function parseCSV(text) {
   return { headers, count: Math.max(rows.length - 1, 0), preview: rows.slice(1, 6) };
 }
 
-function TemplateCard({ template, selected, onSelect }) {
-  const active = template.status === 'active';
-  return (
-    <button
-      type="button"
-      disabled={!active}
-      onClick={() => onSelect(template)}
-      className={`text-left rounded-xl border p-5 transition-all ${
-        selected ? 'border-[#6366f1] bg-[#6366f1]/10' : 'border-[#2a2a2a] bg-[#1a1a1a] hover:border-[#3a3a3a]'
-      } ${!active ? 'opacity-50 cursor-not-allowed' : ''}`}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="w-10 h-10 rounded-lg bg-[#111111] border border-[#2a2a2a] flex items-center justify-center text-[#6366f1]">
-          <Layers3 size={18} />
-        </div>
-        <span className={`text-xs px-2 py-1 rounded-full border ${
-          active ? 'border-green-500/20 text-green-400 bg-green-500/10' : 'border-yellow-500/20 text-yellow-400 bg-yellow-500/10'
-        }`}>
-          {active ? 'Ready' : 'Coming Soon'}
-        </span>
-      </div>
-      <h3 className="text-white font-semibold mt-4">{template.name}</h3>
-      <p className="text-[#9ca3af] text-sm mt-2 leading-5 min-h-[56px]">{template.description}</p>
-      <div className="flex flex-wrap gap-1.5 mt-4">
-        {(template.supported_actions || []).slice(0, 5).map(action => (
-          <span key={action} className="text-[11px] px-2 py-1 rounded-md bg-[#111111] text-[#9ca3af] border border-[#2a2a2a]">
-            {action}
-          </span>
-        ))}
-      </div>
-    </button>
-  );
-}
-
 function StepPreview({ steps }) {
   return (
     <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
@@ -161,7 +127,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
   const [messageOverrides, setMessageOverrides] = useState({});
   const [delayOverrides, setDelayOverrides] = useState({});
   const [customSteps, setCustomSteps] = useState(null); // null = use template steps
-  const [flowBuilderMode, setFlowBuilderMode] = useState(false);
+  const [flowBuilderMode, setFlowBuilderMode] = useState(true);
   const [flowSequence, setFlowSequence] = useState(null);
   const [messageTemplates, setMessageTemplates] = useState([]);
   const [editorStep, setEditorStep] = useState(null);
@@ -405,7 +371,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-5">
           <div className="space-y-5">
             <div className="flex gap-1 bg-[#111111] rounded-xl p-1 w-fit border border-[#2a2a2a]">
-              {['Library', 'Prospects', 'Messages', 'Review'].map((label, index) => (
+              {['Sequence', 'Prospects', 'Review'].map((label, index) => (
                 <button
                   key={label}
                   onClick={() => setStep(index)}
@@ -418,20 +384,9 @@ export default function CampaignWizard({ onClose, onCreated }) {
               ))}
             </div>
 
-            {loading ? (
-              <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-10 text-center text-[#6b7280]">Loading templates...</div>
-            ) : step === 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {templates.map(template => (
-                  <TemplateCard
-                    key={template.id}
-                    template={template}
-                    selected={selected?.id === template.id}
-                    onSelect={selectTemplate}
-                  />
-                ))}
-              </div>
-            ) : null}
+            {loading && step === 0 && (
+              <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-10 text-center text-[#6b7280]">Loading…</div>
+            )}
 
             {step === 1 && (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -564,7 +519,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
               </div>
             )}
 
-            {step === 2 && (
+            {step === 0 && !loading && (
               <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5 space-y-4">
                 {loadingTemplate && (
                   <div className="flex items-center gap-2 text-[#6b7280] text-sm py-2">
@@ -651,7 +606,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
               </div>
             )}
 
-            {step === 3 && (
+            {step === 2 && (
               <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-6">
                 <h3 className="text-white font-semibold mb-4">Review</h3>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-5">
@@ -674,8 +629,8 @@ export default function CampaignWizard({ onClose, onCreated }) {
 
             <div className="flex items-center justify-between">
               <button onClick={() => setStep(s => Math.max(0, s - 1))} disabled={step === 0} className="px-4 py-2.5 rounded-xl border border-[#2a2a2a] text-[#9ca3af] disabled:opacity-40">Back</button>
-              {step < 3 ? (
-                <button onClick={() => setStep(s => Math.min(3, s + 1))} className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#6366f1] text-white font-medium text-sm">
+              {step < 2 ? (
+                <button onClick={() => setStep(s => Math.min(2, s + 1))} className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#6366f1] text-white font-medium text-sm">
                   Continue <ArrowRight size={16} />
                 </button>
               ) : (
