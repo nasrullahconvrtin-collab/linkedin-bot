@@ -1735,16 +1735,24 @@ def _flow_start_node(nodes: list[dict], edges: list[dict]) -> dict | None:
     return nodes[0] if nodes else None
 
 
+def _edge_condition(edge: dict) -> str:
+    """The Visual Flow Builder stores the machine-readable branch condition in
+    edge.data.condition (e.g. 'accepted', 'inmail_available') — edge.label is
+    just the human-readable display text (e.g. '✅ Accepted'), so it must not
+    be used for matching."""
+    return (edge.get("data") or {}).get("condition") or "default"
+
+
 def _flow_next_node(edges: list[dict], by_id: dict, node_id: str, condition: str) -> dict | None:
     outs = [e for e in edges if e.get("source") == node_id]
     if not outs:
         return None
     for e in outs:
-        if (e.get("label") or "default") == condition:
+        if _edge_condition(e) == condition:
             return by_id.get(e.get("target"))
     if condition != "default":
         for e in outs:
-            if (e.get("label") or "default") == "default":
+            if _edge_condition(e) == "default":
                 return by_id.get(e.get("target"))
     return by_id.get(outs[0].get("target"))
 
