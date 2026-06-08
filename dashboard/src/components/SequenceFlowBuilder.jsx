@@ -65,7 +65,7 @@ function FlowNode({ id, data, selected }) {
 
   return (
     <div
-      className={`relative rounded-xl border-2 transition-all shadow-lg ${
+      className={`group relative rounded-xl border-2 transition-all shadow-lg ${
         selected ? 'ring-2 ring-white ring-offset-1 ring-offset-transparent' : ''
       }`}
       style={{
@@ -113,11 +113,24 @@ function FlowNode({ id, data, selected }) {
       {/* Delete button */}
       <button
         onClick={() => data.onDelete(id)}
-        className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-[#ef4444] text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+        className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-[#ef4444] text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
         style={{ fontSize: 10 }}
+        title="Delete step"
       >
         ×
       </button>
+
+      {/* Add-next-step button — appears below the node on hover, wires the new
+          step up as this node's outgoing connection */}
+      {data.onAddNext && (
+        <button
+          onClick={(e) => { e.stopPropagation(); data.onAddNext(id); }}
+          className="nodrag absolute left-1/2 -bottom-3.5 -translate-x-1/2 w-7 h-7 rounded-full bg-[#6366f1] hover:bg-[#4f46e5] text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all hover:scale-110 shadow-lg shadow-[#6366f1]/40 z-10"
+          title="Add next step"
+        >
+          <Plus size={14} />
+        </button>
+      )}
     </div>
   );
 }
@@ -540,20 +553,32 @@ export default function SequenceFlowBuilder({
     setSelectedNode(null);
   }, [setNodes, setEdges]);
 
+  // Tracks which node's "+" button opened the picker (null = the floating
+  // "+ Add Step" / empty-board button, which appends after the last node)
+  const [pickerSourceId, setPickerSourceId] = useState(null);
+  const handleAddNext = useCallback((nodeId) => {
+    setPickerSourceId(nodeId);
+    setShowPicker(true);
+  }, []);
+
+  // Keep onDelete/onAddNext callbacks fresh on every node
   useEffect(() => {
     setNodes(nds => nds.map(n => ({
       ...n,
-      data: { ...n.data, onDelete: deleteNode },
+      data: { ...n.data, onDelete: deleteNode, onAddNext: handleAddNext },
     })));
-  }, [deleteNode]);
+  }, [deleteNode, handleAddNext]);
 
-  // Add node from the "+" picker
-  const addNode = useCallback((nodeType) => {
+  // Add node from the "+" picker. When `sourceId` is given (e.g. clicked the
+  // "+" on a specific node), the new step is wired up as that node's outgoing
+  // connection and placed just below it; otherwise it's appended after the
+  // last node on the canvas (legacy "+ Add Step" behaviour).
+  const addNode = useCallback((nodeType, sourceId = null) => {
     const def = NODE_MAP[nodeType];
     const id = newId();
-    const lastNode = nodes[nodes.length - 1];
-    const pos = lastNode
-      ? { x: lastNode.position.x, y: lastNode.position.y + 160 }
+    const sourceNode = sourceId ? nodes.find(n => n.id === sourceId) : nodes[nodes.length - 1];
+    const pos = sourceNode
+      ? { x: sourceNode.position.x, y: sourceNode.position.y + 160 }
       : { x: 280, y: 80 };
 
     const newNode = {
@@ -565,15 +590,16 @@ export default function SequenceFlowBuilder({
         label: def.label,
         config: {},
         onDelete: deleteNode,
+        onAddNext: handleAddNext,
       },
     };
     setNodes(nds => [...nds, newNode]);
 
-    // Auto-connect to last node
-    if (lastNode) {
+    // Auto-connect to the source node
+    if (sourceNode) {
       setEdges(eds => addEdge({
-        id: `e_${lastNode.id}_${id}`,
-        source: lastNode.id,
+        id: `e_${sourceNode.id}_${id}`,
+        source: sourceNode.id,
         target: id,
         label: 'Continue',
         labelStyle: { fill: '#9ca3af', fontSize: 10 },
@@ -582,7 +608,7 @@ export default function SequenceFlowBuilder({
         markerEnd: { type: MarkerType.ArrowClosed, color: '#4b5563' },
       }, eds));
     }
-  }, [nodes, deleteNode, setNodes, setEdges]);
+  }, [nodes, deleteNode, handleAddNext, setNodes, setEdges]);
 
   // Load a pre-built sequence template onto the canvas (fresh ids, wired up onDelete)
   const loadTemplate = useCallback((tpl) => {
@@ -595,7 +621,7 @@ export default function SequenceFlowBuilder({
     const newNodes = tplNodes.map(n => {
       const id = newId();
       idMap[n.id] = id;
-      return { ...n, id, data: { ...n.data, onDelete: deleteNode } };
+      return { ...n, id, data: { ...n.data, onDelete: deleteNode, onAddNext: handleAddNext } };
     });
     const newEdges = tplEdges.map(e => {
       const condition = e.data?.condition || 'default';
@@ -661,9 +687,9 @@ export default function SequenceFlowBuilder({
   }, []);
 
   const updateNodeData = useCallback((nodeId, newData) => {
-    setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...newData, onDelete: deleteNode } } : n));
-    setSelectedNode(prev => prev?.id === nodeId ? { ...prev, data: { ...newData, onDelete: deleteNode } } : prev);
-  }, [setNodes, deleteNode]);
+    setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...newData, onDelete: deleteNode, onAddNext: handleAddNext } } : n));
+    setSelectedNode(prev => prev?.id === nodeId ? { ...prev, data: { ...newData, onDelete: deleteNode, onAddNext: handleAddNext } } : prev);
+  }, [setNodes, deleteNode, handleAddNext]);
 
   // Save as template
   const handleSaveTemplate = async () => {
@@ -672,7 +698,7 @@ export default function SequenceFlowBuilder({
     try {
       await onSaveTemplate?.({
         name: tplName.trim(),
-        nodes: nodes.map(n => ({ ...n, data: { ...n.data, onDelete: undefined } })),
+        nodes: nodes.map(n => ({ ...n, data: { ...n.data, onDelete: undefined, onAddNext: undefined } })),
         edges,
       });
       toast.success('Template saved!');
@@ -686,7 +712,7 @@ export default function SequenceFlowBuilder({
 
   // Export for campaign
   const handleSave = () => {
-    const clean = nodes.map(n => ({ ...n, data: { ...n.data, onDelete: undefined } }));
+    const clean = nodes.map(n => ({ ...n, data: { ...n.data, onDelete: undefined, onAddNext: undefined } }));
     onSave?.({ nodes: clean, edges });
     toast.success('Sequence saved to campaign');
   };
@@ -752,7 +778,7 @@ export default function SequenceFlowBuilder({
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-center">
               <button
-                onClick={() => setShowPicker(true)}
+                onClick={() => { setPickerSourceId(null); setShowPicker(true); }}
                 className="w-16 h-16 rounded-full bg-[#6366f1] hover:bg-[#4f46e5] text-white flex items-center justify-center mx-auto shadow-lg shadow-[#6366f1]/30 transition-transform hover:scale-105"
               >
                 <Plus size={28} />
@@ -770,18 +796,19 @@ export default function SequenceFlowBuilder({
         ) : (
           /* Floating "+ Add step" button for subsequent nodes */
           <button
-            onClick={() => setShowPicker(true)}
+            onClick={() => { setPickerSourceId(null); setShowPicker(true); }}
             className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-4 py-2.5 rounded-full bg-[#6366f1] hover:bg-[#4f46e5] text-white text-sm font-medium shadow-lg shadow-[#6366f1]/30 transition-transform hover:scale-105"
           >
             <Plus size={16} /> Add Step
           </button>
         )}
 
-        {/* Node type picker modal */}
+        {/* Node type picker modal — when opened via a node's own "+" button,
+            pickerSourceId wires the new step up as that node's outgoing edge */}
         {showPicker && (
           <NodeTypePicker
-            onPick={(type) => { addNode(type); setShowPicker(false); }}
-            onClose={() => setShowPicker(false)}
+            onPick={(type) => { addNode(type, pickerSourceId); setShowPicker(false); setPickerSourceId(null); }}
+            onClose={() => { setShowPicker(false); setPickerSourceId(null); }}
           />
         )}
 
