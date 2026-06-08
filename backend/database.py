@@ -98,7 +98,16 @@ def db_update_campaign(campaign_id: str, data: dict) -> dict | None:
     if not clean:
         return None
     result = supabase.table("campaigns").update(clean).eq("id", campaign_id).execute()
-    return result.data[0] if result.data else None
+    row = result.data[0] if result.data else None
+    # When profile_key changes, re-assign all pending/retrying jobs so the new
+    # extension picks them up immediately — no manual job touching required.
+    if row and "profile_key" in clean:
+        (supabase.table("jobs")
+         .update({"profile_key": clean["profile_key"]})
+         .eq("campaign_id", campaign_id)
+         .in_("status", ["pending", "retrying"])
+         .execute())
+    return row
 
 
 def db_get_campaign(campaign_id: str) -> tuple[dict | None, dict | None]:
@@ -2461,7 +2470,6 @@ def db_job_is_still_eligible(job: dict) -> bool:
         return False
 
     payload = job.get("payload") or {}
-    message_type = payload.get("message_type") or "initial"
     terminal_statuses = {"Replied", "No Response"}
     if prospect.get("status") in terminal_statuses:
         db_update_job(job["id"], {
@@ -2470,6 +2478,11 @@ def db_job_is_still_eligible(job: dict) -> bool:
         })
         return False
 
+    # Flow jobs manage their own sequencing — skip legacy message_type guard
+    if payload.get("flow_node_id"):
+        return True
+
+    message_type = payload.get("message_type") or "initial"
     if message_type == "initial" and prospect.get("message_sent_date"):
         db_update_job(job["id"], {
             "status": "cancelled",

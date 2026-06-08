@@ -1,10 +1,15 @@
 import { useNavigate } from 'react-router-dom';
 import { Archive, Copy, Edit3, Eye, MoreVertical, Pause, Play, Trash2, Users, Send, Reply } from 'lucide-react';
 import { useState } from 'react';
+import { useApp } from '../context/AppContext';
 
 export default function CampaignCard({ campaign, onDelete, onDuplicate, onStatus }) {
   const nav = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  const { profiles } = useApp();
+  const campaignProfileKey = campaign.profile_key || campaign.settings?.profile_key || 'profile_1';
+  const profileObj = profiles.find(p => p.profile_key === campaignProfileKey);
+  const profileOnline = profileObj?.session_active ?? false;
   const total    = campaign.prospect_count || 0;
   const sent     = campaign.sent     || 0;
   const accepted = campaign.accepted || 0;
@@ -55,7 +60,13 @@ export default function CampaignCard({ campaign, onDelete, onDuplicate, onStatus
           </div>
         </div>
       </div>
-      <p className="text-[#6b7280] text-xs -mt-3">Profile: {campaign.profile_key || campaign.settings?.profile_key || 'profile_1'}</p>
+      <div className="flex items-center gap-1.5 -mt-3">
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${profileOnline ? 'bg-green-400' : 'bg-[#4b5563]'}`} />
+        <p className="text-[#6b7280] text-xs">
+          {profileObj?.display_name || campaignProfileKey}
+          {!profileOnline && <span className="text-yellow-500/80 ml-1">(offline)</span>}
+        </p>
+      </div>
       {campaign.template?.name && (
         <p className="text-[#9ca3af] text-xs -mt-2">Template: {campaign.template.name}</p>
       )}

@@ -154,7 +154,10 @@ export default function CampaignWizard({ onClose, onCreated }) {
         setLists(listData.lists || []);
         setProfiles(profileData || []);
         setMessageTemplates(messageTemplateData.messages || []);
-        if ((profileData || [])[0]?.profile_key) setProfileKey(profileData[0].profile_key);
+        const firstOnline = (profileData || []).find(p => p.session_active);
+        const firstAny = (profileData || [])[0];
+        const best = firstOnline || firstAny;
+        if (best?.profile_key) setProfileKey(best.profile_key);
       })
       .catch(err => toast.error(err.message))
       .finally(() => setLoading(false));
@@ -385,9 +388,18 @@ export default function CampaignWizard({ onClose, onCreated }) {
                     className="mt-2 w-full bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
                   >
                     {(profiles.length ? profiles : [{ profile_key: 'profile_1', display_name: 'profile_1' }]).map(p => (
-                      <option key={p.profile_key} value={p.profile_key}>{p.display_name || p.profile_key}</option>
+                      <option key={p.profile_key} value={p.profile_key}>
+                        {p.session_active ? '🟢' : '🔴'} {p.display_name || p.profile_key}
+                      </option>
                     ))}
                   </select>
+                  {(() => {
+                    const sel = profiles.find(p => p.profile_key === profileKey);
+                    if (sel && !sel.session_active) return (
+                      <p className="text-yellow-400 text-xs mt-2">⚠️ This extension is offline. Connect it before launching.</p>
+                    );
+                    return null;
+                  })()}
                   <p className="text-[#6b7280] text-xs mt-2">One campaign runs through one LinkedIn account.</p>
                 </div>
               </div>
@@ -586,7 +598,10 @@ export default function CampaignWizard({ onClose, onCreated }) {
                 <p className="text-[#6b7280] text-xs">Campaign</p>
                 <p className="text-white font-medium mt-1">{campaignName || 'Untitled campaign'}</p>
                 <p className="text-[#6b7280] text-xs mt-3">LinkedIn Profile</p>
-                <p className="text-white text-sm mt-1">{profiles.find(p => p.profile_key === profileKey)?.display_name || profileKey}</p>
+                <div className="flex items-center gap-1.5 mt-1">
+                  {(() => { const p = profiles.find(x => x.profile_key === profileKey); return p ? <span className={`w-1.5 h-1.5 rounded-full ${p.session_active ? 'bg-green-400' : 'bg-yellow-400'}`} /> : null; })()}
+                  <p className="text-white text-sm">{profiles.find(p => p.profile_key === profileKey)?.display_name || profileKey}</p>
+                </div>
               </div>
               <StepPreview steps={steps} />
               <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">

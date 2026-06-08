@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Upload, FileText, X, Loader2, CheckCircle, AlertCircle, Rocket, Pause, Archive, Plus, UserPlus, Trash2, PlusCircle } from 'lucide-react';
+import { ArrowLeft, Upload, FileText, X, Loader2, CheckCircle, AlertCircle, Rocket, Pause, Archive, Plus, UserPlus, Trash2, PlusCircle, WifiOff } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import toast from 'react-hot-toast';
 import { ReactFlowProvider } from 'reactflow';
@@ -9,6 +9,7 @@ import MessageEditorModal from '../components/MessageEditorModal';
 import ProspectTable from '../components/ProspectTable';
 import SequenceFlowBuilder from '../components/SequenceFlowBuilder';
 import StatusBadge from '../components/StatusBadge';
+import { useApp } from '../context/AppContext';
 import {
   addProspectsToCampaign,
   createProspect,
@@ -16,7 +17,6 @@ import {
   bulkImportProspects,
   getCampaignSequence,
   getMessages,
-  getProfiles,
   getProspects,
   launchCampaign,
   removeProspectsFromCampaign,
@@ -118,6 +118,7 @@ function CampaignVariablesPanel({ variables, onAdd, onRemove }) {
 export default function CampaignDetail() {
   const { id } = useParams();
   const nav = useNavigate();
+  const { profiles: contextProfiles } = useApp();
   const [campaign, setCampaign] = useState(null);
   const [stats,    setStats]    = useState(null);
   const [tab,      setTab]      = useState('prospects');
@@ -138,7 +139,6 @@ export default function CampaignDetail() {
   const [actioning, setActioning] = useState(false);
   const [editName, setEditName] = useState('');
   const [editConfig, setEditConfig] = useState('{}');
-  const [profiles, setProfiles] = useState([]);
   const [profileKey, setProfileKey] = useState('profile_1');
   const [prospectPicker, setProspectPicker] = useState([]);
   const [pickedProspect, setPickedProspect] = useState('');
@@ -162,7 +162,6 @@ export default function CampaignDetail() {
   }, [id]);
 
   useEffect(() => {
-    getProfiles().then(setProfiles).catch(() => {});
     getProspects({ limit: 500 }).then(d => setProspectPicker(d.prospects || [])).catch(() => {});
     getMessages().then(d => setMessageTemplates(d.messages || [])).catch(() => {});
   }, []);
@@ -785,12 +784,24 @@ export default function CampaignDetail() {
           <div>
             <label className="block text-xs text-[#9ca3af] mb-1">LinkedIn Profile for this Campaign</label>
             <select value={profileKey} onChange={e => setProfileKey(e.target.value)} className="w-full bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]">
-              {(profiles.length ? profiles : [{ profile_key: 'profile_1', display_name: 'profile_1' }]).map(p => (
-                <option key={p.profile_key} value={p.profile_key}>{p.display_name || p.profile_key}</option>
+              {(contextProfiles.length ? contextProfiles : [{ profile_key: 'profile_1', display_name: 'profile_1' }]).map(p => (
+                <option key={p.profile_key} value={p.profile_key}>
+                  {p.session_active ? '🟢' : '🔴'} {p.display_name || p.profile_key}
+                </option>
               ))}
             </select>
+            {(() => {
+              const sel = contextProfiles.find(p => p.profile_key === profileKey);
+              if (sel && !sel.session_active) return (
+                <div className="flex items-center gap-2 mt-2 px-3 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                  <WifiOff size={13} className="text-yellow-400 shrink-0" />
+                  <p className="text-yellow-400 text-xs">This profile's extension is offline. Jobs will queue but won't run until it reconnects.</p>
+                </div>
+              );
+              return null;
+            })()}
             <p className="text-[#6b7280] text-xs mt-2">
-              One campaign uses one LinkedIn profile. Existing completed messages are not changed.
+              Changing the profile reassigns all pending jobs instantly. Completed messages are not changed.
             </p>
           </div>
           <div>
