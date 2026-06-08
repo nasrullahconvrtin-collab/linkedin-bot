@@ -166,6 +166,21 @@ function taskFromJob(job) {
   if (job.job_type === 'visit_profile') {
     return { type: 'visit_profile', reportType: 'visit_profile', url: payload.linkedin_url };
   }
+  if (job.job_type === 'follow_profile') {
+    return { type: 'follow_profile', reportType: 'follow_profile', url: payload.linkedin_url };
+  }
+  if (job.job_type === 'endorse_profile') {
+    return { type: 'endorse_profile', reportType: 'endorse_profile', url: payload.linkedin_url, skill: payload.skill || '' };
+  }
+  if (job.job_type === 'check_reply' || job.job_type === 'wait_reply') {
+    return { type: 'check_reply', reportType: 'check_reply', url: payload.linkedin_url };
+  }
+  if (job.job_type === 'check_connection_status' || job.job_type === 'wait_acceptance') {
+    return { type: 'check_connection_status', reportType: 'check_connection_status', url: payload.linkedin_url };
+  }
+  if (job.job_type === 'send_inmail') {
+    return { type: 'send_prepared_inmail', reportType: 'send_inmail', url: payload.linkedin_url, subject: payload.subject || '', message: payload.message || '', message_type: 'inmail' };
+  }
   return { type: job.job_type, reportType: job.job_type, url: payload.linkedin_url };
 }
 
@@ -175,11 +190,7 @@ async function runJob(job, cfg) {
   await claimJob(job.id, cfg.profileKey);
   await startJob(job.id);
   let result;
-  if (task.type === 'visit_profile') {
-    const vtab = await navigateAutomationTab(task.url);
-    await waitForTab(vtab.id);
-    result = { status: 'completed', message: 'Profile visited' };
-  } else {
+  {
     result = await contentAction(task.url, task.type, task);
     if (task.type === 'check_messageability' && result.status === 'not_messageable' && task.fallback === 'invitation') {
       result = await contentAction(task.url, 'send_connection', { note: task.note || '' });

@@ -1340,6 +1340,7 @@ def db_add_prospects_to_campaign(campaign_id: str, prospect_ids: list[str]) -> d
     campaign, _ = db_get_campaign(campaign_id)
     if not campaign:
         return {"error": "campaign_not_found", "added": 0, "queued": 0}
+    flow = _campaign_flow_sequence(campaign)
     added = queued = 0
     for prospect_id in sorted(set(prospect_ids or [])):
         prospect, _ = db_get_prospect(prospect_id)
@@ -1348,7 +1349,14 @@ def db_add_prospects_to_campaign(campaign_id: str, prospect_ids: list[str]) -> d
         enrollment = db_upsert_enrollment(campaign, prospect)
         if enrollment:
             added += 1
-            if campaign.get("status") == "running" and db_queue_next_campaign_step(campaign_id, prospect_id, int(enrollment.get("current_step_order") or 0)):
+            if campaign.get("status") != "running":
+                continue
+            queued_job = (
+                db_queue_next_flow_step(campaign_id, prospect_id, enrollment.get("current_node_id"))
+                if flow else
+                db_queue_next_campaign_step(campaign_id, prospect_id, int(enrollment.get("current_step_order") or 0))
+            )
+            if queued_job:
                 queued += 1
     return {"campaign_id": campaign_id, "added": added, "queued": queued}
 
@@ -1589,6 +1597,516 @@ def db_queue_next_campaign_step(campaign_id: str, prospect_id: str, after_step_o
     return None
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Visual Flow Builder execution engine
+#
+# Campaigns built with the Visual Flow Builder store their graph as
+# campaign.sequence_config.flow_sequence = { nodes: [...], edges: [...] }.
+# Each node has data.nodeType (one of NODE_TYPES_DEF in SequenceFlowBuilder.jsx)
+# and data.config. Each edge has a `label` holding the branch condition
+# (e.g. "accepted", "still_not_accepted", "replied", "default", ...).
+#
+# This engine walks that graph one prospect at a time:
+#   - "inline" nodes (Wait, Needs Personalization, Ready to Send, Stop if
+#     Replied, Completed, Failed, CRM Sync, Email Finder, Send Email) are
+#     resolved immediately in the backend with no agent involvement.
+#   - "agent" nodes (Visit Profile, Follow Profile, Endorse Profile,
+#     Send Connection Request, Check Messageability, Send InMail, Send
+#     Message, Check Reply, Wait for Acceptance, Wait for InMail Reply)
+#     are turned into a job for the Chrome extension executor; when that
+#     job completes, the resulting status is matched against the node's
+#     outgoing edge conditions to choose the next node.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Maps a flow node type to the job_type the executor knows how to run.
+FLOW_NODE_JOB_TYPES = {
+    "visit_profile": "visit_profile",
+    "follow_profile": "follow_profile",
+    "endorse_profile": "endorse_profile",
+    "send_invitation": "send_connections",
+    "check_messageability": "check_messageability",
+    "send_inmail": "send_inmail",
+    "send_message": "send_messages",
+    "check_reply": "check_reply",
+    "wait_acceptance": "check_connection_status",
+    "wait_reply": "check_reply",
+}
+
+# Maps (node_type, job-result status) -> the edge condition value used in the
+# Visual Flow Builder so the engine can pick the matching outgoing edge.
+FLOW_STATUS_CONDITIONS = {
+    "send_invitation": {
+        "connected": "already_connected",
+        "sent": "default",
+        "pending": "default",
+        "cannot_connect": "error",
+        "error": "error",
+        "session_expired": "error",
+    },
+    "check_messageability": {
+        "inmail_available": "inmail_available",
+        "normal_message_available": "message_available",
+        "not_messageable": "not_messageable",
+        "invitation_sent": "default",
+        "session_expired": "error",
+    },
+    "wait_acceptance": {
+        "accepted": "accepted",
+        "still_not_accepted": "still_not_accepted",
+        "session_expired": "error",
+    },
+    "wait_reply": {
+        "replied": "replied",
+        "no_reply": "no_reply",
+        "session_expired": "error",
+    },
+    "check_reply": {
+        "replied": "replied",
+        "no_reply": "no_reply",
+        "session_expired": "error",
+    },
+    "send_inmail": {
+        "inmail_sent": "sent",
+        "failed_with_reason": "error",
+    },
+    "send_message": {
+        "message_sent": "sent",
+        "failed_with_reason": "error",
+    },
+}
+
+# Negative/terminal-ish branch conditions: if the flow has no edge defined for
+# these, we end the sequence quietly instead of leaving the prospect stuck.
+_FLOW_NEGATIVE_CONDITIONS = {"still_not_accepted", "no_reply", "not_messageable", "error"}
+
+
+def _campaign_flow_sequence(campaign: dict | None) -> dict | None:
+    seq = ((campaign or {}).get("sequence_config") or {}).get("flow_sequence") or {}
+    if seq.get("nodes"):
+        return seq
+    return None
+
+
+def _flow_node_type(node: dict) -> str:
+    return (node.get("data") or {}).get("nodeType") or node.get("type") or ""
+
+
+def _flow_node_config(node: dict) -> dict:
+    return (node.get("data") or {}).get("config") or {}
+
+
+def _flow_node_label(node: dict) -> str:
+    data = node.get("data") or {}
+    return data.get("label") or NODE_LABELS_BY_TYPE.get(_flow_node_type(node)) or _flow_node_type(node)
+
+
+# Lightweight label lookup mirrored from SequenceFlowBuilder.jsx NODE_TYPES_DEF
+# (kept here only for nicer activity-log copy; not used for execution logic).
+NODE_LABELS_BY_TYPE = {
+    "visit_profile": "Visit Profile",
+    "follow_profile": "Follow Profile",
+    "endorse_profile": "Endorse Profile",
+    "send_invitation": "Send Connection Request",
+    "check_messageability": "Check Messageability",
+    "send_inmail": "Send InMail",
+    "send_message": "Send Message",
+    "check_reply": "Check Reply",
+    "needs_personalization": "Needs Personalization",
+    "ready_to_send": "Ready to Send",
+    "wait": "Wait / Delay",
+    "wait_acceptance": "Wait for Acceptance",
+    "wait_reply": "Wait for InMail Reply",
+    "stop_if_replied": "Stop if Replied",
+    "completed": "Completed",
+    "failed": "Failed / Needs Attention",
+    "crm_sync": "CRM Sync",
+    "email_finder": "Email Finder",
+    "send_email": "Send Email",
+}
+
+
+def _flow_start_node(nodes: list[dict], edges: list[dict]) -> dict | None:
+    targets = {e.get("target") for e in edges}
+    for n in nodes:
+        if n.get("id") and n.get("id") not in targets:
+            return n
+    return nodes[0] if nodes else None
+
+
+def _flow_next_node(edges: list[dict], by_id: dict, node_id: str, condition: str) -> dict | None:
+    outs = [e for e in edges if e.get("source") == node_id]
+    if not outs:
+        return None
+    for e in outs:
+        if (e.get("label") or "default") == condition:
+            return by_id.get(e.get("target"))
+    if condition != "default":
+        for e in outs:
+            if (e.get("label") or "default") == "default":
+                return by_id.get(e.get("target"))
+    return by_id.get(outs[0].get("target"))
+
+
+def _flow_job_payload(node_type: str, config: dict, prospect: dict, campaign: dict) -> dict:
+    base = {"linkedin_url": prospect.get("linkedin_url", "")}
+    if node_type == "send_invitation":
+        note = ""
+        if config.get("add_note"):
+            note = db_render_message_template(config.get("note") or "", prospect)[:300]
+        return {**base, "note": note, "action_type": "invitation"}
+    if node_type == "check_messageability":
+        return {**base, "fallback": config.get("fallback") or "invitation"}
+    if node_type == "send_inmail":
+        return {
+            **base,
+            "subject": db_render_message_template(config.get("subject") or "", prospect),
+            "message": db_render_message_template(config.get("message") or "", prospect),
+        }
+    if node_type == "send_message":
+        return {
+            **base,
+            "message": db_render_message_template(config.get("message") or "", prospect),
+            "message_type": config.get("message_type") or "initial",
+        }
+    if node_type == "wait_reply":
+        return {**base, "message": db_render_message_template(config.get("message") or "", prospect),
+                "check_after_days": config.get("check_after_days") or 7}
+    if node_type == "wait_acceptance":
+        return {**base, "timeout_days": config.get("timeout_days") or 14}
+    if node_type == "endorse_profile":
+        return {**base, "skill": config.get("skill") or ""}
+    return base
+
+
+def _run_inline_flow_node(campaign: dict, prospect: dict, node: dict, scheduled_for: datetime):
+    """Resolve a node that needs no agent action.
+
+    Returns one of:
+      - timedelta: advance scheduled_for by this much, then continue on the default edge
+      - "CONTINUE": move to the default edge immediately
+      - "STOP": pause the sequence here (prospect needs human action)
+      - "TERMINAL": sequence has ended for this prospect (completed/failed)
+      - None: this node needs an agent job (caller should create one)
+    """
+    node_type = _flow_node_type(node)
+    config = _flow_node_config(node)
+    node_id = node.get("id")
+    prospect_id = prospect.get("id")
+    campaign_id = campaign.get("id")
+
+    if node_type == "wait":
+        if config.get("working_days_mode"):
+            target = add_working_days(date.today(), int(config.get("working_days") or 1))
+            return datetime.combine(target, datetime.min.time()).replace(tzinfo=timezone.utc) - datetime.now(timezone.utc)
+        return timedelta(days=int(config.get("days") or 1))
+
+    if node_type == "needs_personalization":
+        db_update_prospect(prospect_id, {
+            "status": "Needs Personalization",
+            "personalization_status": "needs_message_copy",
+            "ready_to_send": False,
+            "next_steps": "Write a personalized message, then mark Ready to Send",
+            "last_action_at": _utc_now(),
+        })
+        _set_flow_position(campaign_id, prospect_id, node_id, scheduled_for, None, status="active")
+        db_log_activity(prospect_id, "flow_step", "paused", "Sequence paused — needs personalization")
+        return "STOP"
+
+    if node_type == "ready_to_send":
+        db_update_prospect(prospect_id, {
+            "ready_to_send": True,
+            "status": "Ready to Send",
+            "next_steps": "Sending prepared message",
+            "last_action_at": _utc_now(),
+        })
+        db_log_activity(prospect_id, "flow_step", "ready", "Marked Ready to Send")
+        return "CONTINUE"
+
+    if node_type == "stop_if_replied":
+        if (prospect or {}).get("status") == "Replied":
+            db_update_prospect(prospect_id, {"next_steps": "Sequence stopped — prospect replied", "last_action_at": _utc_now()})
+            _finish_flow_enrollment(campaign_id, prospect_id, node_id, status="completed")
+            db_log_activity(prospect_id, "flow_step", "stopped", "Sequence stopped — prospect already replied")
+            return "TERMINAL"
+        return "CONTINUE"
+
+    if node_type == "completed":
+        db_update_prospect(prospect_id, {"status": "Completed", "next_steps": "Sequence complete", "last_action_at": _utc_now()})
+        _finish_flow_enrollment(campaign_id, prospect_id, node_id, status="completed")
+        db_log_activity(prospect_id, "flow_step", "completed", "Sequence completed")
+        return "TERMINAL"
+
+    if node_type == "failed":
+        db_update_prospect(prospect_id, {"status": "Needs Attention", "next_steps": "Flagged for manual review", "last_action_at": _utc_now()})
+        _finish_flow_enrollment(campaign_id, prospect_id, node_id, status="needs_attention")
+        db_log_activity(prospect_id, "flow_step", "failed", "Sequence flagged — needs attention")
+        return "TERMINAL"
+
+    if node_type in ("crm_sync", "email_finder", "send_email"):
+        # These need a connected integration (HubSpot / email-finder / mailbox)
+        # which isn't wired up yet. Log it clearly and let the sequence
+        # continue rather than silently stalling the prospect.
+        db_log_activity(
+            prospect_id, "flow_step", "integration_not_configured",
+            f"{_flow_node_label(node)} step skipped — connect this integration in Settings to enable it",
+        )
+        return "CONTINUE"
+
+    return None
+
+
+def _set_flow_position(campaign_id: str, prospect_id: str, node_id: str | None,
+                        scheduled_for: datetime, job: dict | None, status: str | None = None) -> None:
+    updates = {
+        "current_node_id": node_id,
+        "next_step_at": scheduled_for.isoformat(),
+        "last_job_id": (job or {}).get("id"),
+        "updated_at": _utc_now(),
+    }
+    if status:
+        updates["status"] = status
+    supabase.table("campaign_enrollments").update(updates).eq("campaign_id", campaign_id).eq("prospect_id", prospect_id).execute()
+
+
+def _finish_flow_enrollment(campaign_id: str, prospect_id: str, node_id: str | None, status: str = "completed") -> None:
+    supabase.table("campaign_enrollments").update({
+        "status": status,
+        "current_node_id": node_id,
+        "updated_at": _utc_now(),
+    }).eq("campaign_id", campaign_id).eq("prospect_id", prospect_id).execute()
+
+
+def db_queue_next_flow_step(campaign_id: str, prospect_id: str, node_id: str | None = None,
+                            base_time: datetime | None = None) -> dict | None:
+    """Graph-walking counterpart to db_queue_next_campaign_step for Visual Flow
+    Builder campaigns. Walks sequence_config.flow_sequence starting at node_id
+    (or the graph's start node), resolving inline nodes immediately and
+    creating exactly one agent job for the next node that needs one."""
+    campaign, _ = db_get_campaign(campaign_id)
+    prospect, _ = db_get_prospect(prospect_id)
+    if not campaign or not prospect:
+        return None
+    flow = _campaign_flow_sequence(campaign)
+    if not flow:
+        return None
+    if campaign.get("status") != "running":
+        logger.info("Campaign %s is %s; not queueing next flow step", campaign_id, campaign.get("status"))
+        return None
+
+    nodes = flow.get("nodes") or []
+    edges = flow.get("edges") or []
+    by_id = {n.get("id"): n for n in nodes if n.get("id")}
+    scheduled_for = base_time or datetime.now(timezone.utc)
+    profile_key = campaign.get("profile_key") or prospect.get("assigned_account") or "profile_1"
+
+    node = by_id.get(node_id) if node_id else _flow_start_node(nodes, edges)
+
+    guard = 0
+    while node and guard < 100:
+        guard += 1
+        outcome = _run_inline_flow_node(campaign, prospect, node, scheduled_for)
+        if outcome in ("STOP", "TERMINAL"):
+            return None
+        if isinstance(outcome, timedelta):
+            scheduled_for = scheduled_for + outcome
+            node = _flow_next_node(edges, by_id, node.get("id"), "default")
+            continue
+        if outcome == "CONTINUE":
+            node = _flow_next_node(edges, by_id, node.get("id"), "default")
+            continue
+        break  # outcome is None -> this node needs an agent job
+
+    if not node:
+        prospect, _ = db_get_prospect(prospect_id)
+        if (prospect or {}).get("status") not in ("Completed", "Needs Attention", "Replied"):
+            db_update_prospect(prospect_id, {"status": "Completed", "next_steps": "Sequence complete", "last_action_at": _utc_now()})
+        _finish_flow_enrollment(campaign_id, prospect_id, None, status="completed")
+        return None
+
+    node_id = node.get("id")
+    node_type = _flow_node_type(node)
+    config = _flow_node_config(node)
+    job_type = FLOW_NODE_JOB_TYPES.get(node_type)
+
+    if not job_type:
+        db_log_activity(prospect_id, "flow_step", "skipped", f"Unsupported step type '{node_type}' — skipping")
+        next_node = _flow_next_node(edges, by_id, node_id, "default")
+        _set_flow_position(campaign_id, prospect_id, (next_node or {}).get("id"), scheduled_for, None)
+        if next_node:
+            return db_queue_next_flow_step(campaign_id, prospect_id, next_node.get("id"), scheduled_for)
+        _finish_flow_enrollment(campaign_id, prospect_id, node_id, status="completed")
+        return None
+
+    # "Wait for acceptance / InMail reply" nodes represent a timed re-check —
+    # push the check out by the configured number of days before running it.
+    if node_type == "wait_acceptance":
+        scheduled_for = scheduled_for + timedelta(days=int(config.get("timeout_days") or 14))
+    elif node_type == "wait_reply":
+        scheduled_for = scheduled_for + timedelta(days=int(config.get("check_after_days") or 7))
+
+    if db_has_active_job_for_prospect(job_type, prospect_id):
+        logger.info("Active %s job already exists for prospect %s", job_type, prospect_id)
+        return None
+
+    payload = {
+        **_flow_job_payload(node_type, config, prospect, campaign),
+        "flow_node_id": node_id,
+        "flow_node_type": node_type,
+    }
+    job = db_create_job({
+        "job_type": job_type,
+        "profile_key": profile_key,
+        "campaign_id": campaign_id,
+        "prospect_id": prospect_id,
+        "scheduled_for": scheduled_for.isoformat(),
+        "payload": payload,
+    })
+    _set_flow_position(campaign_id, prospect_id, node_id, scheduled_for, job)
+    if job:
+        db_log_activity(prospect_id, "flow_step", "queued", f"Queued {_flow_node_label(node)}")
+    return job
+
+
+def _flow_condition_for_status(node_type: str, status: str) -> str:
+    return (FLOW_STATUS_CONDITIONS.get(node_type) or {}).get(status, "default")
+
+
+def db_apply_completed_flow_job(job: dict, result: dict) -> None:
+    """Counterpart to db_apply_completed_job_result for jobs created by the
+    Visual Flow Builder graph-walker (identified via payload.flow_node_id)."""
+    prospect_id = job.get("prospect_id")
+    campaign_id = job.get("campaign_id")
+    payload = job.get("payload") or {}
+    node_id = payload.get("flow_node_id")
+    node_type = payload.get("flow_node_type") or ""
+    if not prospect_id or not campaign_id or not node_id:
+        return
+
+    status = result.get("status") or ""
+    today = date.today().isoformat()
+    profile_key = job.get("profile_key")
+
+    # Mirror the prospect-facing status transitions the template engine makes,
+    # so the dashboard stays accurate regardless of which builder was used.
+    if node_type == "send_invitation" and status == "connected":
+        db_mark_prospect_connected(prospect_id, "Already connected (flow connection step)", profile_key=profile_key, campaign_id=campaign_id)
+    elif node_type == "send_invitation" and status in ("sent", "pending"):
+        db_update_prospect(prospect_id, {
+            "status": "Connection Request Sent",
+            "connection_sent_date": today,
+            "connection_status": "invitation_sent" if status == "sent" else "invitation_pending",
+            "next_steps": "Waiting for connection acceptance",
+            "last_action_at": _utc_now(),
+        })
+        db_mark_invitation_sent({"id": prospect_id}, profile_key, campaign_id)
+    elif node_type == "check_messageability" and status == "inmail_available":
+        db_update_prospect(prospect_id, {
+            "status": "inmail_available", "messageability_status": "inmail_available",
+            "personalization_status": "needs_inmail_copy", "last_action_at": _utc_now(),
+            "next_steps": "Review InMail subject/body and mark Ready to Send",
+        })
+    elif node_type == "check_messageability" and status == "normal_message_available":
+        db_mark_prospect_connected(prospect_id, "Messageability check found normal message available", profile_key=profile_key, campaign_id=campaign_id)
+    elif node_type == "check_messageability" and status == "invitation_sent":
+        db_update_prospect(prospect_id, {
+            "status": "Connection Request Sent", "connection_status": "invitation_sent",
+            "connection_sent_date": today, "next_steps": "Waiting for connection acceptance",
+            "last_action_at": _utc_now(),
+        })
+        db_mark_invitation_sent({"id": prospect_id}, profile_key, campaign_id)
+    elif node_type == "send_inmail" and status == "inmail_sent":
+        db_update_prospect(prospect_id, {
+            "status": "Sent", "inmail_status": "sent", "inmail_sent_at": _utc_now(),
+            "personalization_status": "sent", "ready_to_send": False, "last_action_at": _utc_now(),
+        })
+    elif node_type == "send_message" and status == "message_sent":
+        db_update_prospect(prospect_id, {
+            "status": "Initial Message Sent", "message_sent_date": today,
+            "initial_message_sent_at": _utc_now(), "ready_to_send": False,
+            "personalization_status": "sent", "last_action_at": _utc_now(),
+        })
+    elif node_type == "wait_acceptance" and status == "accepted":
+        db_mark_prospect_connected(prospect_id, "Connection accepted (flow wait-for-acceptance check)", profile_key=profile_key, campaign_id=campaign_id)
+    elif node_type in ("check_reply", "wait_reply") and status == "replied":
+        db_update_prospect(prospect_id, {"status": "Replied", "next_steps": "Prospect replied", "last_action_at": _utc_now()})
+    elif node_type == "follow_profile" and status in ("followed", "already_following"):
+        db_log_activity(prospect_id, "flow_step", status, result.get("message") or "Followed prospect profile")
+    elif node_type == "endorse_profile" and status == "endorsed":
+        db_log_activity(prospect_id, "flow_step", "endorsed", result.get("message") or "Endorsed a skill")
+    elif node_type == "visit_profile" and status == "visited":
+        db_update_prospect(prospect_id, {"last_action_at": _utc_now()})
+
+    db_log_activity(prospect_id, "flow_step", status or "completed", f"{_flow_node_label_by_type(node_type)} → {status or 'completed'}")
+    _advance_flow_after_result(campaign_id, prospect_id, node_id, node_type, status)
+
+
+def _flow_node_label_by_type(node_type: str) -> str:
+    return NODE_LABELS_BY_TYPE.get(node_type, node_type)
+
+
+def _advance_flow_after_result(campaign_id: str, prospect_id: str, node_id: str, node_type: str, status: str) -> None:
+    campaign, _ = db_get_campaign(campaign_id)
+    flow = _campaign_flow_sequence(campaign)
+    if not flow:
+        return
+    nodes = flow.get("nodes") or []
+    edges = flow.get("edges") or []
+    by_id = {n.get("id"): n for n in nodes if n.get("id")}
+    condition = _flow_condition_for_status(node_type, status)
+    next_node = _flow_next_node(edges, by_id, node_id, condition)
+
+    if next_node:
+        db_queue_next_flow_step(campaign_id, prospect_id, next_node.get("id"))
+        return
+
+    if condition in _FLOW_NEGATIVE_CONDITIONS:
+        db_update_prospect(prospect_id, {
+            "status": "No Response" if condition in ("still_not_accepted", "no_reply") else "Needs Attention",
+            "next_steps": "Sequence ended — no branch defined for this outcome",
+            "last_action_at": _utc_now(),
+        })
+        _finish_flow_enrollment(campaign_id, prospect_id, node_id,
+                                status="completed" if condition in ("still_not_accepted", "no_reply") else "needs_attention")
+        db_log_activity(prospect_id, "flow_step", "ended", f"No '{condition}' branch from {_flow_node_label_by_type(node_type)} — ending sequence")
+    else:
+        db_update_prospect(prospect_id, {
+            "next_steps": "Sequence paused — no matching branch for this result; review the flow",
+            "last_action_at": _utc_now(),
+        })
+        _set_flow_position(campaign_id, prospect_id, node_id, datetime.now(timezone.utc), None, status="active")
+        db_log_activity(prospect_id, "flow_step", "paused", f"No '{condition}' branch from {_flow_node_label_by_type(node_type)} — paused for review")
+
+
+def db_apply_failed_flow_job(job: dict, error_message: str, result: dict | None = None) -> None:
+    """Called when a flow-driven job permanently fails (after max retries)."""
+    prospect_id = job.get("prospect_id")
+    campaign_id = job.get("campaign_id")
+    payload = job.get("payload") or {}
+    node_id = payload.get("flow_node_id")
+    node_type = payload.get("flow_node_type") or ""
+    if not prospect_id or not campaign_id or not node_id:
+        return
+
+    db_log_activity(prospect_id, "flow_step", "failed", f"{_flow_node_label_by_type(node_type)} failed: {error_message[:200]}")
+    campaign, _ = db_get_campaign(campaign_id)
+    flow = _campaign_flow_sequence(campaign)
+    if not flow:
+        return
+    nodes = flow.get("nodes") or []
+    edges = flow.get("edges") or []
+    by_id = {n.get("id"): n for n in nodes if n.get("id")}
+    next_node = _flow_next_node(edges, by_id, node_id, "error")
+    if next_node:
+        db_queue_next_flow_step(campaign_id, prospect_id, next_node.get("id"))
+        return
+    db_update_prospect(prospect_id, {
+        "status": "Needs Attention",
+        "next_steps": f"Flow step failed: {error_message[:120]}",
+        "last_action_at": _utc_now(),
+    })
+    _finish_flow_enrollment(campaign_id, prospect_id, node_id, status="needs_attention")
+
+
 def _update_enrollment_next(campaign_id: str, prospect_id: str, step_order: int,
                             scheduled_for: datetime, job: dict | None):
     updates = {
@@ -1605,7 +2123,8 @@ def db_launch_campaign(campaign_id: str, prospect_ids: list[str] | None = None,
     campaign, _ = db_get_campaign(campaign_id)
     if not campaign:
         return {"error": "campaign_not_found", "queued": 0, "enrolled": 0}
-    if not campaign.get("template_id"):
+    flow = _campaign_flow_sequence(campaign)
+    if not campaign.get("template_id") and not flow:
         return {"error": "template_required", "queued": 0, "enrolled": 0}
 
     if list_ids:
@@ -1632,7 +2151,12 @@ def db_launch_campaign(campaign_id: str, prospect_ids: list[str] | None = None,
         enrollment = db_upsert_enrollment(campaign, prospect)
         if enrollment:
             enrolled += 1
-            if db_queue_next_campaign_step(campaign_id, prospect["id"], 0):
+            queued_job = (
+                db_queue_next_flow_step(campaign_id, prospect["id"])
+                if flow else
+                db_queue_next_campaign_step(campaign_id, prospect["id"], 0)
+            )
+            if queued_job:
                 queued += 1
     return {"campaign_id": campaign_id, "enrolled": enrolled, "queued": queued}
 
@@ -1811,7 +2335,10 @@ def db_complete_job(job_id: str, result: dict | None = None) -> dict | None:
         "result": result or {},
     })
     if job_before and result:
-        db_apply_completed_job_result(job_before, result)
+        if (job_before.get("payload") or {}).get("flow_node_id"):
+            db_apply_completed_flow_job(job_before, result)
+        else:
+            db_apply_completed_job_result(job_before, result)
     return completed
 
 
@@ -1983,7 +2510,7 @@ def db_fail_job(job_id: str, error_message: str, result: dict | None = None) -> 
     status = "retrying" if retry_count < max_retries else "failed"
     backoff_minutes = {1: 10, 2: 30, 3: 120}.get(retry_count, 120)
     scheduled_for = (datetime.now(timezone.utc) + timedelta(minutes=backoff_minutes)).isoformat()
-    return db_update_job(job_id, {
+    updated = db_update_job(job_id, {
         "status": status,
         "failed_at": _utc_now(),
         "error_message": error_message[:500],
@@ -1991,6 +2518,9 @@ def db_fail_job(job_id: str, error_message: str, result: dict | None = None) -> 
         "scheduled_for": scheduled_for if status == "retrying" else None,
         "result": result or {},
     })
+    if status == "failed" and job and (job.get("payload") or {}).get("flow_node_id"):
+        db_apply_failed_flow_job(job, error_message, result)
+    return updated
 
 
 def db_cancel_job(job_id: str) -> dict | None:
