@@ -297,6 +297,8 @@ export default function CampaignDetail() {
     { label: 'Following Up', value: stats?.following_up || 0, color: '#f59e0b' },
     { label: 'Replied',      value: stats?.replied      || 0, color: '#10b981' },
     { label: 'No Response',  value: stats?.no_response  || 0, color: '#ef4444' },
+    { label: 'Completed',    value: stats?.sequence_complete || 0, color: '#34d399' },
+    { label: 'Needs Attention', value: stats?.needs_attention || 0, color: '#f87171' },
   ];
 
   const chartData = statRows.slice(1).map(s => ({ name: s.label, value: s.value }));

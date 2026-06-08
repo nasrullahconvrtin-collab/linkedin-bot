@@ -4,8 +4,10 @@ import { getProspects, getCampaigns } from '../services/api';
 import StatusBadge from './StatusBadge';
 
 const STATUSES = [
-  '', 'Connection Request Sent', 'Connection Accepted', 'Ready to Send',
-  'Initial Message Sent', 'Following Up', 'No Response', 'Replied',
+  '', 'Connection Request Sent', 'Connection Accepted', 'waiting_connection_acceptance',
+  'Needs Personalization', 'inmail_available', 'message_ready', 'Ready to Send', 'Ready To Send',
+  'Sent', 'Initial Message Sent', 'Following Up', 'No Response', 'Replied',
+  'Completed', 'Needs Attention',
 ];
 
 function fmt(d) { return d ? new Date(d).toLocaleDateString() : '—'; }

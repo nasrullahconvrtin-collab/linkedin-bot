@@ -15,6 +15,8 @@ const STATUS_STYLES = {
   'Following Up':            { label: 'Following Up',           cls: 'bg-orange-500/10 text-orange-400 border border-orange-500/20' },
   'No Response':             { label: 'No Response',            cls: 'bg-red-500/10 text-red-400 border border-red-500/20' },
   'Replied':                 { label: 'Replied ✓',              cls: 'bg-green-500/10 text-green-400 border border-green-500/20' },
+  'Completed':               { label: 'Sequence Complete',      cls: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' },
+  'Needs Attention':         { label: 'Needs Attention',        cls: 'bg-red-500/10 text-red-400 border border-red-500/20' },
   'Already Pending':         { label: 'Pending',                cls: 'bg-[#1a1a1a] text-[#9ca3af] border border-[#2a2a2a]' },
   'draft':                   { label: 'Draft',                  cls: 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20' },
   'running':                 { label: 'Running',                cls: 'bg-green-500/10 text-green-400 border border-green-500/20' },

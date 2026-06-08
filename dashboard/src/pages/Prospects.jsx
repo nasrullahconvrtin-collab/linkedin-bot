@@ -22,9 +22,10 @@ import {
 } from '../services/api';
 
 const STATUSES = [
-  '', 'Connection Request Sent', 'Connection Accepted', 'Needs Personalization',
-  'inmail_available', 'message_ready', 'waiting_connection_acceptance', 'Ready To Send',
-  'Ready to Send', 'Sent', 'Follow-Up Ready', 'Initial Message Sent', 'Following Up', 'No Response', 'Replied',
+  '', 'Connection Request Sent', 'Connection Accepted', 'waiting_connection_acceptance',
+  'Needs Personalization', 'inmail_available', 'message_ready', 'Ready to Send', 'Ready To Send',
+  'Sent', 'Initial Message Sent', 'Following Up', 'No Response', 'Replied',
+  'Completed', 'Needs Attention',
 ];
 
 const blankProspect = {
@@ -436,6 +437,46 @@ export default function Prospects() {
                   <input value={Array.isArray(draft.tags) ? draft.tags.join(', ') : draft.tags || ''} onChange={e => setDraft(d => ({ ...d, tags: e.target.value }))} className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm" />
                 </div>
               </div>
+
+              {panel.mode === 'edit' && (
+                <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-4">
+                  <h3 className="text-white font-semibold mb-3">Agent status</h3>
+                  <p className="text-[11px] text-[#6b7280] -mt-2 mb-3">
+                    Set automatically by the agent as it works through the sequence — read-only.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-xs text-[#6b7280]">Connection status</p>
+                      <p className="text-white">{draft.connection_status || '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[#6b7280]">Messageability</p>
+                      <p className="text-white">{draft.messageability_status || '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[#6b7280]">Personalization</p>
+                      <p className="text-white">{draft.personalization_status || '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[#6b7280]">Ready to send</p>
+                      <p className="text-white">{draft.ready_to_send ? 'Yes' : 'No'}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="text-xs text-[#6b7280]">Next step</p>
+                      <p className="text-white">{draft.next_steps || '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[#6b7280]">Last action</p>
+                      <p className="text-white">{draft.last_action_at ? new Date(draft.last_action_at).toLocaleString() : '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[#6b7280]">Connection sent</p>
+                      <p className="text-white">{draft.connection_sent_date ? new Date(draft.connection_sent_date).toLocaleDateString() : '—'}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {[
                 ['inmail_message', 'InMail / Invitation Note'],
                 ['initial_message', 'Initial Message'],

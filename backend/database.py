@@ -138,10 +138,12 @@ def db_get_campaign(campaign_id: str) -> tuple[dict | None, dict | None]:
         "messaged":     sum(1 for r in rows if (r.get("prospect_status") or r.get("status")) == "Initial Message Sent"),
         "following_up": sum(1 for r in rows if (r.get("prospect_status") or r.get("status")) == "Following Up"),
         "followup_due": sum(1 for r in rows if (r.get("prospect_status") or r.get("status")) == "Following Up"),
-        "completed":    sum(1 for r in rows if (r.get("prospect_status") or r.get("status")) in ("Replied", "No Response") or r.get("status") == "completed"),
-        "failed":       sum(1 for r in rows if r.get("status") in ("failed", "error")),
+        "completed":    sum(1 for r in rows if (r.get("prospect_status") or r.get("status")) in ("Replied", "No Response", "Completed") or r.get("status") == "completed"),
+        "failed":       sum(1 for r in rows if (r.get("prospect_status") or r.get("status")) == "Needs Attention" or r.get("status") in ("failed", "error", "needs_attention")),
         "replied":      sum(1 for r in rows if (r.get("prospect_status") or r.get("status")) == "Replied"),
         "no_response":  sum(1 for r in rows if (r.get("prospect_status") or r.get("status")) == "No Response"),
+        "sequence_complete": sum(1 for r in rows if (r.get("prospect_status") or r.get("status")) == "Completed"),
+        "needs_attention":   sum(1 for r in rows if (r.get("prospect_status") or r.get("status")) == "Needs Attention"),
     }
     return campaign, stats
 
