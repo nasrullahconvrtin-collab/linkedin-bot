@@ -88,28 +88,19 @@ function inmailFirstWithFallback() {
   const visit  = mkNode('visit_profile', 'Visit Profile', {}, COL.TRUNK, 0);
   const check  = mkNode('check_messageability', 'Check Messageability', { fallback: 'invitation' }, COL.TRUNK, 1);
 
-  // InMail branch
-  const inmail   = mkNode('send_inmail', 'Send InMail', {
+  // ── Three "opening touch" branches out of Check Messageability ──────────────
+  // Each one sends exactly ONE first message via whichever channel is available,
+  // then feeds into the SAME shared follow-up chain below — see the convergence
+  // edges near the bottom. You build the 4 follow-ups once; every path reuses them.
+  const inmail = mkNode('send_inmail', 'Send InMail', {
     subject: 'Quick question about {{company}}',
     message: "Hi {{first_name}}, I came across your profile and thought it'd be worth connecting — open to a quick chat?",
   }, COL.TRUNK, 2);
-  const waitReply = mkNode('wait_reply', 'Wait for InMail Reply', {
-    check_after_days: 7,
-    message: "Hi {{first_name}}, following up on my note — would still love to connect when you have a moment.",
-  }, COL.TRUNK, 3);
-  const inmailDone = mkNode('completed', 'Completed', {}, COL.TRUNK, 4);
 
-  // Normal-message branch
   const directMsg = mkNode('send_message', 'Send Message', {
     message: "Hi {{first_name}}, thanks for being open to messages — I wanted to reach out because…",
   }, COL.RIGHT, 2);
-  const stopReplied = mkNode('stop_if_replied', 'Stop if Replied', {}, COL.RIGHT, 3);
-  const msgFollowup = mkNode('send_message', 'Follow-up', {
-    message: "Hi {{first_name}}, circling back on this — happy to chat whenever works for you.",
-  }, COL.RIGHT, 4);
-  const msgDone = mkNode('completed', 'Completed', {}, COL.RIGHT, 5);
 
-  // Connection-request fallback branch
   const connect = mkNode('send_invitation', 'Send Connection Request', {
     add_note: true, note: "Hi {{first_name}}, I'd love to connect and stay in touch.",
   }, COL.FAR_RIGHT, 2);
@@ -117,35 +108,71 @@ function inmailFirstWithFallback() {
   const afterAccept = mkNode('send_message', 'Send Initial Message', {
     message: "Hi {{first_name}}, thanks for connecting! Wanted to reach out because…",
   }, COL.FAR_RIGHT, 4);
-  const connectDone = mkNode('completed', 'Completed', {}, COL.FAR_RIGHT, 5);
-  const noAcceptDone = mkNode('completed', 'No Response — End', {}, COL.FAR_RIGHT, 6);
+  const noAcceptDone = mkNode('completed', 'No Response — End', {}, COL.FAR_RIGHT, 5);
+
+  // ── Shared follow-up chain — built ONCE, reused by every branch above ───────
+  // This is the "easier way": instead of duplicating 4 follow-up messages per
+  // branch, every opener (InMail sent / direct message sent / initial message
+  // after connection-acceptance) connects straight into `wait1`. From there it's
+  // a single 5-message cadence (the opener + 4 follow-ups below), each gated by
+  // its own "Stop if Replied" so a reply on ANY channel ends things cleanly —
+  // no duplicated nodes, no duplicated messages to keep in sync.
+  const wait1 = mkNode('wait', 'Wait 3 days', { days: 3 }, COL.TRUNK, 6);
+  const stop1 = mkNode('stop_if_replied', 'Stop if Replied', {}, COL.TRUNK, 7);
+  const fu1   = mkNode('send_message', 'Follow-up 1', {
+    message: "Hi {{first_name}}, just floating this back to the top of your inbox — would love to hear your thoughts.",
+  }, COL.TRUNK, 8);
+  const wait2 = mkNode('wait', 'Wait 4 days', { days: 4 }, COL.TRUNK, 9);
+  const stop2 = mkNode('stop_if_replied', 'Stop if Replied', {}, COL.TRUNK, 10);
+  const fu2   = mkNode('send_message', 'Follow-up 2', {
+    message: "Hi {{first_name}}, circling back on this — happy to chat whenever works for you.",
+  }, COL.TRUNK, 11);
+  const wait3 = mkNode('wait', 'Wait 5 days', { days: 5 }, COL.TRUNK, 12);
+  const stop3 = mkNode('stop_if_replied', 'Stop if Replied', {}, COL.TRUNK, 13);
+  const fu3   = mkNode('send_message', 'Follow-up 3', {
+    message: "Hi {{first_name}}, still happy to connect on this whenever timing works better on your end.",
+  }, COL.TRUNK, 14);
+  const wait4 = mkNode('wait', 'Wait 6 days', { days: 6 }, COL.TRUNK, 15);
+  const stop4 = mkNode('stop_if_replied', 'Stop if Replied', {}, COL.TRUNK, 16);
+  const fu4   = mkNode('send_message', 'Follow-up 4', {
+    message: "Hi {{first_name}}, last note from me on this one — happy to pick it back up whenever suits you.",
+  }, COL.TRUNK, 17);
+  const done  = mkNode('completed', 'Completed', {}, COL.TRUNK, 18);
 
   return {
     nodes: [
       visit, check,
-      inmail, waitReply, inmailDone,
-      directMsg, stopReplied, msgFollowup, msgDone,
-      connect, waitAcc, afterAccept, connectDone, noAcceptDone,
+      inmail, directMsg,
+      connect, waitAcc, afterAccept, noAcceptDone,
+      wait1, stop1, fu1, wait2, stop2, fu2, wait3, stop3, fu3, wait4, stop4, fu4, done,
     ],
     edges: [
       mkEdge(visit.id, check.id),
-      // Branches out of Check Messageability
+      // Branches out of Check Messageability — each sends exactly ONE opener
       mkEdge(check.id, inmail.id, 'inmail_available'),
       mkEdge(check.id, directMsg.id, 'message_available'),
       mkEdge(check.id, connect.id, 'not_messageable'),
-      // InMail branch
-      mkEdge(inmail.id, waitReply.id, 'sent'),
-      mkEdge(waitReply.id, inmailDone.id, 'replied'),
-      mkEdge(waitReply.id, inmailDone.id, 'no_reply'),
-      // Normal message branch
-      mkEdge(directMsg.id, stopReplied.id, 'sent'),
-      mkEdge(stopReplied.id, msgFollowup.id),
-      mkEdge(msgFollowup.id, msgDone.id),
-      // Connection fallback branch
+      // Connection-request fallback: wait for acceptance, then send the opener
       mkEdge(connect.id, waitAcc.id),
       mkEdge(waitAcc.id, afterAccept.id, 'accepted'),
-      mkEdge(afterAccept.id, connectDone.id),
       mkEdge(waitAcc.id, noAcceptDone.id, 'still_not_accepted'),
+      // ── Convergence: all three openers funnel into ONE shared follow-up chain ──
+      mkEdge(inmail.id, wait1.id, 'sent'),
+      mkEdge(directMsg.id, wait1.id, 'sent'),
+      mkEdge(afterAccept.id, wait1.id, 'sent'),
+      // Shared 5-message cadence (1 opener already sent + 4 follow-ups here)
+      mkEdge(wait1.id, stop1.id),
+      mkEdge(stop1.id, fu1.id),
+      mkEdge(fu1.id, wait2.id),
+      mkEdge(wait2.id, stop2.id),
+      mkEdge(stop2.id, fu2.id),
+      mkEdge(fu2.id, wait3.id),
+      mkEdge(wait3.id, stop3.id),
+      mkEdge(stop3.id, fu3.id),
+      mkEdge(fu3.id, wait4.id),
+      mkEdge(wait4.id, stop4.id),
+      mkEdge(stop4.id, fu4.id),
+      mkEdge(fu4.id, done.id),
     ],
   };
 }
@@ -289,7 +316,7 @@ export const SEQUENCE_TEMPLATES = [
   {
     id: 'inmail_first_fallback',
     name: 'InMail-first with fallbacks',
-    description: "Checks messageability first — sends InMail if available, a normal message if not, or falls back to a connection request. Branches and re-converges automatically, just like the flow you described.",
+    description: "Checks messageability first, then sends one opener (InMail, direct message, or — after a connection is accepted — an initial message), and funnels every path into ONE shared 4-message follow-up cadence (5 touches total). Build the follow-ups once; every branch reuses them automatically.",
     tags: ['Branching', 'InMail'],
     build: inmailFirstWithFallback,
   },

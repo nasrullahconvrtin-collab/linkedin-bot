@@ -272,3 +272,74 @@ def test_wait_acceptance_still_not_accepted_routes_to_end_node_and_terminates(mo
     # queuing another agent job — and must NOT land on the `msg` node.
     assert all(j["payload"].get("flow_node_id") != "msg" for j in jobs)
     assert prospect_box["prospect"]["status"] == "Completed"
+
+
+# ─── Converging branches: multiple openers funnel into ONE shared follow-up ──
+# chain (the "build the follow-ups once, reuse them everywhere" pattern from
+# the redesigned 'inmail_first_fallback' template — verifies the graph-walker
+# treats a node with multiple INCOMING edges exactly like any other node, no
+# matter which upstream branch a prospect arrives from.
+
+def _converging_flow():
+    """Two completely different openers (InMail vs. a direct message) both
+    point at the very same `wait1` -> `followup` chain — built once, reused
+    by both branches, instead of being duplicated per branch."""
+    nodes = [
+        _node("check", "check_messageability", "Check Messageability", {"fallback": "invitation"}),
+        _node("inmail", "send_inmail", "Send InMail", {"subject": "Hi", "message": "InMail body"}),
+        _node("direct", "send_message", "Send Message", {"message": "Direct message body"}),
+        _node("wait1", "wait", "Wait 3 days", {"days": 3}),
+        _node("stop1", "stop_if_replied", "Stop if Replied"),
+        _node("followup", "send_message", "Follow-up 1", {"message": "Following up — {{first_name}}"}),
+        _node("done", "completed", "Completed"),
+    ]
+    edges = [
+        _edge("check", "inmail", "inmail_available", "InMail available"),
+        _edge("check", "direct", "message_available", "Message available"),
+        # ── convergence: both openers funnel into the SAME shared chain ──
+        _edge("inmail", "wait1", "sent", "Sent"),
+        _edge("direct", "wait1", "sent", "Sent"),
+        _edge("wait1", "stop1", "default", "Continue"),
+        _edge("stop1", "followup", "default", "Continue"),
+        _edge("followup", "done", "default", "Continue"),
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
+def test_converging_branches_both_funnel_into_shared_followup_chain(monkeypatch):
+    """Whether the prospect was reached via InMail or a direct message, completing
+    that opener must land them on the *same* shared `wait1` step — proving a
+    template author can build the follow-up chain once and have every branch
+    reuse it, rather than duplicating it per branch."""
+    campaign = {"id": "camp-3", "status": "running", "profile_key": "profile_1",
+                "sequence_config": {"flow_sequence": _converging_flow()}}
+    jobs = []
+    fake_db = _FakeSupabase()
+
+    for opener_node_id, opener_node_type, status in (
+        ("inmail", "send_inmail", "inmail_sent"),
+        ("direct", "send_message", "message_sent"),
+    ):
+        prospect_box = {"prospect": {"id": f"prospect-{opener_node_id}", "status": "",
+                                     "linkedin_url": "https://www.linkedin.com/in/example/",
+                                     "assigned_account": "profile_1", "campaign_id": "camp-3",
+                                     "first_name": "Maryam"}}
+        jobs.clear()
+        _patch_common(monkeypatch, campaign, prospect_box, fake_db, jobs)
+
+        job = {"id": f"job-{opener_node_id}", "prospect_id": prospect_box["prospect"]["id"],
+               "campaign_id": "camp-3", "profile_key": "profile_1",
+               "payload": {"flow_node_id": opener_node_id, "flow_node_type": opener_node_type}}
+
+        database.db_apply_completed_flow_job(job, {"status": status})
+
+        # Both openers must converge on the very same `wait1` node — the
+        # shared chain — never on a per-branch duplicate.
+        queued = [j for j in jobs if j["payload"].get("flow_node_id") not in (opener_node_id,)]
+        assert len(queued) == 1, f"expected exactly one queued step after {opener_node_id}, got {queued}"
+        # `wait` is an inline node (no agent job) — the walker resolves it
+        # immediately and queues the job for the node *after* it: `followup`,
+        # reached via the shared `stop1` gate. That's the proof of convergence:
+        # both openers end up driving the identical downstream chain.
+        assert queued[0]["payload"]["flow_node_id"] == "followup"
+        assert queued[0]["job_type"] == "send_messages"
