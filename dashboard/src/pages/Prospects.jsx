@@ -86,10 +86,21 @@ export default function Prospects() {
     getCampaigns().then(setCampaigns).catch(() => {});
   }, []);
 
-  // Prevent background scroll while the side panel is open
+  // Lock scroll without layout shift: compensate for scrollbar width so the
+  // page doesn't jump when overflow:hidden removes it.
   useEffect(() => {
-    document.body.style.overflow = panel ? 'hidden' : '';
-    return () => { document.body.style.overflow = ''; };
+    if (panel) {
+      const sw = window.innerWidth - document.documentElement.clientWidth;
+      document.body.style.overflow = 'hidden';
+      document.body.style.paddingRight = `${sw}px`;
+    } else {
+      document.body.style.overflow = '';
+      document.body.style.paddingRight = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+      document.body.style.paddingRight = '';
+    };
   }, [panel]);
 
   useEffect(() => {

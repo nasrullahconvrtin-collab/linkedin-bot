@@ -52,10 +52,20 @@ export default function MessageEditorModal({
     setSampleIndex(0);
   }, [open, value, name, type]);
 
-  // Prevent background scroll while open
+  // Lock scroll without layout shift: compensate for scrollbar width.
   useEffect(() => {
-    document.body.style.overflow = open ? 'hidden' : '';
-    return () => { document.body.style.overflow = ''; };
+    if (open) {
+      const sw = window.innerWidth - document.documentElement.clientWidth;
+      document.body.style.overflow = 'hidden';
+      document.body.style.paddingRight = `${sw}px`;
+    } else {
+      document.body.style.overflow = '';
+      document.body.style.paddingRight = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+      document.body.style.paddingRight = '';
+    };
   }, [open]);
   const sample = sampleProspects[sampleIndex] || sampleProspects[0] || {
     first_name: 'Mariam',
