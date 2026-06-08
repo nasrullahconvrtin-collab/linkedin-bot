@@ -36,7 +36,7 @@ const blankProspect = {
   followup_3: '', followup_4: '', tags: [], custom_fields: {},
 };
 
-const STD_VARIABLES = ['first_name', 'last_name', 'company', 'job_title', 'location', 'email'];
+const STD_VARIABLES = ['first_name', 'last_name', 'company', 'job_title', 'location', 'email', 'linkedin_url', 'invite_note', 'inmail_subject', 'notes'];
 
 function MessageField({ label, value, onChange, customFields }) {
   const [open, setOpen] = useState(false);

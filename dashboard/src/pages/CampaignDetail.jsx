@@ -78,6 +78,43 @@ function autoMap(headers) {
   return result;
 }
 
+const STD_VARS = ['first_name', 'last_name', 'company', 'job_title', 'location', 'email', 'linkedin_url', 'invite_note', 'inmail_subject'];
+
+function CampaignVariablesPanel({ variables, onAdd, onRemove }) {
+  const [newVar, setNewVar] = useState('');
+  const add = () => { if (newVar.trim()) { onAdd(newVar); setNewVar(''); } };
+  return (
+    <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
+      <h3 className="text-white font-semibold mb-1">Campaign Variables</h3>
+      <p className="text-[#6b7280] text-xs mb-4">
+        Define custom variable names once — they appear as <span className="text-[#818cf8]">{'{{variable}}'}</span> options in every message editor for this campaign.
+        Standard fields (first_name, company, etc.) are always available.
+      </p>
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {STD_VARS.map(v => (
+          <span key={v} className="text-[10px] px-2 py-0.5 rounded-full border border-[#2a2a2a] text-[#6b7280]">{`{{${v}}}`}</span>
+        ))}
+        {variables.map(v => (
+          <span key={v} className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border border-[#6366f1]/40 text-[#818cf8]">
+            {`{{${v}}}`}
+            <button onClick={() => onRemove(v)} className="hover:text-red-400 ml-0.5"><X size={10} /></button>
+          </span>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <input
+          value={newVar}
+          onChange={e => setNewVar(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && add()}
+          placeholder="e.g. recent_post, company_size…"
+          className="flex-1 bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#6366f1]"
+        />
+        <button onClick={add} className="px-4 py-2 rounded-lg bg-[#6366f1] text-white text-sm">Add</button>
+      </div>
+    </div>
+  );
+}
+
 export default function CampaignDetail() {
   const { id } = useParams();
   const nav = useNavigate();
@@ -287,6 +324,24 @@ export default function CampaignDetail() {
     return new File([lines.join('\n')], 'import.csv', { type: 'text/csv' });
   };
 
+  const campaignVariables = (campaign?.sequence_config || {}).variables || [];
+
+  const saveCampaignVariables = async (vars) => {
+    const updated = { ...campaign, sequence_config: { ...(campaign.sequence_config || {}), variables: vars } };
+    await updateCampaign(id, { sequence_config: updated.sequence_config });
+    setCampaign(updated);
+  };
+
+  const addCampaignVariable = async (name) => {
+    const key = name.trim().toLowerCase().replace(/\s+/g, '_');
+    if (!key || campaignVariables.includes(key)) return;
+    await saveCampaignVariables([...campaignVariables, key]);
+  };
+
+  const removeCampaignVariable = async (key) => {
+    await saveCampaignVariables(campaignVariables.filter(v => v !== key));
+  };
+
   const handleImport = async () => {
     if (!csvFile) return;
     setImporting(true);
@@ -299,6 +354,12 @@ export default function CampaignDetail() {
       });
       const res = await bulkImportProspects(mappedFile, id, importMode);
       setImportResult(res);
+      // Persist new custom field keys as campaign variables so they appear in message editors
+      const newKeys = customFieldMappings.map(m => m.key.trim().toLowerCase().replace(/\s+/g, '_')).filter(Boolean);
+      if (newKeys.length > 0) {
+        const merged = [...new Set([...campaignVariables, ...newKeys])];
+        await saveCampaignVariables(merged);
+      }
       toast.success(`Created ${res.created_count || 0}, updated ${res.updated_count || 0}`);
       setCsvFile(null); setCsvHeaders([]); setCsvPreview([]);
     } catch (err) {
@@ -436,6 +497,13 @@ export default function CampaignDetail() {
 
       {tab === 'import' && (
         <div className="space-y-5 max-w-3xl">
+          {/* Campaign Variables — always visible, drives the message editor variable picker */}
+          <CampaignVariablesPanel
+            variables={campaignVariables}
+            onAdd={addCampaignVariable}
+            onRemove={removeCampaignVariable}
+          />
+
           {/* Drop zone */}
           <div
             onDragOver={e => { e.preventDefault(); setDragging(true); }}
