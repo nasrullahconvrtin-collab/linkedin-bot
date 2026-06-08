@@ -203,9 +203,9 @@ export default function Settings() {
     try {
       const res = await createExtensionPairToken(pairProfile || null);
       setPairToken(res);
-      toast.success('Extension pairing token created');
+      toast.success('Pairing code created — paste it into the extension');
     } catch (err) {
-      toast.error(err.message || 'Could not create pairing token');
+      toast.error(err.message || 'Could not create a pairing code');
     } finally {
       setPairing(false);
     }
@@ -215,7 +215,7 @@ export default function Settings() {
     const token = pairToken?.token;
     if (!token) return;
     navigator.clipboard.writeText(token)
-      .then(() => toast.success('Pairing token copied'))
+      .then(() => toast.success('Pairing code copied'))
       .catch(() => toast.error('Copy failed'));
   };
 
@@ -374,7 +374,7 @@ export default function Settings() {
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#6366f1] hover:bg-[#4f46e5] text-white text-sm font-medium disabled:opacity-50"
               >
                 {pairing ? <Loader2 size={15} className="animate-spin" /> : <KeyRound size={15} />}
-                Generate Pairing Token
+                Generate Pairing Code
               </button>
               {pairToken?.expires_at && (
                 <span className="text-xs text-[#6b7280]">
@@ -386,10 +386,13 @@ export default function Settings() {
             {pairToken?.token && (
               <div className="rounded-xl border border-[#2a2a2a] bg-[#0d0d0d] p-4">
                 <div className="flex items-center justify-between gap-3 mb-2">
-                  <p className="text-xs text-[#6b7280]">Paste this token into the LinkedFlow Chrome Extension popup</p>
+                  <p className="text-xs text-[#6b7280]">
+                    Paste this code into the extension's "Pairing code" field — that's the
+                    only thing it needs. No URLs or profile names to type.
+                  </p>
                   <button
                     onClick={copyPairToken}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-xs"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-xs shrink-0"
                   >
                     <Copy size={12} /> Copy
                   </button>
@@ -414,10 +417,12 @@ export default function Settings() {
               <ol className="list-decimal ml-5 space-y-1">
                 <li>Download the ZIP above, unzip it to a folder on your computer.</li>
                 <li>Open Chrome → <span className="font-mono text-[#c7d2fe]">chrome://extensions</span> → enable <span className="font-mono text-[#c7d2fe]">Developer mode</span> → click <span className="font-mono text-[#c7d2fe]">Load unpacked</span> → select the unzipped folder.</li>
-                <li>Generate a pairing token here and paste it into the extension popup.</li>
-                <li>Set the LinkedIn profile run mode to <span className="text-white">Chrome Extension</span>.</li>
-                <li>Keep LinkedIn open/logged in. The extension will heartbeat and pull pending jobs.</li>
+                <li>Click the LinkedFlow icon in your Chrome toolbar, click <span className="text-white">Generate Pairing Code</span> here, and paste the code into that single field — the extension figures out everything else (backend, profile) on its own.</li>
+                <li>Make sure you're logged into LinkedIn in Chrome — the extension uses your existing session in its own hidden background tab.</li>
               </ol>
+              <p className="mt-2 text-xs text-[#6b7280]">
+                That's the whole setup — one code, one paste, no URLs or profile names to remember.
+              </p>
             </div>
           </div>
         </Section>

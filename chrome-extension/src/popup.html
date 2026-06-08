@@ -15,14 +15,20 @@
         </div>
       </header>
 
-      <section class="card">
-        <label>Backend URL</label>
-        <input id="backendUrl" />
-        <label>Pairing token</label>
-        <input id="token" placeholder="Paste token from Settings" />
-        <label>Profile key</label>
-        <input id="profileKey" placeholder="profile_1 or ext_account" />
+      <section class="card" id="connectCard">
+        <label>Pairing code</label>
+        <input id="token" placeholder="Paste the code from LinkedFlow → Settings" />
         <button id="connect">Connect to LinkedFlow</button>
+        <p class="hint">
+          Open <strong>LinkedFlow → Settings → Use Chrome as the executor</strong>,
+          click <strong>Generate Pairing Code</strong>, then paste it here. That's it —
+          no URLs or profile names to fill in.
+        </p>
+        <details class="advanced">
+          <summary>Advanced (self-hosted backend)</summary>
+          <label>Backend URL</label>
+          <input id="backendUrl" />
+        </details>
       </section>
 
       <section class="card grid">

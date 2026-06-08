@@ -6,28 +6,42 @@ const $ = (id) => document.getElementById(id);
 async function render() {
   const cfg = await getConfig();
   if (!cfg.extensionId) await saveConfig({ extensionId: extensionId() });
+  // Backend URL has a built-in default (DEFAULTS.backendUrl) — most users never
+  // need to see or touch it, so it lives behind "Advanced" and is only shown
+  // here for self-hosters who override it.
   $('backendUrl').value = cfg.backendUrl || '';
-  $('profileKey').value = cfg.profileKey || '';
   $('status').textContent = cfg.paired ? (cfg.paused ? 'Connected, paused' : 'Connected') : 'Not connected';
-  $('profile').textContent = cfg.profileKey || '-';
+  $('profile').textContent = cfg.displayName || cfg.profileKey || '-';
   $('job').textContent = cfg.currentJob || 'None';
   $('sync').textContent = cfg.lastSync ? new Date(cfg.lastSync).toLocaleTimeString() : 'Never';
   $('error').textContent = cfg.lastError || 'None';
   $('pause').textContent = cfg.paused ? 'Resume Automation' : 'Pause Automation';
+  // Once paired, the one-field connect card is no longer needed — collapse it
+  // out of the way so returning users land straight on their status.
+  const connectCard = $('connectCard');
+  if (connectCard) connectCard.style.display = cfg.paired ? 'none' : '';
 }
 
 $('connect').addEventListener('click', async () => {
   const cfg = await getConfig();
-  const backendUrl = $('backendUrl').value.trim();
-  const profileKey = $('profileKey').value.trim();
-  await saveConfig({ backendUrl, profileKey, extensionId: cfg.extensionId || extensionId() });
+  const token = $('token').value.trim();
+  if (!token) {
+    await saveConfig({ lastError: 'Paste the pairing code from LinkedFlow → Settings first' });
+    return render();
+  }
+  // Only persist a custom backend URL if the user actually opened "Advanced"
+  // and changed it — otherwise keep the built-in default from DEFAULTS.
+  const backendUrlInput = $('backendUrl').value.trim();
+  const updates = { extensionId: cfg.extensionId || extensionId() };
+  if (backendUrlInput) updates.backendUrl = backendUrlInput;
+  await saveConfig(updates);
   const fresh = await getConfig();
   try {
+    // No profile_key sent: the pairing code already carries (or auto-creates)
+    // the right profile server-side, so the user never has to invent one.
     await pairExtension({
-      token: $('token').value.trim(),
+      token,
       extension_id: fresh.extensionId,
-      profile_key: profileKey,
-      display_name: profileKey,
       extension_version: '0.1.0',
       linkedin_login_status: 'unknown',
     });

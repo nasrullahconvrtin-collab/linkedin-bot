@@ -42,6 +42,26 @@ button {
   margin-top: 10px;
   cursor: pointer;
 }
+.hint {
+  margin: 10px 0 0;
+  color: #6b7280;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.hint strong { display: inline; color: #c7d2fe; font-size: inherit; margin: 0; }
+.advanced {
+  margin-top: 10px;
+  border-top: 1px solid #2a2a2a;
+  padding-top: 8px;
+}
+.advanced summary {
+  cursor: pointer;
+  color: #6b7280;
+  font-size: 11px;
+  user-select: none;
+}
+.advanced summary:hover { color: #9ca3af; }
+.advanced label { margin-top: 8px; }
 button.secondary { background: #1a1a1a; border: 1px solid #2a2a2a; color: #d1d5db; }
 button.danger { background: #ef444420; color: #f87171; border: 1px solid #ef444450; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
