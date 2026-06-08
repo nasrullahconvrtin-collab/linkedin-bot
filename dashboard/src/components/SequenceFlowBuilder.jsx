@@ -17,6 +17,7 @@ import {
   Database, AtSign, Flag, ThumbsUp, LayoutTemplate, Sparkles, ArrowRight,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { EDGE_CONDITIONS, EDGE_COLORS } from '../data/flowEdgeConditions';
 import { SEQUENCE_TEMPLATES } from '../data/sequenceTemplates';
 
 // ─── Node type definitions ────────────────────────────────────────────────────
@@ -51,34 +52,8 @@ export const NODE_TYPES_DEF = [
 const NODE_MAP = Object.fromEntries(NODE_TYPES_DEF.map(n => [n.type, n]));
 
 // ─── Edge condition options ───────────────────────────────────────────────────
-
-export const EDGE_CONDITIONS = [
-  { value: 'default',             label: 'Continue' },
-  { value: 'accepted',            label: '✅ Accepted' },
-  { value: 'still_not_accepted',  label: '❌ Still not accepted' },
-  { value: 'replied',             label: '✅ Replied' },
-  { value: 'no_reply',            label: '❌ No reply' },
-  { value: 'already_connected',   label: 'Already connected' },
-  { value: 'message_available',   label: 'Message available' },
-  { value: 'inmail_available',    label: 'InMail available' },
-  { value: 'not_messageable',     label: 'Not messageable' },
-  { value: 'sent',                label: 'Sent' },
-  { value: 'error',               label: 'Error / Retry' },
-];
-
-export const EDGE_COLORS = {
-  accepted:           '#22c55e',
-  replied:            '#22c55e',
-  message_available:  '#22c55e',
-  inmail_available:   '#0891b2',
-  sent:               '#22c55e',
-  still_not_accepted: '#f97316',
-  no_reply:           '#f97316',
-  not_messageable:    '#ef4444',
-  error:              '#ef4444',
-  already_connected:  '#6366f1',
-  default:            '#4b5563',
-};
+// (defined in their own module — see flowEdgeConditions.js — to avoid a
+// circular import with sequenceTemplates.js, which also needs them)
 
 // ─── Custom Flow Node ─────────────────────────────────────────────────────────
 

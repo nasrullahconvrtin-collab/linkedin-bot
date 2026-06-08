@@ -7,7 +7,7 @@
 // from a working sequence instead of a blank board.
 
 import { MarkerType } from 'reactflow';
-import { EDGE_COLORS, EDGE_CONDITIONS } from '../components/SequenceFlowBuilder';
+import { EDGE_COLORS, EDGE_CONDITIONS } from './flowEdgeConditions';
 
 const CONDITION_LABELS = Object.fromEntries(EDGE_CONDITIONS.map(c => [c.value, c.label]));
 
