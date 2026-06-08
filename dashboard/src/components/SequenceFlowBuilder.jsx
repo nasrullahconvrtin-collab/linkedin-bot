@@ -108,7 +108,7 @@ function FlowNode({ id, data, selected }) {
         {data.config && (
           <div className="text-[10px] text-[#9ca3af] mt-1 space-y-0.5">
             {data.nodeType === 'wait' && (
-              <p>⏱ {data.config.working_days ? `${data.config.working_days} working days` : `${data.config.days || 1} day(s)`}</p>
+              <p>⏱ {data.config.working_days_mode ? `${data.config.working_days ?? 1} working days` : `${data.config.days ?? 0} day(s)`}</p>
             )}
             {data.nodeType === 'send_invitation' && (
               <p>{data.config.add_note ? '📝 With invite note' : '🚫 Without note'}</p>
@@ -265,7 +265,7 @@ function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
               <label className="text-xs text-[#9ca3af]">Number of days</label>
               <input
                 type="number" min="0" max="30"
-                value={cfg.working_days_mode ? (cfg.working_days || 1) : (cfg.days || 1)}
+                value={cfg.working_days_mode ? (cfg.working_days ?? 1) : (cfg.days ?? 0)}
                 onChange={e => cfg.working_days_mode
                   ? set('working_days', Number(e.target.value))
                   : set('days', Number(e.target.value))}

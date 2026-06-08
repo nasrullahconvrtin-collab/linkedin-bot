@@ -1824,9 +1824,12 @@ def _run_inline_flow_node(campaign: dict, prospect: dict, node: dict, scheduled_
 
     if node_type == "wait":
         if config.get("working_days_mode"):
-            target = add_working_days(date.today(), int(config.get("working_days") or 1))
+            working_days = config.get("working_days")
+            n = int(working_days if working_days is not None else 1)
+            target = add_working_days(date.today(), n)
             return datetime.combine(target, datetime.min.time()).replace(tzinfo=timezone.utc) - datetime.now(timezone.utc)
-        return timedelta(days=int(config.get("days") or 1))
+        days = config.get("days")
+        return timedelta(days=int(days if days is not None else 1))
 
     if node_type == "needs_personalization":
         db_update_prospect(prospect_id, {
