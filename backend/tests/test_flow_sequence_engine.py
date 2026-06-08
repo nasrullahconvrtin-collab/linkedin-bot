@@ -41,30 +41,56 @@ def _edge(source, target, condition, display_label):
 
 
 class _FakeTable:
-    """Minimal stand-in for supabase.table(...).update(...).eq(...).eq(...).execute()."""
-    def __init__(self, sink, name):
-        self._sink = sink
+    """Minimal stand-in for the chains the engine uses:
+      .update(...).eq(...).eq(...).execute()
+      .select(...).eq(...).eq(...).limit(...).execute()
+    For `campaign_enrollments`, selects/updates are backed by an in-memory dict
+    on the fake supabase client so _get_flow_state/_update_flow_state (used by
+    the acceptance/reply polling loop) can round-trip `flow_state` realistically."""
+    def __init__(self, db, name):
+        self._db = db
         self._name = name
+        self._mode = None
         self._payload = None
+        self._filters = {}
+
+    def select(self, _cols):
+        self._mode = "select"
+        return self
 
     def update(self, payload):
+        self._mode = "update"
         self._payload = payload
         return self
 
-    def eq(self, *_args, **_kwargs):
+    def eq(self, col, val):
+        self._filters[col] = val
+        return self
+
+    def limit(self, _n):
         return self
 
     def execute(self):
-        self._sink.append((self._name, self._payload))
+        self._db.writes.append((self._name, self._mode, self._payload, dict(self._filters)))
+        if self._name == "campaign_enrollments":
+            key = (self._filters.get("campaign_id"), self._filters.get("prospect_id"))
+            if self._mode == "update":
+                row = self._db.enrollments.setdefault(key, {})
+                row.update(self._payload or {})
+                return types.SimpleNamespace(data=[dict(row)])
+            if self._mode == "select":
+                row = self._db.enrollments.get(key)
+                return types.SimpleNamespace(data=[dict(row)] if row else [])
         return types.SimpleNamespace(data=[])
 
 
 class _FakeSupabase:
     def __init__(self):
         self.writes = []
+        self.enrollments = {}
 
     def table(self, name):
-        return _FakeTable(self.writes, name)
+        return _FakeTable(self, name)
 
 
 # ─── _flow_next_node: must branch on data.condition, never on the cosmetic label ──
@@ -254,6 +280,10 @@ def test_wait_acceptance_accepted_routes_to_message_node(monkeypatch):
 
 
 def test_wait_acceptance_still_not_accepted_routes_to_end_node_and_terminates(monkeypatch):
+    """Once the monitoring window has run its course (the prospect never
+    accepted across many periodic checks), 'still_not_accepted' must finally
+    route into the "completed" terminal node and end the sequence — and must
+    NOT land on the `msg` node (the 'accepted' branch)."""
     campaign = {"id": "camp-2", "status": "running", "profile_key": "profile_1",
                 "sequence_config": {"flow_sequence": _connect_flow_with_fork()}}
     prospect_box = {"prospect": {"id": "prospect-2", "status": "", "linkedin_url": "https://www.linkedin.com/in/example2/",
@@ -261,6 +291,13 @@ def test_wait_acceptance_still_not_accepted_routes_to_end_node_and_terminates(mo
     jobs = []
     fake_db = _FakeSupabase()
     _patch_common(monkeypatch, campaign, prospect_box, fake_db, jobs)
+    # Simulate a monitoring window that started long enough ago to have
+    # exceeded this node's max-wait (legacy `timeout_days: 7` -> ~21 days).
+    fake_db.enrollments[("camp-2", "prospect-2")] = {
+        "flow_state": {"wait_monitor": {"node_id": "wait_acc",
+                                         "started_at": "2026-04-01T00:00:00+00:00",
+                                         "checks": 21}},
+    }
 
     job = {"id": "job-wait", "prospect_id": "prospect-2", "campaign_id": "camp-2",
            "profile_key": "profile_1",
@@ -271,6 +308,7 @@ def test_wait_acceptance_still_not_accepted_routes_to_end_node_and_terminates(mo
     # Routes into the "completed" terminal node (an inline node) rather than
     # queuing another agent job — and must NOT land on the `msg` node.
     assert all(j["payload"].get("flow_node_id") != "msg" for j in jobs)
+    assert all(j["payload"].get("flow_node_id") != "wait_acc" for j in jobs)
     assert prospect_box["prospect"]["status"] == "Completed"
 
 
@@ -343,3 +381,143 @@ def test_converging_branches_both_funnel_into_shared_followup_chain(monkeypatch)
         # both openers end up driving the identical downstream chain.
         assert queued[0]["payload"]["flow_node_id"] == "followup"
         assert queued[0]["job_type"] == "send_messages"
+
+
+# ─── Periodic acceptance / reply monitoring ─────────────────────────────────
+# "Wait for Acceptance" / "Wait for InMail Reply" must POLL on a cadence
+# (check_frequency_hours) up to a max-wait window (max_wait_days) — not wait a
+# fixed delay and check exactly once. While "still pending" and inside the
+# window, the engine re-queues another check on the SAME node (bookkeeping in
+# campaign_enrollments.flow_state.wait_monitor); once the window elapses, the
+# "still_not_accepted"/"no_reply" branch finally fires.
+
+def test_wait_acceptance_still_pending_within_window_requeues_another_check(monkeypatch):
+    campaign = {"id": "camp-4", "status": "running", "profile_key": "profile_1",
+                "sequence_config": {"flow_sequence": _connect_flow_with_fork()}}
+    prospect_box = {"prospect": {"id": "prospect-4", "status": "", "linkedin_url": "https://www.linkedin.com/in/example4/",
+                                 "assigned_account": "profile_1", "campaign_id": "camp-4", "first_name": "Iman"}}
+    jobs = []
+    fake_db = _FakeSupabase()
+    _patch_common(monkeypatch, campaign, prospect_box, fake_db, jobs)
+    # Pretend we entered the wait node ~2 days ago — well inside the (default)
+    # 30-day max-wait window for a node with no explicit config.
+    fake_db.enrollments[("camp-4", "prospect-4")] = {
+        "flow_state": {"wait_monitor": {"node_id": "wait_acc",
+                                         "started_at": "2026-06-06T00:00:00+00:00",
+                                         "checks": 1}},
+    }
+
+    job = {"id": "job-wait", "prospect_id": "prospect-4", "campaign_id": "camp-4",
+           "profile_key": "profile_1",
+           "payload": {"flow_node_id": "wait_acc", "flow_node_type": "wait_acceptance"}}
+
+    database.db_apply_completed_flow_job(job, {"status": "still_not_accepted"})
+
+    # Must NOT advance to the "end" terminal node yet — another check on the
+    # SAME wait_acc node should be queued instead.
+    assert all(j["payload"].get("flow_node_id") != "end" for j in jobs)
+    requeued = [j for j in jobs if j["payload"].get("flow_node_id") == "wait_acc"]
+    assert len(requeued) == 1
+    assert requeued[0]["job_type"] == "check_connection_status"
+    # Bookkeeping must persist across the loop: started_at preserved, counter incremented.
+    monitor = fake_db.enrollments[("camp-4", "prospect-4")]["flow_state"]["wait_monitor"]
+    assert monitor["node_id"] == "wait_acc"
+    assert monitor["started_at"] == "2026-06-06T00:00:00+00:00"
+    assert monitor["checks"] == 2
+    assert monitor["last_status"] == "still_not_accepted"
+    # The prospect must stay in-flight, not be marked Completed.
+    assert prospect_box["prospect"]["status"] != "Completed"
+
+
+def test_wait_acceptance_still_pending_after_max_wait_finally_routes_to_end(monkeypatch):
+    campaign = {"id": "camp-5", "status": "running", "profile_key": "profile_1",
+                "sequence_config": {"flow_sequence": _connect_flow_with_fork()}}
+    prospect_box = {"prospect": {"id": "prospect-5", "status": "", "linkedin_url": "https://www.linkedin.com/in/example5/",
+                                 "assigned_account": "profile_1", "campaign_id": "camp-5", "first_name": "Iman"}}
+    jobs = []
+    fake_db = _FakeSupabase()
+    _patch_common(monkeypatch, campaign, prospect_box, fake_db, jobs)
+    # Pretend monitoring started 90 days ago — way past the default 30-day max wait.
+    fake_db.enrollments[("camp-5", "prospect-5")] = {
+        "flow_state": {"wait_monitor": {"node_id": "wait_acc",
+                                         "started_at": "2026-03-10T00:00:00+00:00",
+                                         "checks": 30}},
+    }
+
+    job = {"id": "job-wait", "prospect_id": "prospect-5", "campaign_id": "camp-5",
+           "profile_key": "profile_1",
+           "payload": {"flow_node_id": "wait_acc", "flow_node_type": "wait_acceptance"}}
+
+    database.db_apply_completed_flow_job(job, {"status": "still_not_accepted"})
+
+    # No further check_connection_status job — the window has expired, so the
+    # engine must fall through to normal edge routing (-> "end", terminal).
+    assert all(j["payload"].get("flow_node_id") != "wait_acc" for j in jobs)
+    assert prospect_box["prospect"]["status"] == "Completed"
+    # The monitor bookkeeping must be cleared once the prospect leaves the node.
+    assert fake_db.enrollments[("camp-5", "prospect-5")]["flow_state"].get("wait_monitor") is None
+
+
+def test_wait_acceptance_accepted_clears_monitor_bookkeeping(monkeypatch):
+    """Once accepted, flow_state.wait_monitor must be cleared so a future
+    re-entry into a similar polling node starts a fresh window."""
+    campaign = {"id": "camp-6", "status": "running", "profile_key": "profile_1",
+                "sequence_config": {"flow_sequence": _connect_flow_with_fork()}}
+    prospect_box = {"prospect": {"id": "prospect-6", "status": "", "linkedin_url": "https://www.linkedin.com/in/example6/",
+                                 "assigned_account": "profile_1", "campaign_id": "camp-6", "first_name": "Iman"}}
+    jobs = []
+    fake_db = _FakeSupabase()
+    _patch_common(monkeypatch, campaign, prospect_box, fake_db, jobs)
+    fake_db.enrollments[("camp-6", "prospect-6")] = {
+        "flow_state": {"wait_monitor": {"node_id": "wait_acc",
+                                         "started_at": "2026-06-07T00:00:00+00:00",
+                                         "checks": 1}},
+    }
+
+    job = {"id": "job-wait", "prospect_id": "prospect-6", "campaign_id": "camp-6",
+           "profile_key": "profile_1",
+           "payload": {"flow_node_id": "wait_acc", "flow_node_type": "wait_acceptance"}}
+
+    database.db_apply_completed_flow_job(job, {"status": "accepted"})
+
+    assert fake_db.enrollments[("camp-6", "prospect-6")]["flow_state"].get("wait_monitor") is None
+
+
+def test_entering_wait_acceptance_schedules_first_check_on_configured_cadence(monkeypatch):
+    """Entering the node (fresh, no prior monitor state) must (a) seed
+    flow_state.wait_monitor and (b) schedule the FIRST check one
+    check_frequency_hours interval out — not the old 'wait N days, check
+    once' delay."""
+    nodes = [
+        _node("connect", "send_invitation", "Send Connection Request", {"add_note": False}),
+        _node("wait_acc", "wait_acceptance", "Wait for Acceptance",
+              {"check_frequency_hours": 12, "max_wait_days": 20}),
+        _node("msg", "send_message", "Send Initial Message", {"message": "hi"}),
+        _node("end", "completed", "No Response — End"),
+    ]
+    edges = [
+        _edge("connect", "wait_acc", "default", "Continue"),
+        _edge("wait_acc", "msg", "accepted", "✅ Accepted"),
+        _edge("wait_acc", "end", "still_not_accepted", "❌ Still not accepted"),
+    ]
+    campaign = {"id": "camp-7", "status": "running", "profile_key": "profile_1",
+                "sequence_config": {"flow_sequence": {"nodes": nodes, "edges": edges}}}
+    prospect_box = {"prospect": {"id": "prospect-7", "status": "", "linkedin_url": "https://www.linkedin.com/in/example7/",
+                                 "assigned_account": "profile_1", "campaign_id": "camp-7", "first_name": "Iman"}}
+    jobs = []
+    fake_db = _FakeSupabase()
+    _patch_common(monkeypatch, campaign, prospect_box, fake_db, jobs)
+
+    before = datetime.now(timezone.utc)
+    database.db_queue_next_flow_step("camp-7", "prospect-7", "wait_acc", base_time=before)
+
+    queued = [j for j in jobs if j["payload"].get("flow_node_id") == "wait_acc"]
+    assert len(queued) == 1
+    scheduled = datetime.fromisoformat(queued[0]["scheduled_for"])
+    delta_hours = (scheduled - before).total_seconds() / 3600.0
+    # Must be scheduled ~12h out (the configured cadence) — NOT 14/20 days.
+    assert 11.9 <= delta_hours <= 12.1
+
+    monitor = fake_db.enrollments[("camp-7", "prospect-7")]["flow_state"]["wait_monitor"]
+    assert monitor["node_id"] == "wait_acc"
+    assert monitor["checks"] == 0

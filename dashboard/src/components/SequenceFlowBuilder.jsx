@@ -37,8 +37,8 @@ export const NODE_TYPES_DEF = [
   { type: 'ready_to_send',        label: 'Ready to Send',         icon: CheckCircle2,   color: '#16a34a', category: 'queue',    description: 'Employee approved — agent sends next' },
   // Delays
   { type: 'wait',                 label: 'Wait / Delay',          icon: Clock,          color: '#475569', category: 'delay',    description: 'Pause for a number of days before the next step' },
-  { type: 'wait_acceptance',      label: 'Wait for Acceptance',   icon: Clock,          color: '#475569', category: 'delay',    description: 'Periodically re-check the profile for the Message button (= accepted)' },
-  { type: 'wait_reply',          label: 'Wait for InMail Reply',  icon: Clock,          color: '#475569', category: 'delay',    description: 'Re-check weekly: open profile → Message — if a normal message box appears, continue; otherwise stop' },
+  { type: 'wait_acceptance',      label: 'Wait for Acceptance',   icon: Clock,          color: '#475569', category: 'delay',    description: 'Polls the profile on a schedule for the Message button (= accepted) until it shows up or the max wait elapses' },
+  { type: 'wait_reply',          label: 'Wait for InMail Reply',  icon: Clock,          color: '#475569', category: 'delay',    description: 'Polls the profile on a schedule for a normal message box (InMail accepted) until it shows up or the max wait elapses' },
   // Control
   { type: 'stop_if_replied',      label: 'Stop if Replied',       icon: XCircle,        color: '#dc2626', category: 'control',  description: 'Stop sequence if prospect replied' },
   { type: 'completed',            label: 'Completed',             icon: Flag,           color: '#16a34a', category: 'control',  description: 'End of sequence — mark completed' },
@@ -50,6 +50,24 @@ export const NODE_TYPES_DEF = [
 ];
 
 const NODE_MAP = Object.fromEntries(NODE_TYPES_DEF.map(n => [n.type, n]));
+
+// Friendly "every N hours/days/weeks" copy shared by the canvas summary and
+// config panel for the polling-style Wait for Acceptance / Wait for InMail
+// Reply nodes (config stores the cadence as `check_frequency_hours`).
+const CHECK_FREQUENCY_OPTIONS = [
+  { value: 12, label: 'Every 12 hours' },
+  { value: 24, label: 'Once a day' },
+  { value: 48, label: 'Every 2 days' },
+  { value: 72, label: 'Every 3 days' },
+  { value: 168, label: 'Once a week' },
+];
+
+function describeCheckFrequency(hours) {
+  const h = Number(hours) || 24;
+  if (h % 168 === 0) return h === 168 ? 'weekly' : `every ${h / 168} weeks`;
+  if (h % 24 === 0) return h === 24 ? 'daily' : `every ${h / 24} days`;
+  return `every ${h}h`;
+}
 
 // ─── Edge condition options ───────────────────────────────────────────────────
 // (defined in their own module — see flowEdgeConditions.js — to avoid a
@@ -102,7 +120,10 @@ function FlowNode({ id, data, selected }) {
               <p className="truncate">💬 {data.config.message.slice(0, 40)}…</p>
             )}
             {data.nodeType === 'wait_acceptance' && (
-              <p>⏳ Timeout: {data.config.timeout_days || 14} days</p>
+              <p>🔁 Checks {describeCheckFrequency(data.config.check_frequency_hours || 24)}, gives up after {data.config.max_wait_days || 30}d</p>
+            )}
+            {data.nodeType === 'wait_reply' && (
+              <p>🔁 Checks {describeCheckFrequency(data.config.check_frequency_hours || 168)}, gives up after {data.config.max_wait_days || 30}d</p>
             )}
           </div>
         )}
@@ -256,15 +277,35 @@ function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
 
         {/* Wait for acceptance config */}
         {node.data.nodeType === 'wait_acceptance' && (
-          <div>
-            <label className="text-xs text-[#9ca3af]">Timeout after X days (then → "Still not accepted" branch)</label>
-            <input
-              type="number" min="1" max="60"
-              value={cfg.timeout_days || 14}
-              onChange={e => set('timeout_days', Number(e.target.value))}
-              className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
-            />
-          </div>
+          <>
+            <p className="text-[11px] text-[#6b7280] -mt-1">
+              Agent periodically reopens the profile and looks for the Message button (= connection accepted). It keeps checking on this cadence — like Day 1, Day 2, Day 3… — until the prospect accepts or the maximum wait period below is reached. Most acceptances land within the first week; very few arrive after 30 days.
+            </p>
+            <div>
+              <label className="text-xs text-[#9ca3af]">Check frequency</label>
+              <select
+                value={cfg.check_frequency_hours || 24}
+                onChange={e => set('check_frequency_hours', Number(e.target.value))}
+                className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+              >
+                {CHECK_FREQUENCY_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}{o.value === 24 ? ' (recommended)' : ''}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-[#9ca3af]">Maximum wait — then → "Still not accepted" branch</label>
+              <div className="mt-1 flex items-center gap-2">
+                <input
+                  type="number" min="1" max="90"
+                  value={cfg.max_wait_days || 30}
+                  onChange={e => set('max_wait_days', Number(e.target.value))}
+                  className="w-24 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+                />
+                <span className="text-xs text-[#9ca3af]">days</span>
+              </div>
+            </div>
+          </>
         )}
 
         {/* Send message config */}
@@ -326,16 +367,31 @@ function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
         {node.data.nodeType === 'wait_reply' && (
           <>
             <p className="text-[11px] text-[#6b7280] -mt-1">
-              Agent re-checks weekly: opens the profile and clicks Message. If a normal message box now appears, it sends the message below and the flow continues; if not, the sequence ends for this prospect.
+              Agent periodically reopens the profile and clicks Message. The moment a normal message box appears (instead of the InMail composer — i.e. the prospect accepted/replied to InMail), it sends the message below and the flow continues. It keeps checking on this cadence until then or until the maximum wait period is reached, at which point the sequence ends here.
             </p>
             <div>
-              <label className="text-xs text-[#9ca3af]">Re-check every X days</label>
-              <input
-                type="number" min="1" max="30"
-                value={cfg.check_after_days || 7}
-                onChange={e => set('check_after_days', Number(e.target.value))}
+              <label className="text-xs text-[#9ca3af]">Check frequency</label>
+              <select
+                value={cfg.check_frequency_hours || 168}
+                onChange={e => set('check_frequency_hours', Number(e.target.value))}
                 className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
-              />
+              >
+                {CHECK_FREQUENCY_OPTIONS.filter(o => o.value >= 24).map(o => (
+                  <option key={o.value} value={o.value}>{o.label}{o.value === 168 ? ' (recommended)' : ''}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-[#9ca3af]">Maximum wait — then → "No reply" branch</label>
+              <div className="mt-1 flex items-center gap-2">
+                <input
+                  type="number" min="1" max="90"
+                  value={cfg.max_wait_days || 30}
+                  onChange={e => set('max_wait_days', Number(e.target.value))}
+                  className="w-24 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+                />
+                <span className="text-xs text-[#9ca3af]">days</span>
+              </div>
             </div>
             <div>
               <label className="text-xs text-[#9ca3af]">Message to send once available</label>

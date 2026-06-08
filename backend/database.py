@@ -1780,9 +1780,12 @@ def _flow_job_payload(node_type: str, config: dict, prospect: dict, campaign: di
         }
     if node_type == "wait_reply":
         return {**base, "message": db_render_message_template(config.get("message") or "", prospect),
-                "check_after_days": config.get("check_after_days") or 7}
+                "check_frequency_hours": _flow_monitor_frequency_hours(node_type, config),
+                "max_wait_days": _flow_monitor_max_wait_days(node_type, config)}
     if node_type == "wait_acceptance":
-        return {**base, "timeout_days": config.get("timeout_days") or 14}
+        return {**base,
+                "check_frequency_hours": _flow_monitor_frequency_hours(node_type, config),
+                "max_wait_days": _flow_monitor_max_wait_days(node_type, config)}
     if node_type == "endorse_profile":
         return {**base, "skill": config.get("skill") or ""}
     return base
@@ -1886,6 +1889,170 @@ def _finish_flow_enrollment(campaign_id: str, prospect_id: str, node_id: str | N
     }).eq("campaign_id", campaign_id).eq("prospect_id", prospect_id).execute()
 
 
+def _parse_iso_dt(value) -> datetime | None:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def _get_flow_state(campaign_id: str, prospect_id: str) -> dict:
+    res = (supabase.table("campaign_enrollments")
+           .select("flow_state")
+           .eq("campaign_id", campaign_id).eq("prospect_id", prospect_id)
+           .limit(1).execute())
+    rows = res.data or []
+    state = (rows[0] or {}).get("flow_state") if rows else None
+    return state if isinstance(state, dict) else {}
+
+
+def _update_flow_state(campaign_id: str, prospect_id: str, patch: dict) -> None:
+    """Shallow-merge `patch` into campaign_enrollments.flow_state — the
+    free-form jsonb bag (added in 2026_06_08_flow_sequence_execution.sql)
+    used for cross-job bookkeeping such as acceptance/reply polling.
+    A `None` value for a key removes that key from the bag."""
+    state = _get_flow_state(campaign_id, prospect_id)
+    for key, value in patch.items():
+        if value is None:
+            state.pop(key, None)
+        else:
+            state[key] = value
+    supabase.table("campaign_enrollments").update({
+        "flow_state": state, "updated_at": _utc_now(),
+    }).eq("campaign_id", campaign_id).eq("prospect_id", prospect_id).execute()
+
+
+# "Wait for Acceptance" / "Wait for InMail Reply" nodes poll periodically —
+# e.g. "check once a day for up to 30 days" — rather than waiting a fixed
+# number of days and checking exactly once. These helpers read the
+# user-configured cadence (`check_frequency_hours` / `max_wait_days`) with
+# backwards-compatible fallbacks for campaigns saved before this existed
+# (which only had a single "wait N days, then check once" field).
+def _flow_monitor_frequency_hours(node_type: str, config: dict) -> float:
+    hours = config.get("check_frequency_hours")
+    if hours:
+        try:
+            return max(1.0, float(hours))
+        except (TypeError, ValueError):
+            pass
+    if node_type == "wait_reply":
+        legacy_days = config.get("check_after_days")
+        if legacy_days:
+            try:
+                return max(1.0, float(legacy_days) * 24.0)
+            except (TypeError, ValueError):
+                pass
+    return 24.0  # sensible default: check once a day
+
+
+def _flow_monitor_max_wait_days(node_type: str, config: dict) -> float:
+    days = config.get("max_wait_days")
+    if days:
+        try:
+            return max(1.0, float(days))
+        except (TypeError, ValueError):
+            pass
+    # Legacy single-shot configs used this value as "wait this long, then
+    # check once" — give the new polling behaviour generous headroom (3x)
+    # so older campaigns keep monitoring at least as long as they used to.
+    legacy = config.get("timeout_days") if node_type == "wait_acceptance" else config.get("check_after_days")
+    if legacy:
+        try:
+            return max(1.0, float(legacy) * 3.0)
+        except (TypeError, ValueError):
+            pass
+    return 30.0  # sensible default: give up after 30 days
+
+
+def _format_monitor_interval(hours: float) -> str:
+    if hours >= 24 and hours % 24 == 0:
+        days = int(hours // 24)
+        return f"{days} day{'s' if days != 1 else ''}"
+    return f"{int(hours)} hour{'s' if hours != 1 else ''}"
+
+
+_FLOW_MONITOR_PENDING_STATUSES = {
+    "wait_acceptance": {"still_not_accepted"},
+    "wait_reply": {"no_reply"},
+}
+
+
+def _continue_flow_wait_monitor(campaign_id: str, prospect_id: str, node_id: str, node_type: str, status: str) -> bool:
+    """Decide whether a 'still pending' result from a Wait-for-Acceptance /
+    Wait-for-InMail-Reply check should queue ANOTHER periodic check (still
+    inside the configured max-wait window) or be allowed to fall through to
+    normal edge routing (the monitoring window has expired).
+
+    Returns True when another check was queued — the caller should stop and
+    NOT advance the prospect to the next node yet."""
+    campaign, _ = db_get_campaign(campaign_id)
+    if (campaign or {}).get("status") != "running":
+        return False
+    flow = _campaign_flow_sequence(campaign)
+    by_id = {n.get("id"): n for n in (flow or {}).get("nodes") or [] if n.get("id")}
+    node = by_id.get(node_id)
+    if not node:
+        return False
+    config = _flow_node_config(node)
+
+    state = _get_flow_state(campaign_id, prospect_id)
+    monitor = state.get("wait_monitor") or {}
+    if monitor.get("node_id") != node_id:
+        monitor = {"node_id": node_id, "started_at": _utc_now(), "checks": 0}
+    started_at = _parse_iso_dt(monitor.get("started_at")) or datetime.now(timezone.utc)
+    checks = int(monitor.get("checks") or 0) + 1
+    max_wait_days = _flow_monitor_max_wait_days(node_type, config)
+    now = datetime.now(timezone.utc)
+
+    if now - started_at >= timedelta(days=max_wait_days):
+        db_log_activity(
+            prospect_id, "flow_step", "monitor_expired",
+            f"{_flow_node_label_by_type(node_type)}: still '{status}' after {checks} check(s) over "
+            f"~{max_wait_days:.0f} days — giving up and moving on",
+        )
+        return False
+
+    freq_hours = _flow_monitor_frequency_hours(node_type, config)
+    scheduled_for = now + timedelta(hours=freq_hours)
+    job_type = FLOW_NODE_JOB_TYPES.get(node_type)
+    prospect, _ = db_get_prospect(prospect_id)
+    profile_key = campaign.get("profile_key") or (prospect or {}).get("assigned_account") or "profile_1"
+    payload = {
+        **_flow_job_payload(node_type, config, prospect or {}, campaign),
+        "flow_node_id": node_id,
+        "flow_node_type": node_type,
+    }
+    job = db_create_job({
+        "job_type": job_type,
+        "profile_key": profile_key,
+        "campaign_id": campaign_id,
+        "prospect_id": prospect_id,
+        "scheduled_for": scheduled_for.isoformat(),
+        "payload": payload,
+    })
+    if not job:
+        return False
+    _update_flow_state(campaign_id, prospect_id, {
+        "wait_monitor": {
+            "node_id": node_id,
+            "started_at": monitor.get("started_at") or _utc_now(),
+            "checks": checks,
+            "last_status": status,
+            "last_checked_at": _utc_now(),
+        },
+    })
+    _set_flow_position(campaign_id, prospect_id, node_id, scheduled_for, job)
+    db_log_activity(
+        prospect_id, "flow_step", "monitoring",
+        f"{_flow_node_label_by_type(node_type)}: still '{status}' (check #{checks}) — "
+        f"checking again in {_format_monitor_interval(freq_hours)}",
+    )
+    return True
+
+
 def db_queue_next_flow_step(campaign_id: str, prospect_id: str, node_id: str | None = None,
                             base_time: datetime | None = None) -> dict | None:
     """Graph-walking counterpart to db_queue_next_campaign_step for Visual Flow
@@ -1947,12 +2114,17 @@ def db_queue_next_flow_step(campaign_id: str, prospect_id: str, node_id: str | N
         _finish_flow_enrollment(campaign_id, prospect_id, node_id, status="completed")
         return None
 
-    # "Wait for acceptance / InMail reply" nodes represent a timed re-check —
-    # push the check out by the configured number of days before running it.
-    if node_type == "wait_acceptance":
-        scheduled_for = scheduled_for + timedelta(days=int(config.get("timeout_days") or 14))
-    elif node_type == "wait_reply":
-        scheduled_for = scheduled_for + timedelta(days=int(config.get("check_after_days") or 7))
+    # "Wait for Acceptance" / "Wait for InMail Reply" nodes poll periodically:
+    # entering the node (re)starts the monitoring window's bookkeeping and
+    # schedules the FIRST check one cadence-interval from now. Subsequent
+    # checks are re-queued directly by _continue_flow_wait_monitor (called
+    # from db_apply_completed_flow_job) without re-walking the graph, so this
+    # branch only fires on the initial entry into the node.
+    if node_type in ("wait_acceptance", "wait_reply"):
+        _update_flow_state(campaign_id, prospect_id, {
+            "wait_monitor": {"node_id": node_id, "started_at": _utc_now(), "checks": 0},
+        })
+        scheduled_for = scheduled_for + timedelta(hours=_flow_monitor_frequency_hours(node_type, config))
 
     if db_has_active_job_for_prospect(job_type, prospect_id):
         logger.info("Active %s job already exists for prospect %s", job_type, prospect_id)
@@ -2047,6 +2219,17 @@ def db_apply_completed_flow_job(job: dict, result: dict) -> None:
         db_update_prospect(prospect_id, {"last_action_at": _utc_now()})
 
     db_log_activity(prospect_id, "flow_step", status or "completed", f"{_flow_node_label_by_type(node_type)} → {status or 'completed'}")
+
+    # "Still pending" results from a polling node don't advance the prospect —
+    # they either queue another check (still inside the max-wait window) or
+    # fall through to normal edge routing once that window has expired.
+    if status in _FLOW_MONITOR_PENDING_STATUSES.get(node_type, ()):
+        if _continue_flow_wait_monitor(campaign_id, prospect_id, node_id, node_type, status):
+            return
+
+    if node_type in ("wait_acceptance", "wait_reply"):
+        _update_flow_state(campaign_id, prospect_id, {"wait_monitor": None})
+
     _advance_flow_after_result(campaign_id, prospect_id, node_id, node_type, status)
 
 

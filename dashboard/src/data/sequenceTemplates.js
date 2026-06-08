@@ -50,7 +50,7 @@ function mkEdge(source, target, condition = 'default') {
 function classicConnectAndFollowUp() {
   const visit   = mkNode('visit_profile', 'Visit Profile', {}, COL.TRUNK, 0);
   const connect = mkNode('send_invitation', 'Send Connection Request', { add_note: true, note: "Hi {{first_name}}, I'd love to connect — I think there's good reason to be in each other's network." }, COL.TRUNK, 1);
-  const waitAcc = mkNode('wait_acceptance', 'Wait for Acceptance', { timeout_days: 7 }, COL.TRUNK, 2);
+  const waitAcc = mkNode('wait_acceptance', 'Wait for Acceptance', { check_frequency_hours: 24, max_wait_days: 21 }, COL.TRUNK, 2);
   const msg1    = mkNode('send_message', 'Send Initial Message', { message: "Hi {{first_name}}, thanks for connecting! I wanted to reach out because…" }, COL.TRUNK, 3);
   const wait1   = mkNode('wait', 'Wait 3 days', { days: 3 }, COL.TRUNK, 4);
   const stop1   = mkNode('stop_if_replied', 'Stop if Replied', {}, COL.TRUNK, 5);
@@ -104,7 +104,7 @@ function inmailFirstWithFallback() {
   const connect = mkNode('send_invitation', 'Send Connection Request', {
     add_note: true, note: "Hi {{first_name}}, I'd love to connect and stay in touch.",
   }, COL.FAR_RIGHT, 2);
-  const waitAcc = mkNode('wait_acceptance', 'Wait for Acceptance', { timeout_days: 7 }, COL.FAR_RIGHT, 3);
+  const waitAcc = mkNode('wait_acceptance', 'Wait for Acceptance', { check_frequency_hours: 24, max_wait_days: 21 }, COL.FAR_RIGHT, 3);
   const afterAccept = mkNode('send_message', 'Send Initial Message', {
     message: "Hi {{first_name}}, thanks for connecting! Wanted to reach out because…",
   }, COL.FAR_RIGHT, 4);
@@ -188,7 +188,7 @@ function warmUpThenConnect() {
   const connect = mkNode('send_invitation', 'Send Connection Request', {
     add_note: true, note: "Hi {{first_name}}, I've been following your posts and thought it was time to properly connect!",
   }, COL.TRUNK, 4);
-  const waitAcc = mkNode('wait_acceptance', 'Wait for Acceptance', { timeout_days: 10 }, COL.TRUNK, 5);
+  const waitAcc = mkNode('wait_acceptance', 'Wait for Acceptance', { check_frequency_hours: 24, max_wait_days: 21 }, COL.TRUNK, 5);
   const msg     = mkNode('send_message', 'Send Initial Message', {
     message: "Hi {{first_name}}, glad to be connected! I wanted to reach out because…",
   }, COL.TRUNK, 6);
@@ -221,7 +221,7 @@ function warmUpThenConnect() {
 // ─────────────────────────────────────────────────────────────────────────────
 function simpleConnectAndMessage() {
   const connect = mkNode('send_invitation', 'Send Connection Request', { add_note: false }, COL.TRUNK, 0);
-  const waitAcc = mkNode('wait_acceptance', 'Wait for Acceptance', { timeout_days: 7 }, COL.TRUNK, 1);
+  const waitAcc = mkNode('wait_acceptance', 'Wait for Acceptance', { check_frequency_hours: 24, max_wait_days: 21 }, COL.TRUNK, 1);
   const msg     = mkNode('send_message', 'Send Message', {
     message: "Hi {{first_name}}, thanks for connecting! Wanted to introduce myself — …",
   }, COL.TRUNK, 2);
@@ -278,7 +278,7 @@ function nurtureExistingConnections() {
 function personalizedWithReview() {
   const visit   = mkNode('visit_profile', 'Visit Profile', {}, COL.TRUNK, 0);
   const connect = mkNode('send_invitation', 'Send Connection Request', { add_note: false }, COL.TRUNK, 1);
-  const waitAcc = mkNode('wait_acceptance', 'Wait for Acceptance', { timeout_days: 7 }, COL.TRUNK, 2);
+  const waitAcc = mkNode('wait_acceptance', 'Wait for Acceptance', { check_frequency_hours: 24, max_wait_days: 21 }, COL.TRUNK, 2);
   const personalize = mkNode('needs_personalization', 'Needs Personalization', {}, COL.TRUNK, 3);
   const ready   = mkNode('ready_to_send', 'Ready to Send', {}, COL.TRUNK, 4);
   const msg     = mkNode('send_message', 'Send Prepared Message', { message: '' }, COL.TRUNK, 5);
