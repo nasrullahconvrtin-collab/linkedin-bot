@@ -14,9 +14,10 @@ import {
   CheckCircle2, Clock, Eye, GitBranch, Mail, MessageSquare,
   MousePointer2, Plus, Save, Send, Settings, Trash2,
   UserCheck, UserPlus, X, XCircle, Zap, AlertTriangle,
-  Database, AtSign, Flag, ThumbsUp,
+  Database, AtSign, Flag, ThumbsUp, LayoutTemplate, Sparkles, ArrowRight,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { SEQUENCE_TEMPLATES } from '../data/sequenceTemplates';
 
 // ─── Node type definitions ────────────────────────────────────────────────────
 
@@ -51,7 +52,7 @@ const NODE_MAP = Object.fromEntries(NODE_TYPES_DEF.map(n => [n.type, n]));
 
 // ─── Edge condition options ───────────────────────────────────────────────────
 
-const EDGE_CONDITIONS = [
+export const EDGE_CONDITIONS = [
   { value: 'default',             label: 'Continue' },
   { value: 'accepted',            label: '✅ Accepted' },
   { value: 'still_not_accepted',  label: '❌ Still not accepted' },
@@ -65,7 +66,7 @@ const EDGE_CONDITIONS = [
   { value: 'error',               label: 'Error / Retry' },
 ];
 
-const EDGE_COLORS = {
+export const EDGE_COLORS = {
   accepted:           '#22c55e',
   replied:            '#22c55e',
   message_available:  '#22c55e',
@@ -483,6 +484,56 @@ function NodeTypePicker({ onPick, onClose }) {
   );
 }
 
+// ─── Sequence template gallery ────────────────────────────────────────────────
+function SequenceTemplateGallery({ onPick, onClose }) {
+  return (
+    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70" onClick={onClose}>
+      <div
+        className="bg-[#111111] border border-[#2a2a2a] rounded-2xl shadow-2xl w-[640px] max-w-[94vw] max-h-[84vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#2a2a2a] sticky top-0 bg-[#111111]">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-lg bg-[#6366f1]/15 flex items-center justify-center">
+              <LayoutTemplate size={17} className="text-[#6366f1]" />
+            </div>
+            <div>
+              <h3 className="text-white font-semibold text-sm">Start from a template</h3>
+              <p className="text-[#6b7280] text-xs mt-0.5">Proven LinkedIn outreach sequences — load one, then tweak it to fit your campaign</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-[#6b7280] hover:text-white"><X size={18} /></button>
+        </div>
+        <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {SEQUENCE_TEMPLATES.map(tpl => (
+            <button
+              key={tpl.id}
+              onClick={() => onPick(tpl)}
+              className="group flex flex-col items-start gap-2 px-4 py-3.5 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] hover:border-[#6366f1]/50 hover:bg-[#1a1a1a]/80 text-left transition-colors"
+            >
+              <div className="flex items-center gap-2 w-full">
+                <Sparkles size={14} className="text-[#6366f1] shrink-0" />
+                <p className="text-white text-sm font-medium truncate">{tpl.name}</p>
+                <ArrowRight size={14} className="ml-auto text-[#4b5563] group-hover:text-[#6366f1] transition-colors shrink-0" />
+              </div>
+              <p className="text-[#9ca3af] text-xs leading-snug">{tpl.description}</p>
+              {tpl.tags?.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-0.5">
+                  {tpl.tags.map(tag => (
+                    <span key={tag} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#6366f1]/10 text-[#a5b4fc] border border-[#6366f1]/20">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main SequenceFlowBuilder ─────────────────────────────────────────────────
 
 let nodeIdCounter = 1;
@@ -504,6 +555,7 @@ export default function SequenceFlowBuilder({
   const [tplName, setTplName] = useState(templateName);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
+  const [showTemplateGallery, setShowTemplateGallery] = useState(false);
   const reactFlowWrapper = useRef(null);
 
   // Keep onDelete callback fresh on nodes
@@ -556,6 +608,32 @@ export default function SequenceFlowBuilder({
       }, eds));
     }
   }, [nodes, deleteNode, setNodes, setEdges]);
+
+  // Load a pre-built sequence template onto the canvas (fresh ids, wired up onDelete)
+  const loadTemplate = useCallback((tpl) => {
+    if (nodes.length > 0) {
+      const ok = window.confirm(`Load "${tpl.name}"? This will replace the current sequence on the canvas.`);
+      if (!ok) return;
+    }
+    const { nodes: tplNodes, edges: tplEdges } = tpl.build();
+    const idMap = {};
+    const newNodes = tplNodes.map(n => {
+      const id = newId();
+      idMap[n.id] = id;
+      return { ...n, id, data: { ...n.data, onDelete: deleteNode } };
+    });
+    const newEdges = tplEdges.map(e => {
+      const condition = e.data?.condition || 'default';
+      return { ...e, id: `e_${idMap[e.source]}_${idMap[e.target]}_${condition}`, source: idMap[e.source], target: idMap[e.target] };
+    });
+    setNodes(newNodes);
+    setEdges(newEdges);
+    setSelectedNode(null);
+    setSelectedEdge(null);
+    setShowTemplateGallery(false);
+    setShowPicker(false);
+    toast.success(`Loaded "${tpl.name}" — customize the steps to fit your campaign`);
+  }, [nodes.length, deleteNode, setNodes, setEdges]);
 
   // Connect nodes
   const onConnect = useCallback((params) => {
@@ -675,6 +753,12 @@ export default function SequenceFlowBuilder({
         {/* Top toolbar */}
         <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
           <button
+            onClick={() => setShowTemplateGallery(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-[#9ca3af] hover:text-white text-xs"
+          >
+            <LayoutTemplate size={12} /> Templates
+          </button>
+          <button
             onClick={() => setShowSaveModal(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-[#9ca3af] hover:text-white text-xs"
           >
@@ -700,6 +784,12 @@ export default function SequenceFlowBuilder({
               </button>
               <p className="text-white text-sm font-medium mt-4">Start building your sequence</p>
               <p className="text-[#6b7280] text-xs mt-1">Click + to add the first step — visit, connect, message, wait, and more</p>
+              <button
+                onClick={() => setShowTemplateGallery(true)}
+                className="flex items-center gap-1.5 mx-auto mt-4 px-3.5 py-2 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-[#9ca3af] hover:text-white hover:border-[#6366f1]/50 text-xs font-medium transition-colors"
+              >
+                <LayoutTemplate size={13} /> …or start from a template
+              </button>
             </div>
           </div>
         ) : (
@@ -717,6 +807,14 @@ export default function SequenceFlowBuilder({
           <NodeTypePicker
             onPick={(type) => { addNode(type); setShowPicker(false); }}
             onClose={() => setShowPicker(false)}
+          />
+        )}
+
+        {/* Sequence template gallery modal */}
+        {showTemplateGallery && (
+          <SequenceTemplateGallery
+            onPick={loadTemplate}
+            onClose={() => setShowTemplateGallery(false)}
           />
         )}
       </div>
