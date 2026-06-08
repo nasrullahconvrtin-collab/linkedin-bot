@@ -1091,7 +1091,8 @@ def db_mark_invitation_sent(prospect: dict, profile_key: str | None = None, camp
 
 
 def db_mark_prospect_connected(prospect_id: str, details: str = "", profile_key: str | None = None,
-                               campaign_id: str | None = None) -> dict:
+                               campaign_id: str | None = None,
+                               skip_legacy_advance: bool = False) -> dict:
     """
     Treat already-connected and newly accepted prospects the same.
     Returns the updated prospect and any queued initial-message job.
@@ -1130,6 +1131,20 @@ def db_mark_prospect_connected(prospect_id: str, details: str = "", profile_key:
             before_status,
         )
         return {"prospect": prospect, "queued_job": None, "status": before_status}
+
+    # Flow campaigns manage prospect status via their own node completions;
+    # don't overwrite with a legacy "Needs Personalization" / "Ready to Send"
+    # status here, and skip the legacy step-advancement call entirely.
+    if skip_legacy_advance:
+        db_update_prospect(prospect_id, {
+            "status": "Connected",
+            "connection_status": "connected",
+            "accepted_at": _utc_now(),
+            "connected_at": _utc_now(),
+            "last_action_at": _utc_now(),
+        })
+        db_log_activity(prospect_id, "connection_progression", "connected", details or "Connected")
+        return {"prospect": prospect, "queued_job": None, "status": "Connected"}
 
     next_status = "Ready to Send" if initial_message else "Needs Personalization"
     next_steps = (
@@ -2171,7 +2186,7 @@ def db_apply_completed_flow_job(job: dict, result: dict) -> None:
     # Mirror the prospect-facing status transitions the template engine makes,
     # so the dashboard stays accurate regardless of which builder was used.
     if node_type == "send_invitation" and status == "connected":
-        db_mark_prospect_connected(prospect_id, "Already connected (flow connection step)", profile_key=profile_key, campaign_id=campaign_id)
+        db_mark_prospect_connected(prospect_id, "Already connected (flow connection step)", profile_key=profile_key, campaign_id=campaign_id, skip_legacy_advance=True)
     elif node_type == "send_invitation" and status in ("sent", "pending"):
         db_update_prospect(prospect_id, {
             "status": "Connection Request Sent",
@@ -2188,7 +2203,7 @@ def db_apply_completed_flow_job(job: dict, result: dict) -> None:
             "next_steps": "Review InMail subject/body and mark Ready to Send",
         })
     elif node_type == "check_messageability" and status == "normal_message_available":
-        db_mark_prospect_connected(prospect_id, "Messageability check found normal message available", profile_key=profile_key, campaign_id=campaign_id)
+        db_mark_prospect_connected(prospect_id, "Messageability check found normal message available", profile_key=profile_key, campaign_id=campaign_id, skip_legacy_advance=True)
     elif node_type == "check_messageability" and status == "invitation_sent":
         db_update_prospect(prospect_id, {
             "status": "Connection Request Sent", "connection_status": "invitation_sent",
@@ -2208,7 +2223,7 @@ def db_apply_completed_flow_job(job: dict, result: dict) -> None:
             "personalization_status": "sent", "last_action_at": _utc_now(),
         })
     elif node_type == "wait_acceptance" and status == "accepted":
-        db_mark_prospect_connected(prospect_id, "Connection accepted (flow wait-for-acceptance check)", profile_key=profile_key, campaign_id=campaign_id)
+        db_mark_prospect_connected(prospect_id, "Connection accepted (flow wait-for-acceptance check)", profile_key=profile_key, campaign_id=campaign_id, skip_legacy_advance=True)
     elif node_type in ("check_reply", "wait_reply") and status == "replied":
         db_update_prospect(prospect_id, {"status": "Replied", "next_steps": "Prospect replied", "last_action_at": _utc_now()})
     elif node_type == "follow_profile" and status in ("followed", "already_following"):
@@ -2370,8 +2385,13 @@ def db_update_campaign_status(campaign_id: str, status: str) -> dict | None:
 def db_advance_connected_campaign_enrollments(prospect_id: str) -> dict | None:
     queued = None
     for enrollment in db_get_active_enrollments_for_prospect(prospect_id):
+        campaign_id = enrollment["campaign_id"]
+        campaign, _ = db_get_campaign(campaign_id)
+        if _campaign_flow_sequence(campaign):
+            # Flow campaigns manage their own advancement in db_apply_completed_flow_job
+            continue
         job = db_queue_next_campaign_step(
-            enrollment["campaign_id"],
+            campaign_id,
             prospect_id,
             int(enrollment.get("current_step_order") or 0),
         )
@@ -2487,10 +2507,14 @@ def db_recover_due_campaign_message_steps() -> int:
             continue
         if prospect.get("status") not in ("Initial Message Sent", "Following Up"):
             continue
+        campaign_id = enrollment.get("campaign_id")
+        campaign, _ = db_get_campaign(campaign_id)
+        if _campaign_flow_sequence(campaign):
+            continue
         if db_has_active_job_for_prospect("send_messages", prospect_id) or db_has_active_job_for_prospect("send_followups", prospect_id):
             continue
         current_step = int(enrollment.get("current_step_order") or 0)
-        job = db_queue_next_campaign_step(enrollment["campaign_id"], prospect_id, current_step)
+        job = db_queue_next_campaign_step(campaign_id, prospect_id, current_step)
         if job:
             queued += 1
     return queued
