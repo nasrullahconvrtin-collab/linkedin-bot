@@ -192,7 +192,21 @@ async function runJob(job, cfg) {
   let result;
   {
     result = await contentAction(task.url, task.type, task);
-    if (task.type === 'check_messageability' && result.status === 'not_messageable' && task.fallback === 'invitation') {
+    // Inline "auto-send invitation when not messageable" fallback — ONLY for
+    // legacy template-engine jobs. Visual Flow Builder campaigns identify
+    // their jobs via payload.flow_node_id and define their OWN explicit
+    // 'not_messageable' branch on the canvas (e.g. routing to a dedicated
+    // "Send Connection Request" node). If we fired this inline fallback for
+    // flow jobs too, the backend would receive a remapped 'invitation_sent'
+    // status that doesn't match any of the check-node's drawn edge conditions
+    // ('inmail_available' / 'message_available' / 'not_messageable') NOR the
+    // generic 'default' condition (no such edge exists on this node), causing
+    // the graph-walker to fall through to the first-declared edge — sending a
+    // duplicate/incorrect action (e.g. an InMail) on top of the invitation we
+    // just sent here. Flow campaigns must always see the raw status so the
+    // user's own drawn branch decides what happens next.
+    const isFlowJob = Boolean(job.payload?.flow_node_id);
+    if (task.type === 'check_messageability' && result.status === 'not_messageable' && task.fallback === 'invitation' && !isFlowJob) {
       result = await contentAction(task.url, 'send_connection', { note: task.note || '' });
       result.status = result.status === 'sent' ? 'invitation_sent' : result.status;
     }
