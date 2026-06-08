@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Upload, FileText, X, Loader2, CheckCircle, AlertCircle, Rocket, Pause, Archive, Plus, UserPlus, Trash2 } from 'lucide-react';
+import { ArrowLeft, Upload, FileText, X, Loader2, CheckCircle, AlertCircle, Rocket, Pause, Archive, Plus, UserPlus, Trash2, PlusCircle } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import toast from 'react-hot-toast';
 import { ReactFlowProvider } from 'reactflow';
@@ -26,18 +26,20 @@ import {
 } from '../services/api';
 
 const REQUIRED_FIELDS = [
-  { key: 'first_name',    label: 'First Name' },
-  { key: 'last_name',     label: 'Last Name' },
-  { key: 'linkedin_url',  label: 'LinkedIn URL *' },
-  { key: 'company',       label: 'Company' },
-  { key: 'job_title',     label: 'Job Title' },
+  { key: 'first_name',       label: 'First Name' },
+  { key: 'last_name',        label: 'Last Name' },
+  { key: 'linkedin_url',     label: 'LinkedIn URL *' },
+  { key: 'company',          label: 'Company' },
+  { key: 'job_title',        label: 'Job Title' },
   { key: 'assigned_account', label: 'Assigned Account' },
+  { key: 'invite_note',      label: 'Invite Note (optional)' },
+  { key: 'inmail_subject',   label: 'InMail Subject' },
   { key: 'inmail_message',   label: 'InMail Message' },
   { key: 'initial_message',  label: 'Initial Message' },
-  { key: 'followup_1',    label: 'Follow-up 1' },
-  { key: 'followup_2',    label: 'Follow-up 2' },
-  { key: 'followup_3',    label: 'Follow-up 3' },
-  { key: 'followup_4',    label: 'Follow-up 4' },
+  { key: 'followup_1',       label: 'Follow-up 1' },
+  { key: 'followup_2',       label: 'Follow-up 2' },
+  { key: 'followup_3',       label: 'Follow-up 3' },
+  { key: 'followup_4',       label: 'Follow-up 4' },
 ];
 
 function parseCSV(text) {
@@ -53,11 +55,13 @@ function parseCSV(text) {
 
 function autoMap(headers) {
   const MAP = {
-    'firstname': 'first_name', 'first_name': 'first_name', 'firstname': 'first_name',
+    'firstname': 'first_name', 'first_name': 'first_name',
     'lastname': 'last_name', 'last_name': 'last_name',
     'linkedinurl': 'linkedin_url', 'linkedin_url': 'linkedin_url', 'linkedin url': 'linkedin_url',
     'company': 'company', 'jobtitle': 'job_title', 'job_title': 'job_title', 'job title': 'job_title',
     'assignedaccount': 'assigned_account', 'assigned_account': 'assigned_account', 'assigned account': 'assigned_account',
+    'invite_note': 'invite_note', 'invite note': 'invite_note', 'invitenote': 'invite_note', 'connection note': 'invite_note',
+    'inmailsubject': 'inmail_subject', 'inmail_subject': 'inmail_subject', 'inmail subject': 'inmail_subject',
     'inmailmessage': 'inmail_message', 'inmail_message': 'inmail_message', 'inmail message': 'inmail_message',
     'initialmessage': 'initial_message', 'initial_message': 'initial_message', 'initial message': 'initial_message',
     'follow-up 1': 'followup_1', 'followup_1': 'followup_1', 'followup 1': 'followup_1',
@@ -88,6 +92,7 @@ export default function CampaignDetail() {
   const [csvHeaders, setCsvHeaders] = useState([]);
   const [csvPreview, setCsvPreview] = useState([]);
   const [mapping,    setMapping]    = useState({});
+  const [customFieldMappings, setCustomFieldMappings] = useState([{ key: '', csvCol: '' }]);
   const [importing,  setImporting]  = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [dragging,   setDragging]   = useState(false);
@@ -255,16 +260,44 @@ export default function CampaignDetail() {
       setCsvHeaders(headers);
       setCsvPreview(rows.slice(0, 5));
       setMapping(autoMap(headers));
+      setCustomFieldMappings([{ key: '', csvCol: '' }]);
       setImportResult(null);
     };
     reader.readAsText(file);
+  };
+
+  const buildMappedCsv = (rawText) => {
+    const { headers, rows } = parseCSV(rawText);
+    // Build rename map: csvColumn → dbField
+    const rename = {};
+    Object.entries(mapping).forEach(([dbField, csvCol]) => {
+      if (csvCol) rename[csvCol] = dbField;
+    });
+    // Custom field mappings: csvColumn → custom_field_key (stored as-is; backend puts unknowns in custom_fields)
+    customFieldMappings.forEach(({ key, csvCol }) => {
+      if (key.trim() && csvCol) rename[csvCol] = key.trim().toLowerCase().replace(/\s+/g, '_');
+    });
+    const newHeaders = headers.map(h => rename[h] || h);
+    const lines = [newHeaders.join(',')].concat(
+      rows.map(row => newHeaders.map((_, i) => {
+        const val = row[headers[i]] || '';
+        return /[",\n]/.test(val) ? `"${val.replaceAll('"', '""')}"` : val;
+      }).join(','))
+    );
+    return new File([lines.join('\n')], 'import.csv', { type: 'text/csv' });
   };
 
   const handleImport = async () => {
     if (!csvFile) return;
     setImporting(true);
     try {
-      const res = await bulkImportProspects(csvFile, id, importMode);
+      const reader = new FileReader();
+      const mappedFile = await new Promise((resolve, reject) => {
+        reader.onload = e => resolve(buildMappedCsv(e.target.result));
+        reader.onerror = reject;
+        reader.readAsText(csvFile);
+      });
+      const res = await bulkImportProspects(mappedFile, id, importMode);
       setImportResult(res);
       toast.success(`Created ${res.created_count || 0}, updated ${res.updated_count || 0}`);
       setCsvFile(null); setCsvHeaders([]); setCsvPreview([]);
@@ -462,6 +495,42 @@ export default function CampaignDetail() {
                       </select>
                     </div>
                   ))}
+                </div>
+
+                {/* Custom fields */}
+                <div className="mt-4 border-t border-[#2a2a2a] pt-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs text-[#9ca3af] font-medium">Custom Fields <span className="text-[#6b7280]">— use as {'{{field_name}}'} in messages</span></p>
+                    <button
+                      onClick={() => setCustomFieldMappings(m => [...m, { key: '', csvCol: '' }])}
+                      className="flex items-center gap-1 text-xs text-[#6366f1] hover:text-white"
+                    >
+                      <PlusCircle size={13} /> Add field
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {customFieldMappings.map((row, i) => (
+                      <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
+                        <input
+                          value={row.key}
+                          onChange={e => setCustomFieldMappings(m => m.map((r, j) => j === i ? { ...r, key: e.target.value } : r))}
+                          placeholder="field_name (e.g. recent_post)"
+                          className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#6366f1]"
+                        />
+                        <select
+                          value={row.csvCol}
+                          onChange={e => setCustomFieldMappings(m => m.map((r, j) => j === i ? { ...r, csvCol: e.target.value } : r))}
+                          className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#6366f1]"
+                        >
+                          <option value="">— skip —</option>
+                          {csvHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                        </select>
+                        <button onClick={() => setCustomFieldMappings(m => m.filter((_, j) => j !== i))} className="text-[#6b7280] hover:text-red-400">
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
 

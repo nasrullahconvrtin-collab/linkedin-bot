@@ -1,3 +1,6 @@
+if (window.__linkedflowContentLoaded) return;
+window.__linkedflowContentLoaded = true;
+
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 function textOf(el) {
@@ -155,7 +158,13 @@ async function sendPreparedMessage(message) {
   if (!message) return { status: 'failed_with_reason', message: 'Message text is empty' };
   if (isLoginRequired()) return { status: 'session_expired', message: 'LinkedIn login required' };
   if (!clickButtonByText('Message')) {
-    return { status: 'failed_with_reason', message: 'Message button not found' };
+    // Message can be hidden under the "More" actions dropdown
+    if (clickButtonByText('More')) {
+      await sleep(800);
+    }
+    if (!clickButtonByText('Message')) {
+      return { status: 'failed_with_reason', message: 'Message button not found' };
+    }
   }
   await sleep(1500);
   const box = document.querySelector('div[role="textbox"], [contenteditable="true"]');

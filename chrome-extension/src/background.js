@@ -57,11 +57,9 @@ async function getAutomationTab(targetUrl) {
 async function navigateAutomationTab(url) {
   const tab = await getAutomationTab(url);
   const dest = url || 'https://www.linkedin.com/feed/';
-  if (!tab.url?.startsWith(dest)) {
-    await chrome.tabs.update(tab.id, { url: dest });
-    return await chrome.tabs.get(tab.id);
-  }
-  return tab;
+  // Always navigate to ensure a clean page state for each action
+  await chrome.tabs.update(tab.id, { url: dest });
+  return await chrome.tabs.get(tab.id);
 }
 
 async function waitForTab(tabId) {

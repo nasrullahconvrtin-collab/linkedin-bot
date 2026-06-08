@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Edit3, FileUp, ListPlus, Plus, Save, Search, Trash2, X } from 'lucide-react';
+import { ChevronDown, Download, Edit3, FileUp, ListPlus, Plus, Save, Search, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
 import StatusBadge from '../components/StatusBadge';
@@ -31,9 +31,53 @@ const STATUSES = [
 const blankProspect = {
   first_name: '', last_name: '', linkedin_url: '', email: '', company: '',
   job_title: '', assigned_account: 'profile_1', status: '', notes: '',
-  inmail_message: '', initial_message: '', followup_1: '', followup_2: '',
+  invite_note: '', inmail_subject: '', inmail_message: '',
+  initial_message: '', followup_1: '', followup_2: '',
   followup_3: '', followup_4: '', tags: [], custom_fields: {},
 };
+
+const STD_VARIABLES = ['first_name', 'last_name', 'company', 'job_title', 'location', 'email'];
+
+function MessageField({ label, fieldKey, value, onChange, customFields = {} }) {
+  const [open, setOpen] = useState(false);
+  const customKeys = Object.keys(customFields).filter(Boolean);
+  const allVars = [...STD_VARIABLES, ...customKeys];
+  const insert = (v) => onChange({ target: { value: value ? `${value} {{${v}}}` : `{{${v}}}` } });
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <label className="text-xs text-[#9ca3af]">{label}</label>
+        <button
+          type="button"
+          onClick={() => setOpen(o => !o)}
+          className="flex items-center gap-1 text-[10px] text-[#6366f1] hover:text-white"
+        >
+          {'{{}'} Insert variable <ChevronDown size={11} className={open ? 'rotate-180' : ''} />
+        </button>
+      </div>
+      {open && (
+        <div className="mb-1 flex flex-wrap gap-1">
+          {allVars.map(v => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => insert(v)}
+              className="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2a2a] text-[#9ca3af] hover:text-white hover:border-[#6366f1]"
+            >
+              {`{{${v}}}`}
+            </button>
+          ))}
+        </div>
+      )}
+      <textarea
+        rows={3}
+        value={value || ''}
+        onChange={onChange}
+        className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm"
+      />
+    </div>
+  );
+}
 
 function csvEscape(value) {
   const text = value == null ? '' : String(value);
@@ -488,23 +532,92 @@ export default function Prospects() {
                 </div>
               )}
 
+              {/* Single-line fields */}
+              <div>
+                <label className="text-xs text-[#9ca3af]">Invite Note <span className="text-[#4b5563]">(optional — sent with connection request)</span></label>
+                <input value={draft.invite_note || ''} onChange={e => setDraft(d => ({ ...d, invite_note: e.target.value }))} className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm" />
+              </div>
+              <div>
+                <label className="text-xs text-[#9ca3af]">InMail Subject</label>
+                <input value={draft.inmail_subject || ''} onChange={e => setDraft(d => ({ ...d, inmail_subject: e.target.value }))} className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm" />
+              </div>
+
+              {/* Message textareas with variable inserter */}
               {[
-                ['inmail_message', 'InMail / Invitation Note'],
+                ['inmail_message', 'InMail Message'],
                 ['initial_message', 'Initial Message'],
                 ['followup_1', 'Follow-up 1'],
                 ['followup_2', 'Follow-up 2'],
                 ['followup_3', 'Follow-up 3'],
                 ['followup_4', 'Follow-up 4'],
-                ['notes', 'Notes'],
               ].map(([key, label]) => (
-                <div key={key}>
-                  <label className="text-xs text-[#9ca3af]">{label}</label>
-                  <textarea rows={3} value={draft[key] || ''} onChange={e => setDraft(d => ({ ...d, [key]: e.target.value }))} className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm" />
-                </div>
+                <MessageField
+                  key={key}
+                  label={label}
+                  fieldKey={key}
+                  value={draft[key]}
+                  onChange={e => setDraft(d => ({ ...d, [key]: e.target.value }))}
+                  customFields={typeof draft.custom_fields === 'object' ? draft.custom_fields : {}}
+                />
               ))}
+
               <div>
-                <label className="text-xs text-[#9ca3af]">Custom Fields JSON</label>
-                <textarea rows={5} value={typeof draft.custom_fields === 'string' ? draft.custom_fields : JSON.stringify(draft.custom_fields || {}, null, 2)} onChange={e => setDraft(d => ({ ...d, custom_fields: e.target.value }))} className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm font-mono" />
+                <label className="text-xs text-[#9ca3af]">Notes</label>
+                <textarea rows={3} value={draft.notes || ''} onChange={e => setDraft(d => ({ ...d, notes: e.target.value }))} className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm" />
+              </div>
+
+              {/* Custom Fields: key-value editor */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs text-[#9ca3af]">Custom Fields <span className="text-[#4b5563]">— use as {'{{field_name}}'} in messages</span></label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cf = typeof draft.custom_fields === 'object' ? { ...draft.custom_fields } : {};
+                      cf[''] = '';
+                      setDraft(d => ({ ...d, custom_fields: cf }));
+                    }}
+                    className="text-[10px] text-[#6366f1] hover:text-white"
+                  >
+                    + Add field
+                  </button>
+                </div>
+                {Object.entries(typeof draft.custom_fields === 'object' ? draft.custom_fields : {}).map(([k, v], i) => (
+                  <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-2 mb-1.5">
+                    <input
+                      value={k}
+                      placeholder="field_name"
+                      onChange={e => {
+                        const cf = { ...(typeof draft.custom_fields === 'object' ? draft.custom_fields : {}) };
+                        const entries = Object.entries(cf);
+                        entries[i] = [e.target.value, v];
+                        setDraft(d => ({ ...d, custom_fields: Object.fromEntries(entries) }));
+                      }}
+                      className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-2 py-1.5 text-white text-xs"
+                    />
+                    <input
+                      value={v}
+                      placeholder="value"
+                      onChange={e => {
+                        const cf = { ...(typeof draft.custom_fields === 'object' ? draft.custom_fields : {}) };
+                        cf[k] = e.target.value;
+                        setDraft(d => ({ ...d, custom_fields: cf }));
+                      }}
+                      className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-2 py-1.5 text-white text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cf = { ...(typeof draft.custom_fields === 'object' ? draft.custom_fields : {}) };
+                        delete cf[k];
+                        setDraft(d => ({ ...d, custom_fields: cf }));
+                      }}
+                      className="text-[#6b7280] hover:text-red-400"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
               </div>
               {panel.mode === 'edit' && (
                 <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-4">
