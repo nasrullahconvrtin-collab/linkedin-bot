@@ -583,6 +583,29 @@ function SequenceTemplateGallery({ onPick, onClose }) {
 let nodeIdCounter = 1;
 function newId() { return `node_${Date.now()}_${nodeIdCounter++}`; }
 
+// Saved campaigns can carry edge label styles from older builder versions
+// (e.g. colored label backgrounds with low-contrast text). Re-derive the
+// label/stroke styling from the edge's condition every time we load a flow
+// so the canvas always renders with the current dark-background, readable
+// color scheme — regardless of what was persisted.
+const CONDITION_LABEL_TO_VALUE = Object.fromEntries(EDGE_CONDITIONS.map(c => [c.label, c.value]));
+
+function normalizeEdgeStyle(edge) {
+  const condition = edge.data?.condition || CONDITION_LABEL_TO_VALUE[edge.label] || 'default';
+  const cond = EDGE_CONDITIONS.find(c => c.value === condition) || EDGE_CONDITIONS[0];
+  const color = EDGE_COLORS[condition] || '#4b5563';
+  const textColor = condition === 'default' ? '#9ca3af' : color;
+  return {
+    ...edge,
+    label: edge.label || cond.label,
+    labelStyle: { fill: textColor, fontSize: 10, fontWeight: condition === 'default' ? 400 : 600 },
+    labelBgStyle: { fill: '#1a1a1a', borderRadius: 4, padding: 2 },
+    style: { stroke: color },
+    markerEnd: { type: MarkerType.ArrowClosed, color },
+    data: { ...edge.data, condition },
+  };
+}
+
 export default function SequenceFlowBuilder({
   initialNodes,
   initialEdges,
@@ -591,7 +614,7 @@ export default function SequenceFlowBuilder({
   templateName = '',
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes && initialNodes.length ? initialNodes : []);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges || []);
+  const [edges, setEdges, onEdgesChange] = useEdgesState((initialEdges || []).map(normalizeEdgeStyle));
   const [selectedNode, setSelectedNode] = useState(null);
   const [selectedEdge, setSelectedEdge]  = useState(null);
   const [edgeMenuPos, setEdgeMenuPos]    = useState(null);
@@ -681,7 +704,7 @@ export default function SequenceFlowBuilder({
     });
     const newEdges = tplEdges.map(e => {
       const condition = e.data?.condition || 'default';
-      return { ...e, id: `e_${idMap[e.source]}_${idMap[e.target]}_${condition}`, source: idMap[e.source], target: idMap[e.target] };
+      return normalizeEdgeStyle({ ...e, id: `e_${idMap[e.source]}_${idMap[e.target]}_${condition}`, source: idMap[e.source], target: idMap[e.target] });
     });
     setNodes(newNodes);
     setEdges(newEdges);
