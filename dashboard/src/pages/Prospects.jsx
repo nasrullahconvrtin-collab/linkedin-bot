@@ -38,9 +38,10 @@ const blankProspect = {
 
 const STD_VARIABLES = ['first_name', 'last_name', 'company', 'job_title', 'location', 'email'];
 
-function MessageField({ label, fieldKey, value, onChange, customFields = {} }) {
+function MessageField({ label, value, onChange, customFields }) {
   const [open, setOpen] = useState(false);
-  const customKeys = Object.keys(customFields).filter(Boolean);
+  const safeCustom = customFields && typeof customFields === 'object' && !Array.isArray(customFields) ? customFields : {};
+  const customKeys = Object.keys(safeCustom).filter(Boolean);
   const allVars = [...STD_VARIABLES, ...customKeys];
   const insert = (v) => onChange({ target: { value: value ? `${value} {{${v}}}` : `{{${v}}}` } });
   return (
@@ -52,21 +53,38 @@ function MessageField({ label, fieldKey, value, onChange, customFields = {} }) {
           onClick={() => setOpen(o => !o)}
           className="flex items-center gap-1 text-[10px] text-[#6366f1] hover:text-white"
         >
-          {'{{}'} Insert variable <ChevronDown size={11} className={open ? 'rotate-180' : ''} />
+          Insert {'{{variable}}'} <ChevronDown size={11} className={open ? 'rotate-180' : ''} />
         </button>
       </div>
       {open && (
-        <div className="mb-1 flex flex-wrap gap-1">
-          {allVars.map(v => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => insert(v)}
-              className="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2a2a] text-[#9ca3af] hover:text-white hover:border-[#6366f1]"
-            >
-              {`{{${v}}}`}
-            </button>
-          ))}
+        <div className="mb-1.5 p-2 rounded-lg bg-[#0a0a0a] border border-[#2a2a2a]">
+          {customKeys.length > 0 && (
+            <p className="text-[9px] text-[#4b5563] uppercase tracking-wide mb-1.5">Custom fields</p>
+          )}
+          <div className="flex flex-wrap gap-1">
+            {allVars.map((v, i) => (
+              <>
+                {i === STD_VARIABLES.length && customKeys.length > 0 && (
+                  <div key="sep" className="w-full border-t border-[#1f1f1f] my-1" />
+                )}
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => insert(v)}
+                  className={`text-[10px] px-1.5 py-0.5 rounded border hover:text-white hover:border-[#6366f1] ${
+                    i >= STD_VARIABLES.length
+                      ? 'border-[#6366f1]/40 text-[#818cf8]'
+                      : 'border-[#2a2a2a] text-[#9ca3af]'
+                  }`}
+                >
+                  {`{{${v}}}`}
+                </button>
+              </>
+            ))}
+          </div>
+          {customKeys.length === 0 && (
+            <p className="text-[10px] text-[#4b5563] mt-1">Add custom fields below to use them as variables here.</p>
+          )}
         </div>
       )}
       <textarea
@@ -557,7 +575,7 @@ export default function Prospects() {
                   fieldKey={key}
                   value={draft[key]}
                   onChange={e => setDraft(d => ({ ...d, [key]: e.target.value }))}
-                  customFields={typeof draft.custom_fields === 'object' ? draft.custom_fields : {}}
+                  customFields={draft.custom_fields}
                 />
               ))}
 
