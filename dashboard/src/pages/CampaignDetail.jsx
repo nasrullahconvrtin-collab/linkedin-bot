@@ -713,6 +713,7 @@ export default function CampaignDetail() {
                   key={campaign?.id}
                   initialNodes={defaultSeq?.nodes}
                   initialEdges={defaultSeq?.edges}
+                  variables={['first_name','last_name','company','title','industry','location','email','linkedin_url','sender_name','sender_company',...(campaignVariables || [])]}
                   savedTemplates={messageTemplates
                     .filter(t => t.message_type === 'flow_sequence' || t.type === 'flow_sequence')
                     .map(t => {
