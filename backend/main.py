@@ -23,6 +23,12 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 
 import database as db
+
+# ── Server-side scheduler (APScheduler) ──────────────────────────────────────
+from contextlib import asynccontextmanager
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron     import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from models import (
     ActivityLogCreate,
     BulkImportResponse,
@@ -58,6 +64,66 @@ from models import (
 
 load_dotenv()
 logging.basicConfig(
+
+# ── APScheduler — server-side cron ───────────────────────────────────────────
+_scheduler = AsyncIOScheduler(timezone="UTC")
+
+async def _cron_run_flow():
+    """Every 10 min: advance any stalled flow-sequence enrollment."""
+    try:
+        result = await run_flow()
+        if result.queued:
+            logger.info("[cron] run_flow → queued=%d", result.queued)
+    except Exception as e:
+        logger.error("[cron] run_flow failed: %s", e)
+
+async def _cron_run_connections():
+    """Daily 09:00 UTC: queue connection requests."""
+    try:
+        result = await run_connections()
+        logger.info("[cron] run_connections → queued=%d", result.queued)
+    except Exception as e:
+        logger.error("[cron] run_connections failed: %s", e)
+
+async def _cron_check_acceptances():
+    """Daily 12:00 UTC: check accepted connection requests."""
+    try:
+        result = await check_acceptances()
+        logger.info("[cron] check_acceptances → queued=%d", result.queued)
+    except Exception as e:
+        logger.error("[cron] check_acceptances failed: %s", e)
+
+async def _cron_run_messages():
+    """Daily 14:00 UTC: queue initial messages."""
+    try:
+        result = await run_messages()
+        logger.info("[cron] run_messages → queued=%d", result.queued)
+    except Exception as e:
+        logger.error("[cron] run_messages failed: %s", e)
+
+async def _cron_run_followups():
+    """Daily 10:00 UTC: queue follow-ups."""
+    try:
+        result = await run_followups()
+        logger.info("[cron] run_followups → queued=%d", result.queued)
+    except Exception as e:
+        logger.error("[cron] run_followups failed: %s", e)
+
+@asynccontextmanager
+async def _lifespan(application: FastAPI):
+    """Start APScheduler on startup; shut it down cleanly on exit."""
+    _scheduler.add_job(_cron_run_flow,          IntervalTrigger(minutes=10),            id="run_flow",          replace_existing=True)
+    _scheduler.add_job(_cron_run_connections,   CronTrigger(hour=9,  minute=0),         id="run_connections",   replace_existing=True)
+    _scheduler.add_job(_cron_check_acceptances, CronTrigger(hour=12, minute=0),         id="check_acceptances", replace_existing=True)
+    _scheduler.add_job(_cron_run_messages,      CronTrigger(hour=14, minute=0),         id="run_messages",      replace_existing=True)
+    _scheduler.add_job(_cron_run_followups,     CronTrigger(hour=10, minute=0),         id="run_followups",     replace_existing=True)
+    _scheduler.start()
+    logger.info("APScheduler started — flow engine every 10 min, daily jobs at 09/10/12/14 UTC")
+    yield
+    _scheduler.shutdown(wait=False)
+    logger.info("APScheduler stopped")
+
+
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
@@ -67,6 +133,7 @@ app = FastAPI(
     title="LinkedIn Automation API",
     description="Backend for LinkedIn outreach automation campaigns, prospects, queues, and Chrome Extension execution.",
     version="1.0.0",
+    lifespan=_lifespan,
 )
 
 _ALLOWED_ORIGINS = [o.strip() for o in os.getenv(
