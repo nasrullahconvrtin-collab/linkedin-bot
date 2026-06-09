@@ -1386,6 +1386,119 @@ async def check_acceptances() -> SchedulerResponse:
 # HUBSPOT INTEGRATION
 # ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
+
+@app.post("/scheduler/run-flow", tags=["Scheduler"])
+async def run_flow() -> SchedulerResponse:
+    """
+    Flow-sequence engine: for every active campaign enrollment that uses a
+    visual flow sequence and has NO pending/running job, queue the next step.
+    Call this endpoint on a schedule (e.g. every 5-10 minutes).
+    """
+    try:
+        # Find all active flow enrollments
+        enrollments = (
+            db.supabase.table("campaign_enrollments")
+            .select("id, campaign_id, prospect_id, current_node_id, status")
+            .eq("status", "active")
+            .execute()
+            .data or []
+        )
+        queued = 0
+        skipped = 0
+        for enrollment in enrollments:
+            campaign_id = enrollment["campaign_id"]
+            prospect_id = enrollment["prospect_id"]
+            current_node_id = enrollment.get("current_node_id")
+
+            # Only process flow-sequence campaigns
+            campaign, _ = db.db_get_campaign(campaign_id)
+            if not db._campaign_flow_sequence(campaign):
+                skipped += 1
+                continue
+
+            # Check if prospect already has a pending or running job
+            existing_jobs = (
+                db.supabase.table("jobs")
+                .select("id, status")
+                .eq("prospect_id", prospect_id)
+                .in_("status", ["pending", "running"])
+                .execute()
+                .data or []
+            )
+            if existing_jobs:
+                skipped += 1
+                continue
+
+            # No active job — queue the next flow step
+            next_job = db.db_queue_next_flow_step(campaign_id, prospect_id, current_node_id)
+            if next_job:
+                queued += 1
+                logger.info(
+                    "run_flow: queued flow step for prospect=%s campaign=%s node=%s → job=%s",
+                    prospect_id, campaign_id, current_node_id, next_job.get("id")
+                )
+            else:
+                skipped += 1
+
+        return SchedulerResponse(
+            queued=queued,
+            agents_available=_online_executor_count(),
+            message=f"Flow engine: queued {queued} step(s), skipped {skipped}",
+        )
+    except Exception as e:
+        logger.error(f"run_flow: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.post("/campaigns/{campaign_id}/prospects/{prospect_id}/advance-flow", tags=["Campaigns"])
+async def advance_flow_enrollment(campaign_id: str, prospect_id: str, node_id: str | None = None):
+    """
+    Manually advance a prospect's flow enrollment to a specific node (or the
+    next node from current_node_id). Useful for recovering stuck enrollments.
+    """
+    try:
+        # Validate campaign and enrollment exist
+        campaign, err = db.db_get_campaign(campaign_id)
+        if not campaign:
+            raise HTTPException(404, f"Campaign not found: {err}")
+        if not db._campaign_flow_sequence(campaign):
+            raise HTTPException(400, "Campaign does not have a flow sequence")
+
+        enrollment_rows = (
+            db.supabase.table("campaign_enrollments")
+            .select("*")
+            .eq("campaign_id", campaign_id)
+            .eq("prospect_id", prospect_id)
+            .execute()
+            .data or []
+        )
+        if not enrollment_rows:
+            raise HTTPException(404, "Enrollment not found")
+
+        current = enrollment_rows[0].get("current_node_id")
+        use_node = node_id or current
+
+        # If caller supplied a node_id, update enrollment to that node first
+        if node_id and node_id != current:
+            db.supabase.table("campaign_enrollments").update({
+                "current_node_id": node_id,
+                "updated_at": db._utc_now(),
+            }).eq("campaign_id", campaign_id).eq("prospect_id", prospect_id).execute()
+            use_node = node_id
+
+        next_job = db.db_queue_next_flow_step(campaign_id, prospect_id, use_node)
+        return {
+            "ok": True,
+            "previous_node": current,
+            "queued_from_node": use_node,
+            "next_job": next_job,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"advance_flow_enrollment: {e}")
+        raise HTTPException(500, str(e))
+
 @app.post("/hubspot/sync/{prospect_id}", tags=["HubSpot"])
 async def hubspot_sync(prospect_id: str, body: HubSpotSync):
     """
