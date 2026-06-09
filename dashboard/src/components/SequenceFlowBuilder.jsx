@@ -160,23 +160,49 @@ const nodeTypes = { flowNode: FlowNode };
 
 // ─── Reusable variable-insert chips for rich message fields ──────────────────
 
-function VarChips({ onInsert, vars = ['first_name', 'last_name', 'company', 'title'] }) {
+const DEFAULT_VARS = [
+  'first_name', 'last_name', 'company', 'title', 'industry', 'location',
+  'email', 'linkedin_url', 'sender_name', 'sender_company', 'sender_email', 'sender_linkedin',
+];
+
+function VarChips({ onInsert, vars }) {
+  const [custom, setCustom] = useState('');
+  const allVars = vars && vars.length ? vars : DEFAULT_VARS;
+  const insertCustom = () => {
+    const v = custom.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+    if (v) { onInsert('{{' + v + '}}'); setCustom(''); }
+  };
   return (
-    <div className="flex flex-wrap gap-1 mt-2">
-      {vars.map(v => (
-        <button key={v} type="button"
-          onClick={() => onInsert(`{{${v}}}`)}
-          className="text-[10px] px-1.5 py-0.5 rounded bg-[#1a1a1a] border border-[#2a2a2a] text-[#9ca3af] hover:text-white">
-          {`{{${v}}}`}
+    <div className="mt-2 space-y-1.5">
+      <div className="flex flex-wrap gap-1">
+        {allVars.map(v => (
+          <button key={v} type="button"
+            onClick={() => onInsert('{{' + v + '}}')}
+            className="text-[10px] px-1.5 py-0.5 rounded bg-[#1a1a1a] border border-[#2a2a2a] text-[#9ca3af] hover:text-white hover:border-[#6366f1] transition-colors">
+            {'{{' + v + '}}'}
+          </button>
+        ))}
+      </div>
+      <div className="flex gap-1">
+        <input
+          value={custom}
+          onChange={e => setCustom(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && insertCustom()}
+          placeholder="custom_var"
+          className="flex-1 text-[10px] px-2 py-1 rounded bg-[#1a1a1a] border border-[#2a2a2a] text-[#9ca3af] focus:outline-none focus:border-[#6366f1] placeholder:text-[#4b5563]"
+        />
+        <button type="button" onClick={insertCustom}
+          className="text-[10px] px-2 py-1 rounded bg-[#6366f1] text-white hover:bg-[#4f46e5]">
+          + insert
         </button>
-      ))}
+      </div>
     </div>
   );
 }
 
 // ─── Node config panel ────────────────────────────────────────────────────────
 
-function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
+function NodeConfigPanel({ node, onChange, onClose, onDelete, availableVars }) {
   const def = NODE_MAP[node.data.nodeType] || {};
   const cfg = node.data.config || {};
   const set = (key, val) => onChange({ ...node.data, config: { ...cfg, [key]: val } });
@@ -228,7 +254,7 @@ function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
                   placeholder="Hi {{first_name}}, I'd love to connect…"
                   className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1] resize-none"
                 />
-                <VarChips onInsert={(v) => set('note', ((cfg.note || '') + v).slice(0, 300))} />
+                <VarChips vars={availableVars} onInsert={(v) => set('note', ((cfg.note || '') + v).slice(0, 300))} />
                 <p className="text-[10px] text-[#6b7280] mt-1">{(cfg.note || '').length}/300 chars</p>
               </div>
             )}
@@ -322,7 +348,7 @@ function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
               placeholder="Hi {{first_name}}, following up…"
               className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1] resize-none"
             />
-            <VarChips onInsert={(v) => set('message', (cfg.message || '') + v)} />
+            <VarChips vars={availableVars} onInsert={(v) => set('message', (cfg.message || '') + v)} />
           </div>
         )}
 
@@ -340,7 +366,7 @@ function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
                 placeholder="Quick question about {{company}}"
                 className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
               />
-              <VarChips onInsert={(v) => set('subject', (cfg.subject || '') + v)} />
+              <VarChips vars={availableVars} onInsert={(v) => set('subject', (cfg.subject || '') + v)} />
             </div>
             <div>
               <label className="text-xs text-[#9ca3af]">InMail body</label>
@@ -351,7 +377,7 @@ function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
                 placeholder="Hi {{first_name}}, …"
                 className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1] resize-none"
               />
-              <VarChips onInsert={(v) => set('message', (cfg.message || '') + v)} />
+              <VarChips vars={availableVars} onInsert={(v) => set('message', (cfg.message || '') + v)} />
             </div>
             <div>
               <label className="flex items-center gap-2 cursor-pointer">
@@ -402,7 +428,7 @@ function NodeConfigPanel({ node, onChange, onClose, onDelete }) {
                 placeholder="Hi {{first_name}}, thanks for connecting…"
                 className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1] resize-none"
               />
-              <VarChips onInsert={(v) => set('message', (cfg.message || '') + v)} />
+              <VarChips vars={availableVars} onInsert={(v) => set('message', (cfg.message || '') + v)} />
             </div>
           </>
         )}
@@ -639,6 +665,7 @@ export default function SequenceFlowBuilder({
   onSaveTemplate,
   savedTemplates = [],
   templateName = '',
+  variables = [],
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes && initialNodes.length ? initialNodes : []);
   const [edges, setEdges, onEdgesChange] = useEdgesState((initialEdges || []).map(normalizeEdgeStyle));
@@ -936,6 +963,7 @@ export default function SequenceFlowBuilder({
           onChange={(newData) => updateNodeData(selectedNode.id, newData)}
           onClose={() => setSelectedNode(null)}
           onDelete={deleteNode}
+          availableVars={variables && variables.length ? variables : DEFAULT_VARS}
         />
       )}
 
