@@ -529,7 +529,7 @@ function NodeTypePicker({ onPick, onClose }) {
 }
 
 // ─── Sequence template gallery ────────────────────────────────────────────────
-function SequenceTemplateGallery({ onPick, onClose }) {
+function SequenceTemplateGallery({ onPick, onClose, savedTemplates = [] }) {
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70" onClick={onClose}>
       <div
@@ -543,35 +543,61 @@ function SequenceTemplateGallery({ onPick, onClose }) {
             </div>
             <div>
               <h3 className="text-white font-semibold text-sm">Start from a template</h3>
-              <p className="text-[#6b7280] text-xs mt-0.5">Proven LinkedIn outreach sequences — load one, then tweak it to fit your campaign</p>
+              <p className="text-[#6b7280] text-xs mt-0.5">Load a saved or built-in sequence — then tweak it to fit your campaign</p>
             </div>
           </div>
           <button onClick={onClose} className="text-[#6b7280] hover:text-white"><X size={18} /></button>
         </div>
-        <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {SEQUENCE_TEMPLATES.map(tpl => (
-            <button
-              key={tpl.id}
-              onClick={() => onPick(tpl)}
-              className="group flex flex-col items-start gap-2 px-4 py-3.5 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] hover:border-[#6366f1]/50 hover:bg-[#1a1a1a]/80 text-left transition-colors"
-            >
-              <div className="flex items-center gap-2 w-full">
-                <Sparkles size={14} className="text-[#6366f1] shrink-0" />
-                <p className="text-white text-sm font-medium truncate">{tpl.name}</p>
-                <ArrowRight size={14} className="ml-auto text-[#4b5563] group-hover:text-[#6366f1] transition-colors shrink-0" />
+        <div className="p-4 space-y-4">
+          {savedTemplates.length > 0 && (
+            <div>
+              <p className="text-xs text-[#9ca3af] font-medium mb-2 px-1">Your saved sequences</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {savedTemplates.map(tpl => (
+                  <button
+                    key={tpl.id}
+                    onClick={() => onPick(tpl)}
+                    className="group flex flex-col items-start gap-2 px-4 py-3.5 rounded-xl border border-[#6366f1]/30 bg-[#6366f1]/5 hover:border-[#6366f1]/60 text-left transition-colors"
+                  >
+                    <div className="flex items-center gap-2 w-full">
+                      <LayoutTemplate size={14} className="text-[#6366f1] shrink-0" />
+                      <p className="text-white text-sm font-medium truncate">{tpl.name}</p>
+                      <ArrowRight size={14} className="ml-auto text-[#4b5563] group-hover:text-[#6366f1] transition-colors shrink-0" />
+                    </div>
+                    <p className="text-[#9ca3af] text-xs">{tpl.nodes?.length || 0} nodes</p>
+                  </button>
+                ))}
               </div>
-              <p className="text-[#9ca3af] text-xs leading-snug">{tpl.description}</p>
-              {tpl.tags?.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-0.5">
-                  {tpl.tags.map(tag => (
-                    <span key={tag} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#6366f1]/10 text-[#a5b4fc] border border-[#6366f1]/20">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </button>
-          ))}
+            </div>
+          )}
+          <div>
+            {savedTemplates.length > 0 && <p className="text-xs text-[#9ca3af] font-medium mb-2 px-1">Built-in templates</p>}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {SEQUENCE_TEMPLATES.map(tpl => (
+                <button
+                  key={tpl.id}
+                  onClick={() => onPick(tpl)}
+                  className="group flex flex-col items-start gap-2 px-4 py-3.5 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] hover:border-[#6366f1]/50 hover:bg-[#1a1a1a]/80 text-left transition-colors"
+                >
+                  <div className="flex items-center gap-2 w-full">
+                    <Sparkles size={14} className="text-[#6366f1] shrink-0" />
+                    <p className="text-white text-sm font-medium truncate">{tpl.name}</p>
+                    <ArrowRight size={14} className="ml-auto text-[#4b5563] group-hover:text-[#6366f1] transition-colors shrink-0" />
+                  </div>
+                  <p className="text-[#9ca3af] text-xs leading-snug">{tpl.description}</p>
+                  {tpl.tags?.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-0.5">
+                      {tpl.tags.map(tag => (
+                        <span key={tag} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#6366f1]/10 text-[#a5b4fc] border border-[#6366f1]/20">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -611,6 +637,7 @@ export default function SequenceFlowBuilder({
   initialEdges,
   onSave,
   onSaveTemplate,
+  savedTemplates = [],
   templateName = '',
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes && initialNodes.length ? initialNodes : []);
@@ -695,7 +722,8 @@ export default function SequenceFlowBuilder({
       const ok = window.confirm(`Load "${tpl.name}"? This will replace the current sequence on the canvas.`);
       if (!ok) return;
     }
-    const { nodes: tplNodes, edges: tplEdges } = tpl.build();
+    // Built-in templates use a build() factory; user-saved templates have nodes/edges directly
+    const { nodes: tplNodes, edges: tplEdges } = typeof tpl.build === 'function' ? tpl.build() : tpl;
     const idMap = {};
     const newNodes = tplNodes.map(n => {
       const id = newId();
@@ -896,6 +924,7 @@ export default function SequenceFlowBuilder({
           <SequenceTemplateGallery
             onPick={loadTemplate}
             onClose={() => setShowTemplateGallery(false)}
+            savedTemplates={savedTemplates}
           />
         )}
       </div>

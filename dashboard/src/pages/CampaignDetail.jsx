@@ -673,6 +673,15 @@ export default function CampaignDetail() {
             <SequenceFlowBuilder
               initialNodes={campaign.sequence_config.flow_sequence.nodes}
               initialEdges={campaign.sequence_config.flow_sequence.edges}
+              savedTemplates={messageTemplates
+                .filter(t => t.message_type === 'flow_sequence' || t.type === 'flow_sequence')
+                .map(t => {
+                  try {
+                    const parsed = typeof t.body === 'string' ? JSON.parse(t.body) : t;
+                    return { id: t.id, name: t.name || parsed.name, nodes: parsed.nodes || [], edges: parsed.edges || [] };
+                  } catch { return null; }
+                })
+                .filter(Boolean)}
               onSave={async (seq) => {
                 await saveSequenceConfig({ flow_sequence: seq });
               }}
@@ -685,7 +694,7 @@ export default function CampaignDetail() {
         </div>
       )}
 
-      {tab === 'sequence' && (
+      {tab === 'sequence' && !(campaign?.sequence_config?.flow_sequence?.nodes || []).length && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
             <h3 className="text-white font-semibold mb-4">Editable Sequence</h3>
