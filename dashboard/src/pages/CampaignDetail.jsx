@@ -8,6 +8,7 @@ import Layout from '../components/Layout';
 import MessageEditorModal from '../components/MessageEditorModal';
 import ProspectTable from '../components/ProspectTable';
 import SequenceFlowBuilder from '../components/SequenceFlowBuilder';
+import { pickSequenceTemplate } from '../data/sequenceTemplates';
 import StatusBadge from '../components/StatusBadge';
 import { useApp } from '../context/AppContext';
 import {
@@ -694,8 +695,44 @@ export default function CampaignDetail() {
         </div>
       )}
 
-      {tab === 'sequence' && !(campaign?.sequence_config?.flow_sequence?.nodes || []).length && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {tab === 'sequence' && !(campaign?.sequence_config?.flow_sequence?.nodes || []).length && (() => {
+        // Pre-populate builder with closest matching sequence template for legacy campaigns
+        const defaultSeq = (() => {
+          const tpl = pickSequenceTemplate(campaign?.template?.name || campaign?.name || '');
+          return tpl?.build ? tpl.build() : null;
+        })();
+        return (
+          <div className="space-y-4">
+            <div className="space-y-3">
+              <div>
+                <h3 className="text-white font-semibold">Sequence Builder</h3>
+                <p className="text-[#6b7280] text-xs mt-1">Build a visual automation flow for this campaign. Saving here upgrades this campaign to the flow engine.</p>
+              </div>
+              <ReactFlowProvider>
+                <SequenceFlowBuilder
+                  key={campaign?.id}
+                  initialNodes={defaultSeq?.nodes}
+                  initialEdges={defaultSeq?.edges}
+                  savedTemplates={messageTemplates
+                    .filter(t => t.message_type === 'flow_sequence' || t.type === 'flow_sequence')
+                    .map(t => {
+                      try {
+                        const parsed = typeof t.body === 'string' ? JSON.parse(t.body) : t;
+                        return { id: t.id, name: t.name || parsed.name, nodes: parsed.nodes || [], edges: parsed.edges || [] };
+                      } catch { return null; }
+                    })
+                    .filter(Boolean)}
+                  onSave={async (seq) => {
+                    await saveSequenceConfig({ flow_sequence: seq });
+                  }}
+                  onSaveTemplate={async (payload) => {
+                    const saved = await saveMessage({ ...payload, message_type: 'flow_sequence', type: 'flow_sequence', body: JSON.stringify(payload) });
+                    setMessageTemplates(t => [saved, ...t.filter(x => x.id !== saved.id)]);
+                  }}
+                />
+              </ReactFlowProvider>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
             <h3 className="text-white font-semibold mb-4">Editable Sequence</h3>
             {!sequence?.template ? (
@@ -778,7 +815,9 @@ export default function CampaignDetail() {
             </div>
           </div>
         </div>
-      )}
+          </div>
+        );
+      })()}
 
       {tab === 'edit' && (
         <div className="max-w-3xl rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5 space-y-4">
