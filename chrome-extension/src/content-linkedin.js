@@ -78,11 +78,33 @@ async function ensureTop() {
 async function detectMessageability() {
   await ensureTop();
   if (isLoginRequired()) return { status: 'session_expired', message: 'LinkedIn login required' };
+
+  // 1st-degree check: if already connected, a Message button must exist (possibly
+  // hidden under "More"). Return normal_message_available immediately so the flow
+  // never tries to send a redundant connection request.
+  const has1st = document.querySelector('[aria-label*="1st"]') ||
+    Array.from(document.querySelectorAll('span')).some(el =>
+      el.textContent.trim() === '1st' || el.textContent.trim() === '1st degree connection'
+    );
+  if (has1st) return { status: 'normal_message_available', message: '1st-degree connection — normal message available' };
+
   if (hasNormalMessage()) return { status: 'normal_message_available', message: 'Normal LinkedIn message is available' };
   if (hasPendingInvite()) return { status: 'pending', message: 'Connection request is already pending' };
 
+  // Try Message button (may be hidden under "More" dropdown)
+  if (!clickButtonByText('Message')) {
+    if (clickButtonByText('More')) {
+      await sleep(800);
+      clickButtonByText('Message');
+    }
+  }
+  if (document.querySelector('[contenteditable="true"], div[role="textbox"]')) {
+    // Message composer already open (clicked above opened it)
+    return { status: 'normal_message_available', message: 'Normal LinkedIn message is available' };
+  }
+  // Try clicking Message and waiting for the composer to appear
   if (clickButtonByText('Message')) {
-    await sleep(1200);
+    await sleep(1500);
     if (hasInmailComposer()) return { status: 'inmail_available', message: 'InMail composer is available' };
     if (document.querySelector('[contenteditable="true"], div[role="textbox"]')) {
       return { status: 'normal_message_available', message: 'Normal LinkedIn message is available' };
