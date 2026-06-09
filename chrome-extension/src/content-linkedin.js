@@ -5,15 +5,24 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
  * Close any LinkedIn modal / popup / overlay that might block actions.
- * LinkedIn shows various interstitials: "Add to your network", premium upsells,
- * cookie banners, "People also viewed" modals, messaging prompts, etc.
- * We try all common dismiss patterns silently — if nothing is open, this is a no-op.
+ *
+ * Strategy (in order):
+ *   1. Known CSS selectors for common LinkedIn modals.
+ *   2. For every visible [role="dialog"] or modal-like container:
+ *      a. Button whose visible text is a close glyph or word.
+ *      b. Button containing an SVG with a close/X path (Premium upsell X has NO aria-label).
+ *      c. Last button inside a modal header (positional heuristic).
+ *   3. Escape key as final fallback.
+ *
+ * Returns a Promise that resolves once dismissed or after an 800 ms safety timeout.
  */
 async function dismissPopups() {
-  const CLOSE_SELECTORS = [
-    // Artdeco modal close (most LinkedIn modals)
+  const CLOSE_TEXT = new Set(['×', 'X', '✕', '✖', 'Close', 'Dismiss', 'Skip', 'Not now', 'Maybe later', 'No thanks', 'Got it']);
+  const CLOSE_LABEL_RE = /close|dismiss|skip|not\s*now|maybe\s*later|no\s*thanks|got\s*it/i;
+
+  // Selectors that reliably name their close buttons
+  const NAMED_SELECTORS = [
     'button.artdeco-modal__dismiss',
-    // Generic aria-label patterns
     'button[aria-label="Dismiss"]',
     'button[aria-label="Close"]',
     'button[aria-label="Got it"]',
@@ -21,71 +30,99 @@ async function dismissPopups() {
     'button[aria-label="Not now"]',
     'button[aria-label="No thanks"]',
     'button[aria-label="Maybe later"]',
-    // Premium / Sales Navigator upsell modals
+    'button[data-test-modal-close-btn]',
     '.premium-marketing-modal button[aria-label*="close" i]',
     '.premium-marketing-modal button[aria-label*="dismiss" i]',
-    'button[data-test-modal-close-btn]',
-    // Toast / snackbar dismiss
     'button.artdeco-toast-item__dismiss',
-    // Cookie / GDPR banners
     'button[action-type="ACCEPT"]',
     '#artdeco-global-alert-container button',
-    // Messaging overlay close
     'button[data-control-name="overlay.close_conversation_window"]',
     '.msg-overlay-bubble-header__controls button',
   ];
 
+  // Returns true if a button's inner SVG looks like a close/X icon.
+  // LinkedIn Premium upsell renders an unlabelled <button><svg>…</svg></button>
+  // whose path draws an X — this catches it without relying on any label.
+  function hasSvgCloseIcon(btn) {
+    const svg = btn.querySelector('svg');
+    if (!svg) return false;
+    const title = (svg.querySelector('title')?.textContent || '').toLowerCase();
+    if (/close|dismiss|x/i.test(title)) return true;
+    // Heuristic: a small SVG (≤ 24 px viewBox) with exactly 1–2 path/line elements
+    // whose d-attribute contains diagonal moves is almost certainly an X icon.
+    const vb = svg.getAttribute('viewBox') || '';
+    const size = parseFloat(vb.split(' ')[2]) || 0;
+    if (size > 0 && size <= 24) {
+      const paths = svg.querySelectorAll('path, line, polyline');
+      if (paths.length <= 3) return true;
+    }
+    return false;
+  }
+
+  function isVisible(el) {
+    return el && el.offsetParent !== null && el.getBoundingClientRect().width > 0;
+  }
+
+  function tryClick(btn) {
+    if (!isVisible(btn)) return false;
+    try { btn.click(); return true; } catch (_) { return false; }
+  }
+
+  function findCloseButton(container) {
+    const buttons = Array.from(container.querySelectorAll('button'));
+
+    // a. Text / aria-label match (catches labelled X buttons)
+    const byLabel = buttons.find(btn => {
+      const txt = (btn.textContent || '').trim();
+      const lbl = btn.getAttribute('aria-label') || '';
+      return CLOSE_TEXT.has(txt) || CLOSE_LABEL_RE.test(lbl);
+    });
+    if (byLabel) return byLabel;
+
+    // b. SVG-icon match (catches Premium upsell X with no label)
+    const bySvg = buttons.find(hasSvgCloseIcon);
+    if (bySvg) return bySvg;
+
+    // c. Positional heuristic: last button inside a header element
+    const header = container.querySelector(
+      'header, [class*="modal-header"], [class*="dialog-header"], [class*="header"]'
+    );
+    if (header) {
+      const headerBtns = Array.from(header.querySelectorAll('button'));
+      if (headerBtns.length) return headerBtns[headerBtns.length - 1];
+    }
+
+    return null;
+  }
+
+  const deadline = Date.now() + 800;
   let dismissed = false;
 
-  // 1. Try known selectors first
-  for (const sel of CLOSE_SELECTORS) {
+  // Step 1 — named selectors
+  for (const sel of NAMED_SELECTORS) {
     for (const btn of Array.from(document.querySelectorAll(sel))) {
-      if (btn && btn.offsetParent !== null) {
-        try { btn.click(); dismissed = true; } catch (_) {}
-        await sleep(200);
-      }
+      if (tryClick(btn)) { dismissed = true; await sleep(150); }
     }
   }
 
-  // 2. Aggressive fallback: find any visible modal/dialog and click its close/X button
-  //    Catches LinkedIn premium upsells, Sales Nav popups, and any future modal types
+  // Step 2 — scan every visible dialog/modal container
   const modalRoots = Array.from(document.querySelectorAll(
-    '[role="dialog"], [data-test-modal], .artdeco-modal, .scaffold-layout-modal, ' +
-    '.premium-upsell-modal, [class*="upsell-modal"], [class*="marketing-modal"]'
+    '[role="dialog"], [data-test-modal], .artdeco-modal, .scaffold-layout-modal,' +
+    '.premium-upsell-modal, [class*="upsell-modal"], [class*="marketing-modal"],' +
+    '[class*="premium-modal"], [class*="paywall"]'
   ));
   for (const modal of modalRoots) {
-    if (!modal || modal.offsetParent === null) continue;
-    // Find the close button inside the modal — look for:
-    // - button whose text/aria-label is ×, X, Close, Dismiss, etc.
-    // - the last/first button in a header row (usually the X)
-    const closeBtn = Array.from(modal.querySelectorAll('button')).find(btn => {
-      const txt = (btn.textContent || '').trim();
-      const lbl = (btn.getAttribute('aria-label') || '').toLowerCase();
-      return (
-        txt === '×' || txt === 'X' || txt === '✕' || txt === '✖' ||
-        /^close$/i.test(txt) || /^dismiss$/i.test(txt) ||
-        /close|dismiss|skip|not now|maybe later|no thanks/i.test(lbl)
-      );
-    })
-    // Also try the top-right button heuristic (often the X in LinkedIn modals)
-    || (() => {
-      const header = modal.querySelector('header, [class*="modal-header"], [class*="header"]');
-      if (header) {
-        const btns = Array.from(header.querySelectorAll('button'));
-        return btns[btns.length - 1]; // last button in header is usually X
-      }
-      return null;
-    })();
-
-    if (closeBtn && closeBtn.offsetParent !== null) {
-      try { closeBtn.click(); dismissed = true; } catch (_) {}
-      await sleep(300);
-    }
+    if (!isVisible(modal)) continue;
+    const btn = findCloseButton(modal);
+    if (btn && tryClick(btn)) { dismissed = true; await sleep(200); }
   }
 
-  // 3. Escape key as last resort
+  // Step 3 — Escape key fallback
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-  if (dismissed) await sleep(500);
+
+  // Respect the 800 ms deadline so callers don't stall
+  const remaining = deadline - Date.now();
+  if (dismissed && remaining > 0) await sleep(Math.min(remaining, 500));
 }
 
 function textOf(el) {
@@ -228,11 +265,13 @@ async function sendConnection(note = '') {
 
   if (note && clickButtonByText('Add a note')) {
     await sleep(700);
-    const textarea = document.querySelector('textarea[name="message"]');
-    if (textarea) {
-      textarea.value = note.slice(0, 300);
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    }
+    // LinkedIn's connection dialog uses a React-controlled textarea; setting .value
+    // directly doesn't trigger React's synthetic event system, so the note is
+    // silently dropped. fillContentEditable uses the clipboard paste path which
+    // React does observe. Fall back to a plain textarea if no contenteditable exists.
+    const box = document.querySelector('[contenteditable="true"], div[role="textbox"]')
+      || document.querySelector('textarea[name="message"]');
+    if (box) fillContentEditable(box, note.slice(0, 300));
   }
   if (clickButtonByText(['Send without a note', 'Send', 'Done'])) {
     return { status: 'sent', message: 'Connection request sent' };
@@ -409,15 +448,29 @@ async function checkReply() {
     return { status: 'no_reply', message: 'Could not open the message thread' };
   }
   await sleep(1500);
-  // Look at the most recent messages in the open conversation panel
-  const bubbles = Array.from(document.querySelectorAll('.msg-s-event-listitem, [class*="message-list-item"], li[class*="msg"]'));
+
+  // LinkedIn renders each message bubble inside a <li> with a data attribute or
+  // class that identifies direction. Try multiple selectors across LinkedIn versions.
+  const bubbles = Array.from(document.querySelectorAll(
+    '.msg-s-event-listitem, [class*="message-list-item"], li[class*="msg"]'
+  ));
   if (!bubbles.length) return { status: 'no_reply', message: 'No conversation found yet' };
 
   const last = bubbles[bubbles.length - 1];
   const lastText = textOf(last);
-  // Heuristic: if the most recent bubble is NOT attributed to "You", treat it as a reply
-  const fromMe = /\byou\b/i.test(textOf(last.querySelector('.msg-s-event-listitem__name, [class*="from"]')) || '') ||
-    /\bYou\b/.test(lastText.slice(0, 12));
+
+  // Determine direction using structural signals rather than fragile "You" text matching:
+  // 1. LinkedIn marks self-sent bubbles with a modifier class (--is-sender or --self).
+  // 2. The sender name label (when present) can be compared against our own display name.
+  // 3. Outgoing bubbles often have a right-aligned wrapper or an "edit" pencil icon.
+  const isSentByCls = /--is-sender|--self|outgoing|sent-by-me/i.test(last.className || '');
+  const editIcon = last.querySelector('[data-control-name="edit_message"], button[aria-label*="Edit" i]');
+  const senderEl = last.querySelector('.msg-s-event-listitem__name, [class*="sender-name"], [class*="from-name"]');
+  const senderText = textOf(senderEl).toLowerCase();
+  // "You" in various LinkedIn UI languages for the sender label
+  const selfSenderRE = /^(you|yo|tu|vous|du|jij|ti|вы|я)$/i;
+  const fromMe = isSentByCls || Boolean(editIcon) || (senderText.length > 0 && selfSenderRE.test(senderText));
+
   if (lastText && !fromMe) {
     return { status: 'replied', message: 'Prospect has replied', reply_excerpt: lastText.slice(0, 280) };
   }

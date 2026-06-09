@@ -106,10 +106,13 @@ async def _background_scheduler_loop():
                 last_run["flow"] = now
 
             # ── Daily jobs ──────────────────────────────────────────────────
+            # Use >= so jobs that were missed due to a server restart still
+            # fire on the same day (e.g. restart at 13:00 catches up on the
+            # 09:00 and 10:00 jobs that haven't run yet today).
             for key, hour, fn in DAILY_JOBS:
                 last = last_run.get(key)
                 already_ran_today = last and last.date() == now.date()
-                if now.hour == hour and not already_ran_today:
+                if now.hour >= hour and not already_ran_today:
                     try:
                         result = await fn()
                         logger.info("[scheduler] %s → queued=%d", key, result.queued)
@@ -260,6 +263,8 @@ def _map_csv_row(raw_row: dict, campaign_id: str | None) -> dict | None:
 
     if not mapped.get("linkedin_url") and not mapped.get("email"):
         return None
+    if not mapped.get("linkedin_url"):
+        logger.warning("CSV row has no linkedin_url — jobs for this prospect will navigate to feed: %s", mapped.get("email", "(no email)"))
 
     # Apply campaign override
     if campaign_id:
@@ -276,7 +281,8 @@ def _map_csv_row(raw_row: dict, campaign_id: str | None) -> dict | None:
 def _profile_can_queue(profile_key: str) -> tuple[bool, str]:
     profile = db.db_get_profile(profile_key)
     if not profile:
-        return True, ""
+        # Unknown profile — block queueing so we don't bypass rate limits
+        return False, "profile not found"
     if profile.get("enabled") is False:
         return False, "profile disabled"
     # Respect per-profile daily limit stored in DB; fall back to env var then hardcoded 25.
@@ -696,8 +702,12 @@ async def update_prospect_list(list_id: str, body: ProspectListUpdate):
 @app.delete("/prospect-lists/{list_id}", tags=["Prospect Lists"])
 async def delete_prospect_list(list_id: str):
     try:
-        db.db_delete_prospect_list(list_id)
+        deleted = db.db_delete_prospect_list(list_id)
+        if not deleted:
+            raise HTTPException(404, "Prospect list not found")
         return {"deleted": True}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"delete_prospect_list: {e}")
         raise HTTPException(500, str(e))
@@ -1436,25 +1446,20 @@ async def run_followups() -> SchedulerResponse:
 
 @app.post("/scheduler/check-acceptances", tags=["Scheduler"])
 async def check_acceptances() -> SchedulerResponse:
+    """Queue one check_connection_status job per pending prospect.
+    Previously created a single bulk job per profile which the extension had
+    no handler for, causing every acceptance check to permanently fail."""
     try:
         sent = db.db_get_prospects_by_status("Connection Request Sent")
-        by_profile: dict[str, list[dict]] = {}
-        for p in sent:
-            by_profile.setdefault(p.get("assigned_account") or "profile_1", []).append(p)
         queued = 0
-        for profile_key, prospects in by_profile.items():
-            ok, reason = _profile_can_queue(profile_key)
-            if not ok:
-                logger.info("Skipping acceptance check for %s: %s", profile_key, reason)
+        for p in sent:
+            if not (p.get("linkedin_url") or "").strip():
                 continue
-            job = db.db_create_job({
-                "job_type": "check_acceptances",
-                "profile_key": profile_key,
-                "payload": {"prospects": [{"prospect_id": p["id"], "linkedin_url": p.get("linkedin_url", ""), "first_name": p.get("first_name"), "last_name": p.get("last_name")} for p in prospects]},
-            })
-            if job:
-                queued += len(prospects)
-        return SchedulerResponse(queued=queued, agents_available=_online_executor_count(), message=f"Created acceptance-check jobs for {queued} prospect(s)")
+            if _queue_job_for_prospect("check_connection_status", p, {
+                "linkedin_url": p.get("linkedin_url", ""),
+            }):
+                queued += 1
+        return SchedulerResponse(queued=queued, agents_available=_online_executor_count(), message=f"Created {queued} connection-status check job(s)")
     except Exception as e:
         logger.error(f"check_acceptances: {e}")
         raise HTTPException(500, str(e))
@@ -1492,12 +1497,13 @@ async def run_flow() -> SchedulerResponse:
                 skipped += 1
                 continue
 
-            # Check if prospect already has a pending or running job
+            # Check if prospect already has a non-terminal job (includes "claimed"
+            # which sits between pending→running; missing it caused double-queuing)
             existing_jobs = (
                 db.supabase.table("jobs")
                 .select("id, status")
                 .eq("prospect_id", prospect_id)
-                .in_("status", ["pending", "running"])
+                .in_("status", ["pending", "claimed", "running", "retrying"])
                 .execute()
                 .data or []
             )

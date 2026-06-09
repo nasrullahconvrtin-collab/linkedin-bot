@@ -185,7 +185,14 @@ function taskFromJob(job) {
 async function runJob(job, cfg) {
   const task = taskFromJob(job);
   await saveConfig({ currentJob: `${job.job_type} ${job.id}` });
-  await claimJob(job.id, cfg.profileKey);
+  // claimJob uses a conditional UPDATE (WHERE status IN pending/retrying).
+  // If another extension instance already claimed this job, the update returns
+  // no rows and claimJob resolves to null — bail out to avoid double-execution.
+  const claimed = await claimJob(job.id, cfg.profileKey);
+  if (!claimed) {
+    await saveConfig({ currentJob: '' });
+    return;
+  }
   await startJob(job.id);
   let result;
   {

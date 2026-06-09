@@ -447,12 +447,10 @@ def db_delete_prospect(prospect_id: str):
 def db_get_pending_prospects(assigned_account: str | None = None) -> list[dict]:
     """Status is empty string or NULL. Excludes prospects enrolled in flow-sequence campaigns
     because the flow engine manages those prospects autonomously."""
-    q1 = supabase.table("prospects").select("*").eq("status", "")
-    q2 = supabase.table("prospects").select("*").is_("status", "null")
+    q = supabase.table("prospects").select("*").or_("status.eq.,status.is.null")
     if assigned_account:
-        q1 = q1.eq("assigned_account", assigned_account)
-        q2 = q2.eq("assigned_account", assigned_account)
-    all_prospects = (q1.execute().data or []) + (q2.execute().data or [])
+        q = q.eq("assigned_account", assigned_account)
+    all_prospects = q.execute().data or []
 
     # Filter out prospects whose active campaign enrollment uses a visual flow sequence.
     # The flow engine creates its own jobs (with flow_node_id) — the legacy scheduler
@@ -531,7 +529,7 @@ def db_get_needs_personalization(limit: int = 500, offset: int = 0) -> tuple[lis
     dedup = {}
     for row in rows:
         dedup[row["id"]] = row
-    return list(dedup.values()), (needs.count or 0) + len(accepted_rows)
+    return list(dedup.values()), len(dedup)
 
 
 def db_get_ready_for_message_queue(limit: int = 500, offset: int = 0) -> tuple[list[dict], int]:
@@ -774,7 +772,10 @@ def db_update_profile(profile_key: str, data: dict) -> dict | None:
 def db_mark_stale_profiles_offline(seconds: int = 90):
     cutoff = (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
     try:
-        supabase.table("linkedin_profiles").update({"session_active": False}).lt("last_active", cutoff).execute()
+        supabase.table("linkedin_profiles").update({
+            "session_active": False,
+            "extension_status": "offline",
+        }).lt("last_active", cutoff).execute()
     except Exception as exc:
         logger.warning("Could not mark stale profiles offline: %s", exc)
 
@@ -1458,8 +1459,9 @@ def db_update_prospect_list(list_id: str, data: dict) -> dict | None:
     return result.data[0] if result.data else None
 
 
-def db_delete_prospect_list(list_id: str) -> None:
-    supabase.table("prospect_lists").delete().eq("id", list_id).execute()
+def db_delete_prospect_list(list_id: str) -> bool:
+    res = supabase.table("prospect_lists").delete().eq("id", list_id).execute()
+    return bool(res.data)
 
 
 def db_get_prospects_for_list(list_id: str, limit: int = 500, offset: int = 0) -> tuple[list[dict], int]:
@@ -2783,14 +2785,23 @@ def db_fail_job(job_id: str, error_message: str, result: dict | None = None) -> 
     status = "retrying" if retry_count < max_retries else "failed"
     backoff_minutes = {1: 10, 2: 30, 3: 120}.get(retry_count, 120)
     scheduled_for = (datetime.now(timezone.utc) + timedelta(minutes=backoff_minutes)).isoformat()
-    updated = db_update_job(job_id, {
+    updates: dict = {
         "status": status,
         "failed_at": _utc_now(),
         "error_message": error_message[:500],
         "retry_count": retry_count,
-        "scheduled_for": scheduled_for if status == "retrying" else None,
         "result": result or {},
-    })
+    }
+    if status == "retrying":
+        updates["scheduled_for"] = scheduled_for
+    updated = db_update_job(job_id, updates)
+    if status == "failed":
+        # db_update_job filters None values, so explicitly null scheduled_for
+        # on permanent failure to prevent stale timestamps from confusing recovery.
+        supabase.table("jobs").update({
+            "scheduled_for": None,
+            "updated_at": _utc_now(),
+        }).eq("id", job_id).execute()
     if status == "failed" and job and (job.get("payload") or {}).get("flow_node_id"):
         db_apply_failed_flow_job(job, error_message, result)
     return updated
