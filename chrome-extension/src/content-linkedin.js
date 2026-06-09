@@ -11,43 +11,81 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
  */
 async function dismissPopups() {
   const CLOSE_SELECTORS = [
-    // Generic modal close / dismiss buttons
+    // Artdeco modal close (most LinkedIn modals)
+    'button.artdeco-modal__dismiss',
+    // Generic aria-label patterns
     'button[aria-label="Dismiss"]',
     'button[aria-label="Close"]',
     'button[aria-label="Got it"]',
     'button[aria-label="Skip"]',
     'button[aria-label="Not now"]',
     'button[aria-label="No thanks"]',
-    // Artdeco modal close
-    'button.artdeco-modal__dismiss',
+    'button[aria-label="Maybe later"]',
+    // Premium / Sales Navigator upsell modals
+    '.premium-marketing-modal button[aria-label*="close" i]',
+    '.premium-marketing-modal button[aria-label*="dismiss" i]',
+    'button[data-test-modal-close-btn]',
     // Toast / snackbar dismiss
     'button.artdeco-toast-item__dismiss',
     // Cookie / GDPR banners
     'button[action-type="ACCEPT"]',
     '#artdeco-global-alert-container button',
-    // "Add to your network" / premium modal backdrop
-    '.artdeco-modal__actionbar button:last-child',
     // Messaging overlay close
     'button[data-control-name="overlay.close_conversation_window"]',
-    // Generic "x" close icons inside modals
     '.msg-overlay-bubble-header__controls button',
-    '.scaffold-layout__aside button[aria-label*="close" i]',
   ];
 
   let dismissed = false;
+
+  // 1. Try known selectors first
   for (const sel of CLOSE_SELECTORS) {
-    const btns = Array.from(document.querySelectorAll(sel));
-    for (const btn of btns) {
-      if (btn && btn.offsetParent !== null) {   // only if visible
+    for (const btn of Array.from(document.querySelectorAll(sel))) {
+      if (btn && btn.offsetParent !== null) {
         try { btn.click(); dismissed = true; } catch (_) {}
         await sleep(200);
       }
     }
   }
 
-  // Also press Escape — catches any modal that doesn't have a close button
-  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  if (dismissed) await sleep(400);
+  // 2. Aggressive fallback: find any visible modal/dialog and click its close/X button
+  //    Catches LinkedIn premium upsells, Sales Nav popups, and any future modal types
+  const modalRoots = Array.from(document.querySelectorAll(
+    '[role="dialog"], [data-test-modal], .artdeco-modal, .scaffold-layout-modal, ' +
+    '.premium-upsell-modal, [class*="upsell-modal"], [class*="marketing-modal"]'
+  ));
+  for (const modal of modalRoots) {
+    if (!modal || modal.offsetParent === null) continue;
+    // Find the close button inside the modal — look for:
+    // - button whose text/aria-label is ×, X, Close, Dismiss, etc.
+    // - the last/first button in a header row (usually the X)
+    const closeBtn = Array.from(modal.querySelectorAll('button')).find(btn => {
+      const txt = (btn.textContent || '').trim();
+      const lbl = (btn.getAttribute('aria-label') || '').toLowerCase();
+      return (
+        txt === '×' || txt === 'X' || txt === '✕' || txt === '✖' ||
+        /^close$/i.test(txt) || /^dismiss$/i.test(txt) ||
+        /close|dismiss|skip|not now|maybe later|no thanks/i.test(lbl)
+      );
+    })
+    // Also try the top-right button heuristic (often the X in LinkedIn modals)
+    || (() => {
+      const header = modal.querySelector('header, [class*="modal-header"], [class*="header"]');
+      if (header) {
+        const btns = Array.from(header.querySelectorAll('button'));
+        return btns[btns.length - 1]; // last button in header is usually X
+      }
+      return null;
+    })();
+
+    if (closeBtn && closeBtn.offsetParent !== null) {
+      try { closeBtn.click(); dismissed = true; } catch (_) {}
+      await sleep(300);
+    }
+  }
+
+  // 3. Escape key as last resort
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  if (dismissed) await sleep(500);
 }
 
 function textOf(el) {
