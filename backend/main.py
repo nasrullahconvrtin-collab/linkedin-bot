@@ -128,9 +128,6 @@ async def _lifespan(application: FastAPI):
     logger.info("APScheduler stopped")
 
 
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
 
 app = FastAPI(
     title="LinkedIn Automation API",
