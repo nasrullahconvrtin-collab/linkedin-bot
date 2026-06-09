@@ -6,6 +6,7 @@ import {
 import toast from 'react-hot-toast';
 import { ReactFlowProvider } from 'reactflow';
 import SequenceFlowBuilder from '../components/SequenceFlowBuilder';
+import { SEQUENCE_TEMPLATES, pickSequenceTemplate } from '../data/sequenceTemplates';
 import VariableMappingPanel, { autoVariableMappings } from '../components/VariableMappingPanel';
 import {
   addProspectsToCampaign,
@@ -81,6 +82,7 @@ function parseCSV(text) {
   return { headers, count: Math.max(rows.length - 1, 0), preview: rows.slice(1, 6) };
 }
 
+
 function StepPreview({ steps }) {
   return (
     <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
@@ -149,6 +151,11 @@ export default function CampaignWizard({ onClose, onCreated }) {
         const firstActive = allTemplates.find(t => t.status === 'active') || allTemplates[0] || null;
         setSelected(firstActive);
         setCampaignName(firstActive?.name || '');
+        // Pre-populate sequence builder with matching template on initial load
+        if (firstActive?.name) {
+          const seqTpl = pickSequenceTemplate(firstActive.name);
+          if (seqTpl?.build) setFlowSequence(seqTpl.build());
+        }
         setVariables(variableData.standard || DEFAULT_VARS);
         setProspects(prospectData.prospects || []);
         setLists(listData.lists || []);
@@ -199,6 +206,9 @@ export default function CampaignWizard({ onClose, onCreated }) {
     setCustomSteps(null); // reset any manual edits
     setMessageOverrides({});
     setDelayOverrides({});
+    // Pre-populate the flow builder with the closest matching sequence template
+    const seqTpl = pickSequenceTemplate(template.name);
+    if (seqTpl?.build) setFlowSequence(seqTpl.build());
     if ((template.steps || []).length) return; // already has steps from list
     setLoadingTemplate(true);
     try {
@@ -544,8 +554,18 @@ export default function CampaignWizard({ onClose, onCreated }) {
                 </div>
                 <ReactFlowProvider>
                   <SequenceFlowBuilder
+                    key={selected?.id || 'default'}
                     initialNodes={flowSequence?.nodes}
                     initialEdges={flowSequence?.edges}
+                    savedTemplates={messageTemplates
+                      .filter(m => m.message_type === 'flow_sequence' || m.type === 'flow_sequence')
+                      .map(m => {
+                        try {
+                          const parsed = typeof m.body === 'string' ? JSON.parse(m.body) : m.body;
+                          return { id: m.id, name: m.name || m.subject || 'Saved Sequence', nodes: parsed?.nodes || [], edges: parsed?.edges || [] };
+                        } catch { return null; }
+                      })
+                      .filter(Boolean)}
                     onSave={(seq) => { setFlowSequence(seq); toast.success('Sequence saved to campaign'); }}
                     onSaveTemplate={async (payload) => {
                       const saved = await saveMessage({ ...payload, message_type: 'flow_sequence', type: 'flow_sequence', body: JSON.stringify(payload) });
