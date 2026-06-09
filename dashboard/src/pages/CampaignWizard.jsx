@@ -566,6 +566,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
                         } catch { return null; }
                       })
                       .filter(Boolean)}
+                    variables={availableMessageVariables}
                     onSave={(seq) => { setFlowSequence(seq); toast.success('Sequence saved to campaign'); }}
                     onSaveTemplate={async (payload) => {
                       const saved = await saveMessage({ ...payload, message_type: 'flow_sequence', type: 'flow_sequence', body: JSON.stringify(payload) });
