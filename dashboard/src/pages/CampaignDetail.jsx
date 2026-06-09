@@ -325,6 +325,15 @@ export default function CampaignDetail() {
   };
 
   const campaignVariables = (campaign?.sequence_config || {}).variables || [];
+  // All variables available in message templates for this campaign
+  const allSequenceVars = (() => {
+    const standard = ['first_name','last_name','company','title','industry','location','email','linkedin_url','sender_name','sender_company','sender_email','sender_linkedin'];
+    const custom = campaignVariables || [];
+    const mapped = Object.values(campaign?.sequence_config?.variable_mappings || {})
+      .map(v => (typeof v === 'object' ? (v.target || v.customName) : v))
+      .filter(Boolean);
+    return [...new Set([...standard, ...custom, ...mapped])];
+  })();
 
   const saveCampaignVariables = async (vars) => {
     const updated = { ...campaign, sequence_config: { ...(campaign.sequence_config || {}), variables: vars } };
@@ -674,6 +683,7 @@ export default function CampaignDetail() {
             <SequenceFlowBuilder
               initialNodes={campaign.sequence_config.flow_sequence.nodes}
               initialEdges={campaign.sequence_config.flow_sequence.edges}
+              variables={allSequenceVars}
               savedTemplates={messageTemplates
                 .filter(t => t.message_type === 'flow_sequence' || t.type === 'flow_sequence')
                 .map(t => {
@@ -713,7 +723,7 @@ export default function CampaignDetail() {
                   key={campaign?.id}
                   initialNodes={defaultSeq?.nodes}
                   initialEdges={defaultSeq?.edges}
-                  variables={['first_name','last_name','company','title','industry','location','email','linkedin_url','sender_name','sender_company',...(campaignVariables || [])]}
+                  variables={allSequenceVars}
                   savedTemplates={messageTemplates
                     .filter(t => t.message_type === 'flow_sequence' || t.type === 'flow_sequence')
                     .map(t => {
