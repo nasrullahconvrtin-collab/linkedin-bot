@@ -64,6 +64,10 @@ from models import (
 
 load_dotenv()
 logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+logger = logging.getLogger("linkedin_bot")
 
 # ── APScheduler — server-side cron ───────────────────────────────────────────
 _scheduler = AsyncIOScheduler(timezone="UTC")
@@ -127,7 +131,6 @@ async def _lifespan(application: FastAPI):
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
-logger = logging.getLogger("linkedin_bot")
 
 app = FastAPI(
     title="LinkedIn Automation API",
