@@ -445,13 +445,37 @@ def db_delete_prospect(prospect_id: str):
 
 
 def db_get_pending_prospects(assigned_account: str | None = None) -> list[dict]:
-    """Status is empty string or NULL."""
+    """Status is empty string or NULL. Excludes prospects enrolled in flow-sequence campaigns
+    because the flow engine manages those prospects autonomously."""
     q1 = supabase.table("prospects").select("*").eq("status", "")
     q2 = supabase.table("prospects").select("*").is_("status", "null")
     if assigned_account:
         q1 = q1.eq("assigned_account", assigned_account)
         q2 = q2.eq("assigned_account", assigned_account)
-    return (q1.execute().data or []) + (q2.execute().data or [])
+    all_prospects = (q1.execute().data or []) + (q2.execute().data or [])
+
+    # Filter out prospects whose active campaign enrollment uses a visual flow sequence.
+    # The flow engine creates its own jobs (with flow_node_id) — the legacy scheduler
+    # must not create duplicate/conflicting legacy jobs for those prospects.
+    filtered = []
+    for p in all_prospects:
+        skip = False
+        enrollments = (
+            supabase.table("campaign_enrollments")
+            .select("campaign_id")
+            .eq("prospect_id", p["id"])
+            .eq("status", "active")
+            .execute()
+            .data or []
+        )
+        for enrollment in enrollments:
+            campaign, _ = db_get_campaign(enrollment["campaign_id"])
+            if _campaign_flow_sequence(campaign):
+                skip = True
+                break
+        if not skip:
+            filtered.append(p)
+    return filtered
 
 
 def db_get_prospects_by_status(
@@ -2714,8 +2738,24 @@ def db_apply_completed_job_result(job: dict, result: dict) -> None:
             }).eq("campaign_id", job["campaign_id"]).eq("prospect_id", prospect_id).execute()
         step_order = int((job.get("payload") or {}).get("campaign_step_order") or 0)
         next_job = None
-        if job.get("campaign_id") and step_order:
-            next_job = db_queue_next_campaign_step(job["campaign_id"], prospect_id, step_order)
+        campaign_id = job.get("campaign_id")
+        if campaign_id:
+            campaign, _ = db_get_campaign(campaign_id)
+            if _campaign_flow_sequence(campaign):
+                # This is a legacy job that ran inside a flow campaign (dual-engine conflict).
+                # Hand off: advance the flow from the current enrollment node so follow-ups fire.
+                enrollments = (
+                    supabase.table("campaign_enrollments")
+                    .select("current_node_id")
+                    .eq("campaign_id", campaign_id)
+                    .eq("prospect_id", prospect_id)
+                    .execute()
+                    .data or []
+                )
+                current_node = (enrollments[0] or {}).get("current_node_id") if enrollments else None
+                next_job = db_queue_next_flow_step(campaign_id, prospect_id, current_node)
+            elif step_order:
+                next_job = db_queue_next_campaign_step(campaign_id, prospect_id, step_order)
         db_update_prospect(prospect_id, {
             "next_steps": _next_steps_for_queued_job(next_job),
             "last_action_at": _utc_now(),
