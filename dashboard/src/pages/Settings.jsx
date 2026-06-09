@@ -8,7 +8,7 @@ import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
 import { useApp } from '../context/AppContext';
 import {
-  getStats, runConnections, checkAcceptances, runMessages, runFollowups,
+  getStats, runConnections, checkAcceptances, runMessages, runFollowups, runFlow,
   getSchedules, updateSchedules, createExtensionPairToken,
 } from '../services/api';
 
@@ -23,6 +23,7 @@ const SCHEDULE_DEFAULTS = [
   { key: 'acc',  label: 'Check acceptances', time: '12:00', enabled: true, runOnStartup: false },
   { key: 'msg',  label: 'Send messages',     time: '14:00', enabled: true, runOnStartup: false },
   { key: 'fu',   label: 'Send follow-ups',   time: '10:00', enabled: true, runOnStartup: false },
+  { key: 'flow', label: 'Run flow engine',   time: '*/10',  enabled: true, runOnStartup: true  },
 ];
 
 const LS_KEY_LIMITS   = 'lf_limits';
@@ -34,6 +35,7 @@ const TASK_FNS = {
   acc:  checkAcceptances,
   msg:  runMessages,
   fu:   runFollowups,
+  flow: runFlow,
 };
 
 function getAutorunRecord() {
