@@ -24,11 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import database as db
 
-# ── Server-side scheduler (APScheduler) ──────────────────────────────────────
 from contextlib import asynccontextmanager
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron     import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
 from models import (
     ActivityLogCreate,
     BulkImportResponse,
@@ -69,63 +65,76 @@ logging.basicConfig(
 )
 logger = logging.getLogger("linkedin_bot")
 
-# ── APScheduler — server-side cron ───────────────────────────────────────────
-_scheduler = AsyncIOScheduler(timezone="UTC")
+# ── Server-side background scheduler (pure asyncio, no extra packages) ────────
+async def _background_scheduler_loop():
+    """
+    Runs inside the FastAPI process on Railway 24/7.
+    - Flow engine:   every 10 minutes  (queues next step for all active flow enrollments)
+    - Connections:   daily at 09:00 UTC
+    - Follow-ups:    daily at 10:00 UTC
+    - Acceptances:   daily at 12:00 UTC
+    - Messages:      daily at 14:00 UTC
+    No external packages required — uses asyncio only.
+    """
+    import asyncio as _asyncio
+    from datetime import datetime as _dt, timezone as _tz
 
-async def _cron_run_flow():
-    """Every 10 min: advance any stalled flow-sequence enrollment."""
-    try:
-        result = await run_flow()
-        if result.queued:
-            logger.info("[cron] run_flow → queued=%d", result.queued)
-    except Exception as e:
-        logger.error("[cron] run_flow failed: %s", e)
+    last_run: dict[str, _dt] = {}
+    FLOW_INTERVAL_SECS = 600  # 10 minutes
+    DAILY_JOBS = [
+        ("connections",  9,  lambda: run_connections()),
+        ("followups",   10,  lambda: run_followups()),
+        ("acceptances", 12,  lambda: check_acceptances()),
+        ("messages",    14,  lambda: run_messages()),
+    ]
 
-async def _cron_run_connections():
-    """Daily 09:00 UTC: queue connection requests."""
-    try:
-        result = await run_connections()
-        logger.info("[cron] run_connections → queued=%d", result.queued)
-    except Exception as e:
-        logger.error("[cron] run_connections failed: %s", e)
+    logger.info("Background scheduler started (pure asyncio)")
+    while True:
+        try:
+            await _asyncio.sleep(60)          # wake up every minute
+            now = _dt.now(_tz.utc)
 
-async def _cron_check_acceptances():
-    """Daily 12:00 UTC: check accepted connection requests."""
-    try:
-        result = await check_acceptances()
-        logger.info("[cron] check_acceptances → queued=%d", result.queued)
-    except Exception as e:
-        logger.error("[cron] check_acceptances failed: %s", e)
+            # ── Flow engine (every 10 min) ──────────────────────────────────
+            last_flow = last_run.get("flow")
+            if not last_flow or (now - last_flow).total_seconds() >= FLOW_INTERVAL_SECS:
+                try:
+                    result = await run_flow()
+                    if result.queued:
+                        logger.info("[scheduler] run_flow → queued=%d", result.queued)
+                except Exception as exc:
+                    logger.error("[scheduler] run_flow error: %s", exc)
+                last_run["flow"] = now
 
-async def _cron_run_messages():
-    """Daily 14:00 UTC: queue initial messages."""
-    try:
-        result = await run_messages()
-        logger.info("[cron] run_messages → queued=%d", result.queued)
-    except Exception as e:
-        logger.error("[cron] run_messages failed: %s", e)
+            # ── Daily jobs ──────────────────────────────────────────────────
+            for key, hour, fn in DAILY_JOBS:
+                last = last_run.get(key)
+                already_ran_today = last and last.date() == now.date()
+                if now.hour == hour and not already_ran_today:
+                    try:
+                        result = await fn()
+                        logger.info("[scheduler] %s → queued=%d", key, result.queued)
+                    except Exception as exc:
+                        logger.error("[scheduler] %s error: %s", key, exc)
+                    last_run[key] = now
 
-async def _cron_run_followups():
-    """Daily 10:00 UTC: queue follow-ups."""
-    try:
-        result = await run_followups()
-        logger.info("[cron] run_followups → queued=%d", result.queued)
-    except Exception as e:
-        logger.error("[cron] run_followups failed: %s", e)
+        except _asyncio.CancelledError:
+            logger.info("Background scheduler stopped")
+            break
+        except Exception as exc:
+            logger.error("[scheduler] unexpected error: %s", exc)
 
 @asynccontextmanager
 async def _lifespan(application: FastAPI):
-    """Start APScheduler on startup; shut it down cleanly on exit."""
-    _scheduler.add_job(_cron_run_flow,          IntervalTrigger(minutes=10),            id="run_flow",          replace_existing=True)
-    _scheduler.add_job(_cron_run_connections,   CronTrigger(hour=9,  minute=0),         id="run_connections",   replace_existing=True)
-    _scheduler.add_job(_cron_check_acceptances, CronTrigger(hour=12, minute=0),         id="check_acceptances", replace_existing=True)
-    _scheduler.add_job(_cron_run_messages,      CronTrigger(hour=14, minute=0),         id="run_messages",      replace_existing=True)
-    _scheduler.add_job(_cron_run_followups,     CronTrigger(hour=10, minute=0),         id="run_followups",     replace_existing=True)
-    _scheduler.start()
-    logger.info("APScheduler started — flow engine every 10 min, daily jobs at 09/10/12/14 UTC")
+    """Start background scheduler on startup; cancel it cleanly on shutdown."""
+    import asyncio as _asyncio
+    task = _asyncio.create_task(_background_scheduler_loop())
+    logger.info("Background scheduler task created")
     yield
-    _scheduler.shutdown(wait=False)
-    logger.info("APScheduler stopped")
+    task.cancel()
+    try:
+        await task
+    except _asyncio.CancelledError:
+        pass
 
 
 
