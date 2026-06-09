@@ -163,6 +163,8 @@ const nodeTypes = { flowNode: FlowNode };
 const DEFAULT_VARS = [
   'first_name', 'last_name', 'company', 'title', 'industry', 'location',
   'email', 'linkedin_url', 'sender_name', 'sender_company', 'sender_email', 'sender_linkedin',
+  // Per-prospect message fields (set during CSV import)
+  'inmail_message', 'initial_message', 'followup_1', 'followup_2', 'followup_3', 'followup_4',
 ];
 
 function VarChips({ onInsert, vars }) {
