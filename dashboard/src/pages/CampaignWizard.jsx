@@ -184,7 +184,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
     const known = new Set([
       'first_name', 'firstname', 'last_name', 'lastname', 'linkedin_url', 'linkedinurl', 'linkedin url',
       'email', 'company', 'job_title', 'jobtitle', 'job title', 'assigned_account', 'assigned account',
-      'inmail_message', 'initial_message', 'followup_1', 'followup_2', 'followup_3', 'followup_4', 'status',
+      'status',
     ]);
     return csvMeta.headers
       .filter(h => !known.has(h.toLowerCase().trim()))
@@ -248,7 +248,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
   }, [csvMeta, variableMappings]);
 
   const availableMessageVariables = useMemo(
-    () => [...new Set([...variables, ...csvFields, ...mappedVariables, 'email', 'linkedin_url', 'sender_name', 'sender_company', 'sender_email', 'sender_phone', 'sender_linkedin'])],
+    () => [...new Set([...variables, ...csvFields, ...mappedVariables, 'email', 'linkedin_url', 'sender_name', 'sender_company', 'sender_email', 'sender_phone', 'sender_linkedin', 'inmail_message', 'initial_message', 'followup_1', 'followup_2', 'followup_3', 'followup_4'])],
     [csvFields, mappedVariables, variables],
   );
 
