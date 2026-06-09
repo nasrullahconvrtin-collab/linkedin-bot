@@ -281,8 +281,10 @@ def _map_csv_row(raw_row: dict, campaign_id: str | None) -> dict | None:
 def _profile_can_queue(profile_key: str) -> tuple[bool, str]:
     profile = db.db_get_profile(profile_key)
     if not profile:
-        # Unknown profile — block queueing so we don't bypass rate limits
-        return False, "profile not found"
+        # Profile not in DB yet (e.g. first run before heartbeat registers it).
+        # Allow queueing with a warning rather than silently blocking all jobs.
+        logger.warning("_profile_can_queue: profile %s not found in DB, allowing with default limit", profile_key)
+        return True, ""
     if profile.get("enabled") is False:
         return False, "profile disabled"
     # Respect per-profile daily limit stored in DB; fall back to env var then hardcoded 25.

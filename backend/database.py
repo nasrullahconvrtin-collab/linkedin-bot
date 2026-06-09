@@ -447,10 +447,12 @@ def db_delete_prospect(prospect_id: str):
 def db_get_pending_prospects(assigned_account: str | None = None) -> list[dict]:
     """Status is empty string or NULL. Excludes prospects enrolled in flow-sequence campaigns
     because the flow engine manages those prospects autonomously."""
-    q = supabase.table("prospects").select("*").or_("status.eq.,status.is.null")
+    q1 = supabase.table("prospects").select("*").eq("status", "")
+    q2 = supabase.table("prospects").select("*").is_("status", "null")
     if assigned_account:
-        q = q.eq("assigned_account", assigned_account)
-    all_prospects = q.execute().data or []
+        q1 = q1.eq("assigned_account", assigned_account)
+        q2 = q2.eq("assigned_account", assigned_account)
+    all_prospects = (q1.execute().data or []) + (q2.execute().data or [])
 
     # Filter out prospects whose active campaign enrollment uses a visual flow sequence.
     # The flow engine creates its own jobs (with flow_node_id) — the legacy scheduler
