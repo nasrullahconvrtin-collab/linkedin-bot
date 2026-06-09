@@ -100,6 +100,7 @@ export const runConnections    = ()         => api.post('/scheduler/run-connecti
 export const checkAcceptances  = ()         => api.post('/scheduler/check-acceptances');
 export const runMessages       = ()         => api.post('/scheduler/run-messages');
 export const runFollowups      = ()         => api.post('/scheduler/run-followups');
+export const runFlow           = ()         => api.post('/scheduler/run-flow');
 export const getSchedules      = ()         => api.get('/schedules');
 export const updateSchedules   = (rows)     => api.put('/schedules', rows);
 export const getMessages       = (params)   => api.get('/messages', { params });
