@@ -872,7 +872,7 @@ export default function CampaignDetail() {
         availableVariables={['first_name', 'last_name', 'company', 'title', 'industry', 'location', 'email', 'linkedin_url', ...((campaign.sequence_config || {}).variables || [])]}
         sampleProspects={prospectPicker.slice(0, 8)}
         senderVariables={{
-          sender_name: profiles.find(p => p.profile_key === profileKey)?.display_name || profileKey,
+          sender_name: contextProfiles.find(p => p.profile_key === profileKey)?.display_name || profileKey,
           sender_company: 'LinkedFlow',
           sender_email: '',
           sender_phone: '',
