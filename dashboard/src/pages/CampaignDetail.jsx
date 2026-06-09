@@ -327,7 +327,7 @@ export default function CampaignDetail() {
   const campaignVariables = (campaign?.sequence_config || {}).variables || [];
   // All variables available in message templates for this campaign
   const allSequenceVars = (() => {
-    const standard = ['first_name','last_name','company','title','industry','location','email','linkedin_url','sender_name','sender_company','sender_email','sender_linkedin'];
+    const standard = ['first_name','last_name','company','title','industry','location','email','linkedin_url','sender_name','sender_company','sender_email','sender_linkedin','inmail_message','initial_message','followup_1','followup_2','followup_3','followup_4'];
     const custom = campaignVariables || [];
     const mapped = Object.values(campaign?.sequence_config?.variable_mappings || {})
       .map(v => (typeof v === 'object' ? (v.target || v.customName) : v))
