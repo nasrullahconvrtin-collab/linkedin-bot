@@ -3,6 +3,53 @@ window.__linkedflowContentLoaded = true;
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * Close any LinkedIn modal / popup / overlay that might block actions.
+ * LinkedIn shows various interstitials: "Add to your network", premium upsells,
+ * cookie banners, "People also viewed" modals, messaging prompts, etc.
+ * We try all common dismiss patterns silently — if nothing is open, this is a no-op.
+ */
+async function dismissPopups() {
+  const CLOSE_SELECTORS = [
+    // Generic modal close / dismiss buttons
+    'button[aria-label="Dismiss"]',
+    'button[aria-label="Close"]',
+    'button[aria-label="Got it"]',
+    'button[aria-label="Skip"]',
+    'button[aria-label="Not now"]',
+    'button[aria-label="No thanks"]',
+    // Artdeco modal close
+    'button.artdeco-modal__dismiss',
+    // Toast / snackbar dismiss
+    'button.artdeco-toast-item__dismiss',
+    // Cookie / GDPR banners
+    'button[action-type="ACCEPT"]',
+    '#artdeco-global-alert-container button',
+    // "Add to your network" / premium modal backdrop
+    '.artdeco-modal__actionbar button:last-child',
+    // Messaging overlay close
+    'button[data-control-name="overlay.close_conversation_window"]',
+    // Generic "x" close icons inside modals
+    '.msg-overlay-bubble-header__controls button',
+    '.scaffold-layout__aside button[aria-label*="close" i]',
+  ];
+
+  let dismissed = false;
+  for (const sel of CLOSE_SELECTORS) {
+    const btns = Array.from(document.querySelectorAll(sel));
+    for (const btn of btns) {
+      if (btn && btn.offsetParent !== null) {   // only if visible
+        try { btn.click(); dismissed = true; } catch (_) {}
+        await sleep(200);
+      }
+    }
+  }
+
+  // Also press Escape — catches any modal that doesn't have a close button
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  if (dismissed) await sleep(400);
+}
+
 function textOf(el) {
   return (el?.textContent || '').replace(/\s+/g, ' ').trim();
 }
@@ -71,6 +118,7 @@ function detectAccount() {
 }
 
 async function ensureTop() {
+  await dismissPopups();
   window.scrollTo(0, 0);
   await sleep(700);
 }
@@ -225,11 +273,16 @@ async function sendPreparedInmail(subject, message) {
 async function visitProfile() {
   await ensureTop();
   if (isLoginRequired()) return { status: 'session_expired', message: 'LinkedIn login required' };
+  // Dismiss any popup that appeared on page load before acting
+  await dismissPopups();
+  await sleep(500);
   // Scroll a bit so LinkedIn registers a genuine profile view
   window.scrollBy(0, 400);
   await sleep(900);
   window.scrollBy(0, -200);
   await sleep(400);
+  // Final popup sweep before reporting done — ensures next action has clean DOM
+  await dismissPopups();
   const name = (document.querySelector('h1')?.textContent || '').trim();
   return { status: 'visited', message: name ? `Visited profile: ${name}` : 'Profile visited' };
 }
