@@ -349,3 +349,16 @@ export const SEQUENCE_TEMPLATES = [
     build: personalizedWithReview,
   },
 ];
+
+/**
+ * Pick the best-matching SEQUENCE_TEMPLATE for a given campaign template name.
+ * Falls back to "Connect + 2 Follow-ups" when no keyword matches.
+ */
+export function pickSequenceTemplate(name = '') {
+  if (/inmail/i.test(name)) return SEQUENCE_TEMPLATES.find(t => t.id === 'inmail_first_fallback');
+  if (/nurture|existing|re.?engage/i.test(name)) return SEQUENCE_TEMPLATES.find(t => t.id === 'nurture_existing');
+  if (/warm/i.test(name)) return SEQUENCE_TEMPLATES.find(t => t.id === 'warm_up_then_connect');
+  if (/simple|minimal/i.test(name)) return SEQUENCE_TEMPLATES.find(t => t.id === 'simple_connect_message');
+  if (/personali/i.test(name)) return SEQUENCE_TEMPLATES.find(t => t.id === 'personalized_review');
+  return SEQUENCE_TEMPLATES.find(t => t.id === 'classic_connect_followup') || SEQUENCE_TEMPLATES[0];
+}
