@@ -1,3 +1,8 @@
+(() => {
+// Guard against double-injection: the manifest injects this file on every
+// LinkedIn page, and background.js re-injects it via chrome.scripting if
+// messaging fails. A bare top-level `return` is a SyntaxError in a classic
+// content script, so the guard lives inside this IIFE.
 if (window.__linkedflowContentLoaded) return;
 window.__linkedflowContentLoaded = true;
 
@@ -493,3 +498,5 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   })().then(sendResponse).catch(err => sendResponse({ status: 'failed_with_reason', message: String(err.message || err) }));
   return true;
 });
+
+})();
