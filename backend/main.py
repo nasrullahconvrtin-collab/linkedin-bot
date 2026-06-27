@@ -11,7 +11,7 @@ import io
 import json
 import logging
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 import httpx
@@ -291,8 +291,18 @@ def _profile_can_queue(profile_key: str) -> tuple[bool, str]:
     db_limit = profile.get("daily_limit")
     env_limit = int(os.getenv("DAILY_CONNECTION_LIMIT", "25"))
     daily_limit = int(db_limit) if db_limit is not None else env_limit
-    if int(profile.get("daily_sent") or 0) >= daily_limit:
+    # NOTE: profile.daily_sent is never incremented anywhere in this codebase —
+    # count actual sent invitations from prospects.connection_sent_date instead,
+    # which IS reliably set by db_mark_invitation_sent on every real send.
+    today = date.today().isoformat()
+    sent_today = db.db_count_connections_sent_since(profile_key, today)
+    if sent_today >= daily_limit:
         return False, "daily limit reached"
+    weekly_limit = int(os.getenv("WEEKLY_CONNECTION_LIMIT", str(daily_limit * 5)))
+    week_start = (date.today() - timedelta(days=6)).isoformat()
+    sent_this_week = db.db_count_connections_sent_since(profile_key, week_start)
+    if sent_this_week >= weekly_limit:
+        return False, "weekly limit reached"
     return True, ""
 
 

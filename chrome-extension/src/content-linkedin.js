@@ -157,7 +157,27 @@ function clickLeafByText(label) {
 
 function isLoginRequired() {
   const url = location.href;
-  return url.includes('/login') || url.includes('/authwall') || url.includes('/checkpoint');
+  return url.includes('/login') || url.includes('/authwall');
+}
+
+// LinkedIn checkpoint = account flagged/restricted, distinct from a plain
+// logged-out session — automation must stop immediately, not just retry login.
+function isAccountRestricted() {
+  return location.href.includes('/checkpoint');
+}
+
+function isProfileNotFound() {
+  const text = (document.body.innerText || '').slice(0, 2000);
+  return /this page doesn.?t exist|page not found|profile (is )?unavailable/i.test(text);
+}
+
+// Combined gate to call at the top of every action: checkpoint/login/404 all
+// short-circuit the action with a distinct status the backend understands.
+function detectBlockingState() {
+  if (isAccountRestricted()) return { status: 'restricted', message: 'LinkedIn checkpoint - account restricted' };
+  if (isLoginRequired()) return { status: 'session_expired', message: 'LinkedIn login required' };
+  if (isProfileNotFound()) return { status: 'not_found', message: 'Profile page not found' };
+  return null;
 }
 
 function profileHeaderButtons() {
@@ -205,7 +225,7 @@ async function ensureTop() {
 
 async function detectMessageability() {
   await ensureTop();
-  if (isLoginRequired()) return { status: 'session_expired', message: 'LinkedIn login required' };
+  { const blocked = detectBlockingState(); if (blocked) return blocked; }
 
   // 1st-degree check: if already connected, a Message button must exist (possibly
   // hidden under "More"). Return normal_message_available immediately so the flow
@@ -244,7 +264,7 @@ async function detectMessageability() {
 
 async function sendConnection(note = '') {
   await ensureTop();
-  if (isLoginRequired()) return { status: 'session_expired', message: 'LinkedIn login required' };
+  { const blocked = detectBlockingState(); if (blocked) return blocked; }
 
   // Check for 1st degree connection indicator in the page
   const degreeText = document.body.innerText || '';
@@ -308,7 +328,7 @@ function fillContentEditable(box, text) {
 async function sendPreparedMessage(message) {
   await ensureTop();
   if (!message) return { status: 'failed_with_reason', message: 'Message text is empty' };
-  if (isLoginRequired()) return { status: 'session_expired', message: 'LinkedIn login required' };
+  { const blocked = detectBlockingState(); if (blocked) return blocked; }
   if (!clickButtonByText('Message')) {
     // Message can be hidden under the "More" actions dropdown
     if (clickButtonByText('More')) {
@@ -336,7 +356,7 @@ async function sendPreparedMessage(message) {
 async function sendPreparedInmail(subject, message) {
   await ensureTop();
   if (!subject || !message) return { status: 'failed_with_reason', message: 'Subject or message is empty' };
-  if (isLoginRequired()) return { status: 'session_expired', message: 'LinkedIn login required' };
+  { const blocked = detectBlockingState(); if (blocked) return blocked; }
   clickButtonByText('Message');
   await sleep(1500);
   const subjectInput = document.querySelector('input[name="subject"], input[placeholder*="Subject" i]');
@@ -354,7 +374,7 @@ async function sendPreparedInmail(subject, message) {
 
 async function visitProfile() {
   await ensureTop();
-  if (isLoginRequired()) return { status: 'session_expired', message: 'LinkedIn login required' };
+  { const blocked = detectBlockingState(); if (blocked) return blocked; }
   // Dismiss any popup that appeared on page load before acting
   await dismissPopups();
   await sleep(500);
@@ -376,7 +396,7 @@ function isAlreadyFollowing() {
 
 async function followProfile() {
   await ensureTop();
-  if (isLoginRequired()) return { status: 'session_expired', message: 'LinkedIn login required' };
+  { const blocked = detectBlockingState(); if (blocked) return blocked; }
   if (isAlreadyFollowing()) return { status: 'already_following', message: 'Already following this profile' };
 
   let clicked = clickButtonByText('Follow');
@@ -407,7 +427,7 @@ function findSkillEndorseTargets(skillName) {
 
 async function endorseProfile(skillName = '') {
   await ensureTop();
-  if (isLoginRequired()) return { status: 'session_expired', message: 'LinkedIn login required' };
+  { const blocked = detectBlockingState(); if (blocked) return blocked; }
 
   // Navigate to the "Details > Skills" page for a reliable layout when possible
   const skillsLink = Array.from(document.querySelectorAll('a[href*="/details/skills"]'))[0];
@@ -437,7 +457,7 @@ async function endorseProfile(skillName = '') {
 
 async function checkConnectionStatus() {
   await ensureTop();
-  if (isLoginRequired()) return { status: 'session_expired', message: 'LinkedIn login required' };
+  { const blocked = detectBlockingState(); if (blocked) return blocked; }
   const has1st = document.querySelector('[aria-label*="1st"]') ||
     Array.from(document.querySelectorAll('span')).some(el => /^1st(\s+degree connection)?$/.test(el.textContent.trim()));
   if (has1st || hasNormalMessage()) return { status: 'accepted', message: 'Connection request accepted' };
@@ -448,7 +468,7 @@ async function checkConnectionStatus() {
 
 async function checkReply() {
   await ensureTop();
-  if (isLoginRequired()) return { status: 'session_expired', message: 'LinkedIn login required' };
+  { const blocked = detectBlockingState(); if (blocked) return blocked; }
   if (!clickButtonByText('Message')) {
     return { status: 'no_reply', message: 'Could not open the message thread' };
   }

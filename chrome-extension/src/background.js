@@ -73,10 +73,10 @@ async function waitForTab(tabId) {
   return false;
 }
 
-async function contentAction(url, type, payload = {}) {
+async function contentActionOnce(url, type, payload = {}) {
   const tab = await navigateAutomationTab(url);
   const ready = await waitForTab(tab.id);
-  if (!ready) return { status: 'error', message: 'Automation tab did not load in time' };
+  if (!ready) return null; // page timeout - caller decides whether to retry
   // Wait for LinkedIn React to finish rendering
   await new Promise(r => setTimeout(r, 1500));
   try {
@@ -87,6 +87,22 @@ async function contentAction(url, type, payload = {}) {
     return await chrome.tabs.sendMessage(tab.id, { type, ...payload });
   }
 }
+
+// Page timeout → retry once, then skip with error (per corner-case spec).
+async function contentAction(url, type, payload = {}) {
+  let result = await contentActionOnce(url, type, payload);
+  if (result === null) result = await contentActionOnce(url, type, payload);
+  if (result === null) return { status: 'error', message: 'Automation tab did not load in time (after retry)' };
+  return result;
+}
+
+function randomDelayMs(minMinutes, maxMinutes) {
+  const minutes = minMinutes + Math.random() * (maxMinutes - minMinutes);
+  return Math.round(minutes * 60000);
+}
+
+const CONNECTION_JOB_TYPES = new Set(['send_connections', 'check_messageability']);
+const MESSAGE_JOB_TYPES = new Set(['send_messages', 'send_followups', 'send_prepared_message', 'send_prepared_inmail', 'send_inmail']);
 
 async function closeAutomationWindow() {
   const { tabId, winId } = await getSavedIds();
@@ -138,7 +154,7 @@ async function heartbeatOnce(cfg) {
     extension_version: EXT_VERSION,
     automation_paused: Boolean(cfg.paused),
   });
-  await saveConfig({ displayName: state.displayName || cfg.displayName, lastSync: new Date().toISOString(), lastError: '' });
+  await saveConfig({ displayName: state.displayName || cfg.displayName, lastSync: new Date().toISOString() });
   return state;
 }
 
@@ -223,27 +239,67 @@ async function runJob(job, cfg) {
     prospect_id: job.prospect_id,
     message_type: task.message_type,
   };
-  if (['error', 'failed_with_reason', 'session_expired', 'restricted', 'limit_reached', 'cannot_connect'].includes(final.status)) {
+  // Account restricted (LinkedIn checkpoint) → stop all automation immediately.
+  if (final.status === 'restricted') {
+    await saveConfig({ paused: true, lastError: 'Account restricted by LinkedIn - automation paused, manual review required' });
+  }
+  if (['error', 'failed_with_reason', 'session_expired', 'restricted', 'limit_reached', 'cannot_connect', 'not_found'].includes(final.status)) {
     await failJob(job.id, final.message || final.status, final);
   } else {
     await completeJob(job.id, final);
+    // Enforce randomized spacing between sends, per job type, so the NEXT
+    // tick's job-eligibility check (below) holds off even if more jobs are queued.
+    if (CONNECTION_JOB_TYPES.has(job.job_type) && ['sent', 'invitation_sent'].includes(final.status)) {
+      await saveConfig({ nextConnectionAllowedAt: Date.now() + randomDelayMs(3, 7) });
+    }
+    if (MESSAGE_JOB_TYPES.has(job.job_type) && final.status === 'message_sent') {
+      await saveConfig({ nextMessageAllowedAt: Date.now() + randomDelayMs(5, 10) });
+    }
   }
   await saveConfig({ currentJob: '', lastSync: new Date().toISOString(), lastError: '' });
 }
 
 // ── Main tick ─────────────────────────────────────────────────────────────────
+// Heartbeat and job-processing are independent: a heartbeat failure (network
+// blip, transient backend error) must NOT prevent job polling/execution from
+// running, and vice versa. Previously both lived in one try/catch, so any
+// heartbeat error silently skipped job processing for that entire tick.
+
+async function tickHeartbeat(cfg) {
+  try {
+    await heartbeatOnce(cfg);
+    return true;
+  } catch (err) {
+    await saveConfig({ lastError: `heartbeat: ${String(err.message || err)}` });
+    return false;
+  }
+}
+
+async function tickJobs(cfg) {
+  try {
+    const data = await pendingJobs(cfg.profileKey);
+    const jobs = data.jobs || [];
+    const now = Date.now();
+    const job = jobs.find(j => {
+      if (CONNECTION_JOB_TYPES.has(j.job_type)) return now >= (cfg.nextConnectionAllowedAt || 0);
+      if (MESSAGE_JOB_TYPES.has(j.job_type)) return now >= (cfg.nextMessageAllowedAt || 0);
+      return true;
+    });
+    if (job) await runJob(job, cfg);
+    return { ok: true, jobs: jobs.length };
+  } catch (err) {
+    await saveConfig({ lastError: `jobs: ${String(err.message || err)}`, currentJob: '' });
+    return { ok: false, error: String(err.message || err) };
+  }
+}
 
 export async function tick() {
   const cfg = await getConfig();
-  if (!cfg.paired || !cfg.profileKey || cfg.paused) return { ok: true, skipped: true };
-  try {
-    await heartbeatOnce(cfg);
-    const data = await pendingJobs(cfg.profileKey);
-    const job = (data.jobs || [])[0];
-    if (job) await runJob(job, cfg);
-    return { ok: true, jobs: data.jobs?.length || 0 };
-  } catch (err) {
-    await saveConfig({ lastError: String(err.message || err), currentJob: '' });
-    return { ok: false, error: String(err.message || err) };
-  }
+  if (!cfg.paired || !cfg.profileKey) return { ok: true, skipped: true };
+  // Even when paused, keep heartbeating so the dashboard shows "paused" rather
+  // than going stale/offline; just skip job execution.
+  const heartbeatOk = await tickHeartbeat(cfg);
+  if (cfg.paused) return { ok: true, skipped: true, heartbeatOk };
+  const jobsResult = await tickJobs(cfg);
+  return { ok: heartbeatOk && jobsResult.ok, ...jobsResult };
 }

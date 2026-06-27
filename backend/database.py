@@ -616,6 +616,20 @@ def _count_rows(table: str, **filters) -> int:
     return q.execute().count or 0
 
 
+def db_count_connections_sent_since(profile_key: str, since_date_iso: str) -> int:
+    """Count actual sent invitations (connection_sent_date is only ever set when a
+    real invitation went out), not job attempts. Used for both the daily and the
+    weekly send-limit checks instead of the unused/never-incremented daily_sent column."""
+    return (
+        supabase.table("prospects")
+        .select("id", count="exact")
+        .eq("assigned_account", profile_key)
+        .gte("connection_sent_date", since_date_iso)
+        .execute()
+        .count or 0
+    )
+
+
 def _profile_job_stats(profile_key: str) -> dict:
     jobs = (
         supabase.table("jobs")

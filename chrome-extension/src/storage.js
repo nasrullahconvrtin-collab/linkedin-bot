@@ -8,6 +8,8 @@ export const DEFAULTS = {
   lastSync: '',
   lastError: '',
   currentJob: '',
+  nextConnectionAllowedAt: 0,
+  nextMessageAllowedAt: 0,
 };
 
 export async function getConfig() {
