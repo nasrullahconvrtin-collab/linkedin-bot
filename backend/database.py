@@ -806,6 +806,7 @@ def db_upsert_profile(profile_key: str, updates: dict) -> dict | None:
             .execute()
         )
     except Exception as exc:
+        logger.error("db_upsert_profile: upsert failed for %s, falling back without runtime fields: %s", profile_key, exc)
         if not any(field in str(exc) for field in PROFILE_RUNTIME_FIELDS):
             raise
         fallback = _without_profile_runtime_fields(updates)
