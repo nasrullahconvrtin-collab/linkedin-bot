@@ -915,7 +915,13 @@ def db_extension_heartbeat(data: dict) -> dict | None:
         "linkedin_login_status": data.get("linkedin_login_status") or "unknown",
         "extension_version": data.get("extension_version"),
         "local_state": data.get("current_url") or data.get("local_state"),
-        "automation_paused": data.get("automation_paused"),
+        # Column is NOT NULL default false. data.get() returns None whenever the
+        # caller omits the field, and an explicit NULL in an upsert overrides the
+        # column default (the default only applies when the key is absent entirely),
+        # so this was violating the not-null constraint on every heartbeat that
+        # didn't pass automation_paused - poisoning the whole upsert and silently
+        # dropping every other runtime field via the exception fallback below.
+        "automation_paused": bool(data.get("automation_paused")),
     })
 
 
