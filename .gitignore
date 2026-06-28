@@ -49,6 +49,7 @@ test-results/
 storage_state*.json
 profile_*/
 profiles/
+python-executor/browser-profile/
 
 # Build artifacts
 build/
