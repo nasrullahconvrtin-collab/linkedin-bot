@@ -298,10 +298,26 @@ async function sendConnection(note = '') {
       || document.querySelector('textarea[name="message"]');
     if (box) fillContentEditable(box, note.slice(0, 300));
   }
-  if (clickButtonByText(['Send without a note', 'Send', 'Done'])) {
+  if (clickButtonByText(['Send without a note', 'Send invitation', 'Send', 'Done'])) {
     return { status: 'sent', message: 'Connection request sent' };
   }
+  // LinkedIn varies this button's exact wording across rollouts/locales
+  // ("Send", "Send invitation", "Send now", etc.) - fall back to a substring/
+  // aria-label match on whatever dialog is currently open instead of failing.
+  const dialog = document.querySelector('[role="dialog"], .artdeco-modal') || document;
+  const fallbackBtn = Array.from(dialog.querySelectorAll('button')).find(b => {
+    const label = (textOf(b) + ' ' + (b.getAttribute('aria-label') || '')).toLowerCase();
+    return /send/.test(label) && !/cancel|close|dismiss/.test(label);
+  });
+  if (fallbackBtn && isVisibleEl(fallbackBtn)) {
+    fallbackBtn.click();
+    return { status: 'sent', message: 'Connection request sent (fallback button match)' };
+  }
   return { status: 'error', message: 'Send button not found in connection dialog' };
+}
+
+function isVisibleEl(el) {
+  return Boolean(el && el.offsetParent !== null);
 }
 
 function fillContentEditable(box, text) {
