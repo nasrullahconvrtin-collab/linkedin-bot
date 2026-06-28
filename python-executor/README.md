@@ -67,6 +67,16 @@ POLL_INTERVAL_SECONDS=60
 ```
 `PROFILE_KEY` just needs to be unique per team member — e.g. `ali`, `fatima_account2`. Pick anything, lowercase, no spaces. **Each team member must use a different value here.**
 
+### Optional: AI fallback for when LinkedIn changes a button
+
+`find_button()` looks for buttons by their known text (e.g. "Connect", "Send"). When LinkedIn changes that wording, it fails — which is the most common reason a job error shows up.
+
+If you add an `ANTHROPIC_API_KEY` to `.env` (get one free to start at [console.anthropic.com](https://console.anthropic.com)), the script will fall back to asking an AI vision model to look at a screenshot and find the right button by *what it does*, not its exact wording. This only runs when the fast method fails, so it costs roughly $1-5/month total even across several profiles, not per-action.
+
+Every time it's used, it's logged to `ai_fallback_log.jsonl` (timestamp, what it was looking for, whether it succeeded) — useful for spotting recurring LinkedIn changes and hardening `find_button()`'s label lists permanently instead of relying on the AI call every time.
+
+Leave `ANTHROPIC_API_KEY` blank to skip this entirely — the script still works exactly as before, it just won't self-recover from a UI change (you'd need someone to update the code).
+
 ## Running it
 
 ```

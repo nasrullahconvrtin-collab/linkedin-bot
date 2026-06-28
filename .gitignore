@@ -50,6 +50,7 @@ storage_state*.json
 profile_*/
 profiles/
 python-executor/browser-profile/
+python-executor/ai_fallback_log.jsonl
 
 # Build artifacts
 build/

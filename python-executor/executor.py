@@ -16,6 +16,8 @@ Usage:
 """
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import os
 import random
@@ -36,6 +38,14 @@ POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
 EXTENSION_ID = f"py_{PROFILE_KEY}"
 EXTENSION_VERSION = "1.0.0-python"
 BROWSER_PROFILE_DIR = Path(__file__).parent / "browser-profile"
+
+# AI vision fallback - only called when the fast hardcoded button matching
+# (find_button) fails, e.g. LinkedIn changed a button's wording/layout. See
+# ai_locate_click() below. Optional: leave ANTHROPIC_API_KEY unset to disable
+# this entirely and just fail like before.
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+AI_FALLBACK_LOG = Path(__file__).parent / "ai_fallback_log.jsonl"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("linkedflow_executor")
@@ -202,6 +212,107 @@ def click_button(page: Page, labels: list[str] | str, scope=None, exclude: list[
         return False
 
 
+def _log_ai_fallback(goal: str, page_url: str, outcome: str, detail: str = "") -> None:
+    """Append-only log of every time the AI fallback was used, so these can be
+    reviewed later and turned into permanent entries in find_button()'s label
+    lists - keeping the fast/free path as the primary one over time instead
+    of leaning on the AI call forever for the same recurring case."""
+    try:
+        with open(AI_FALLBACK_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "goal": goal,
+                "url": page_url,
+                "outcome": outcome,
+                "detail": detail,
+            }) + "\n")
+    except Exception as exc:
+        logger.error("Could not write AI fallback log: %s", exc)
+
+
+def ai_locate_click(page: Page, goal: str) -> bool:
+    """Last-resort fallback when find_button()/click_button() can't find what
+    they're looking for by text/aria-label matching. Takes a screenshot of
+    the page as it actually looks right now and asks a vision model to find
+    and report click coordinates for whatever accomplishes `goal` - this
+    doesn't rely on knowing LinkedIn's current button wording in advance the
+    way the hardcoded matching does, so it keeps working even after LinkedIn
+    changes something, at the cost of an API call (only happens on failure,
+    not on every action - see README for the cost rationale)."""
+    if not ANTHROPIC_API_KEY:
+        return False
+
+    try:
+        screenshot = page.screenshot(full_page=False)
+    except Exception as exc:
+        logger.error("AI fallback: could not capture screenshot: %s", exc)
+        return False
+
+    viewport = page.viewport_size or {"width": 1280, "height": 900}
+    b64 = base64.b64encode(screenshot).decode("ascii")
+    prompt = (
+        f"This is a screenshot of a LinkedIn page, {viewport['width']}x{viewport['height']} pixels. "
+        f"Goal: {goal}\n\n"
+        "Find the single clickable element (button/link) that best accomplishes this goal. "
+        "Respond with ONLY a JSON object, no other text: "
+        '{"found": true, "x": <pixel x center of the element>, "y": <pixel y center>} '
+        'or {"found": false, "reason": "<short reason>"} if nothing on the page accomplishes the goal.'
+    )
+
+    try:
+        res = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": ANTHROPIC_MODEL,
+                "max_tokens": 200,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": b64}},
+                        {"type": "text", "text": prompt},
+                    ],
+                }],
+            },
+            timeout=30,
+        )
+        res.raise_for_status()
+        text = res.json()["content"][0]["text"].strip()
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)  # strip markdown fences if present
+        decision = json.loads(text)
+    except Exception as exc:
+        logger.error("AI fallback request failed: %s", exc)
+        _log_ai_fallback(goal, page.url, "error", str(exc))
+        return False
+
+    if not decision.get("found"):
+        logger.info("AI fallback: model couldn't find it either - %s", decision.get("reason", ""))
+        _log_ai_fallback(goal, page.url, "not_found", decision.get("reason", ""))
+        return False
+
+    try:
+        page.mouse.click(decision["x"], decision["y"])
+        logger.info("AI fallback succeeded for goal=%r at (%s, %s)", goal, decision["x"], decision["y"])
+        _log_ai_fallback(goal, page.url, "clicked", f"({decision['x']}, {decision['y']})")
+        return True
+    except Exception as exc:
+        logger.error("AI fallback: click failed: %s", exc)
+        _log_ai_fallback(goal, page.url, "click_error", str(exc))
+        return False
+
+
+def click_with_ai_fallback(page: Page, labels: list[str] | str, goal: str, scope=None, exclude: list[str] | None = None) -> bool:
+    """Try the fast hardcoded match first; only pay for an AI call if it fails."""
+    if click_button(page, labels, scope, exclude):
+        return True
+    logger.info("Hardcoded match failed for %r - trying AI fallback (goal: %s)", labels, goal)
+    return ai_locate_click(page, goal)
+
+
 def visible_button_texts(page: Page, limit: int = 15) -> list[str]:
     out = []
     try:
@@ -323,6 +434,9 @@ def send_connection(page: Page, note: str = "") -> dict:
         clicked = click_button(page, "Connect", scope=scope, exclude=["disconnect"])
 
     if not clicked:
+        clicked = ai_locate_click(page, "Click the button that sends a connection/invite request to this LinkedIn profile (may be labeled Connect, or hidden in a 'More' menu)")
+
+    if not clicked:
         return {"status": "cannot_connect", "message": f"Connect button not found. Buttons: {visible_button_texts(page)}"}
     page.wait_for_timeout(1200)
 
@@ -334,7 +448,9 @@ def send_connection(page: Page, note: str = "") -> dict:
 
     dialog = page.locator('[role="dialog"], .artdeco-modal').first
     scope = dialog if dialog.count() else page
-    if click_button(page, ["Send without a note", "Send invitation", "Send", "Done", "Send now"], scope=scope, exclude=["cancel", "close", "dismiss"]):
+    if click_with_ai_fallback(page, ["Send without a note", "Send invitation", "Send", "Done", "Send now"],
+                               "Click the button that confirms/sends the connection invitation in this open dialog",
+                               scope=scope, exclude=["cancel", "close", "dismiss"]):
         return {"status": "sent", "message": "Connection request sent"}
     return {"status": "error", "message": f"Send button not found in connection dialog. Buttons: {visible_button_texts(page)}"}
 
@@ -350,7 +466,7 @@ def send_prepared_message(page: Page, message: str) -> dict:
     if not click_button(page, "Message"):
         if click_button(page, "More"):
             page.wait_for_timeout(1200)
-        if not click_button(page, "Message"):
+        if not click_button(page, "Message") and not ai_locate_click(page, "Click the button that opens a message/chat composer to this LinkedIn profile"):
             return {"status": "failed_with_reason", "message": f"Message button not found. Buttons: {visible_button_texts(page)}"}
 
     page.wait_for_timeout(1500)
@@ -362,7 +478,8 @@ def send_prepared_message(page: Page, message: str) -> dict:
 
     composer = box.locator('xpath=ancestor::*[@role="dialog" or contains(@class,"msg-form")][1]')
     scope = composer if composer.count() else page
-    if not click_button(page, "Send", scope=scope, exclude=["cancel", "close", "dismiss"]):
+    if not click_with_ai_fallback(page, "Send", "Click the button that sends the typed message in the currently open message composer",
+                                   scope=scope, exclude=["cancel", "close", "dismiss"]):
         return {"status": "failed_with_reason", "message": "Send button not found"}
     return {"status": "message_sent", "message": "Message sent successfully"}
 
