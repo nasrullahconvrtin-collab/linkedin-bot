@@ -282,8 +282,21 @@ async function sendConnection(note = '') {
 
   let clicked = clickButtonByText('Connect');
   if (!clicked && clickButtonByText('More')) {
-    await sleep(900);
+    await sleep(1200); // dropdown render can be slower than the 900ms we used to wait
     clicked = clickLeafByText('Connect');
+    if (!clicked) {
+      // LinkedIn's "More" dropdown item is often not an exact "Connect" text
+      // match (icon + label markup, extra whitespace) - same fragility we
+      // already hit on the Send button. Fall back to substring/aria-label
+      // matching on whatever menu is currently open.
+      const menu = document.querySelector('[role="menu"], .artdeco-dropdown__content') || document;
+      const item = Array.from(menu.querySelectorAll('div[role="button"], button, a, span')).find(el => {
+        if (el.offsetParent === null) return false;
+        const label = (textOf(el) + ' ' + (el.getAttribute('aria-label') || '')).toLowerCase();
+        return /connect/.test(label) && !/disconnect/.test(label);
+      });
+      if (item) { item.click(); clicked = true; }
+    }
   }
   if (!clicked) return { status: 'cannot_connect', message: `Connect button not found. Header buttons: [${profileHeaderButtons().join(', ')}]` };
   await sleep(1200);
