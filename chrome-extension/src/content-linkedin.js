@@ -259,7 +259,7 @@ async function detectMessageability() {
     }
   }
   if (hasConnectButton()) return { status: 'not_messageable', message: 'No message path found; invitation fallback can run' };
-  return { status: 'not_messageable', message: 'No message, InMail, or Connect action found' };
+  return { status: 'not_messageable', message: `No message, InMail, or Connect action found. Header buttons: [${profileHeaderButtons().join(', ')}]` };
 }
 
 async function sendConnection(note = '') {
@@ -285,7 +285,7 @@ async function sendConnection(note = '') {
     await sleep(900);
     clicked = clickLeafByText('Connect');
   }
-  if (!clicked) return { status: 'cannot_connect', message: 'Connect button not found' };
+  if (!clicked) return { status: 'cannot_connect', message: `Connect button not found. Header buttons: [${profileHeaderButtons().join(', ')}]` };
   await sleep(1200);
 
   if (note && clickButtonByText('Add a note')) {
@@ -313,7 +313,8 @@ async function sendConnection(note = '') {
     fallbackBtn.click();
     return { status: 'sent', message: 'Connection request sent (fallback button match)' };
   }
-  return { status: 'error', message: 'Send button not found in connection dialog' };
+  const dialogButtons = Array.from(dialog.querySelectorAll('button')).map(textOf);
+  return { status: 'error', message: `Send button not found in connection dialog. Dialog buttons: [${dialogButtons.join(', ')}]` };
 }
 
 function isVisibleEl(el) {
