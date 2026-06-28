@@ -134,22 +134,44 @@ function textOf(el) {
   return (el?.textContent || '').replace(/\s+/g, ' ').trim();
 }
 
-function clickButtonByText(labels) {
-  const wanted = Array.isArray(labels) ? labels : [labels];
-  const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
-  const btn = buttons.find(b => wanted.includes(textOf(b)));
-  if (btn) {
-    btn.click();
-    return true;
-  }
-  return false;
+function isVisibleEl(el) {
+  return Boolean(el && el.offsetParent !== null);
 }
 
-function clickLeafByText(label) {
-  const nodes = Array.from(document.querySelectorAll('button, a, div[role="button"], span'));
-  const node = nodes.find(el => textOf(el) === label && el.offsetParent !== null);
-  if (node) {
-    node.click();
+/**
+ * Single, consistent multi-strategy clickable-element finder used by every
+ * action in this file. LinkedIn's button markup/wording shifts across
+ * rollouts and locales (exact text today, "Send invitation" tomorrow, an
+ * icon-only button with only an aria-label next), so every prior ad-hoc
+ * exact-match-then-bespoke-fallback we wrote broke at least once. This
+ * replaces all of that with one ordered strategy:
+ *   1. Exact visible text match (cheapest, most precise - tried first).
+ *   2. Substring match against text + aria-label (case-insensitive),
+ *      skipping anything matching `exclude` (e.g. "Cancel", "Disconnect").
+ * `root` scopes the search (e.g. to an open dropdown/dialog) instead of the
+ * whole document, which both narrows false positives and is required once a
+ * menu/modal is open since duplicate labels can exist elsewhere on the page.
+ */
+function findActionable(labels, { root = document, exclude = [] } = {}) {
+  const wanted = Array.isArray(labels) ? labels : [labels];
+  const candidates = Array.from(root.querySelectorAll('button, [role="button"], a, span, div[role="button"]'))
+    .filter(isVisibleEl);
+
+  const exact = candidates.find(el => wanted.includes(textOf(el)));
+  if (exact) return exact;
+
+  const wantedLower = wanted.map(w => w.toLowerCase());
+  return candidates.find(el => {
+    const label = (textOf(el) + ' ' + (el.getAttribute('aria-label') || '')).toLowerCase();
+    if (exclude.some(x => label.includes(x))) return false;
+    return wantedLower.some(w => label.includes(w));
+  }) || null;
+}
+
+function clickActionable(labels, opts) {
+  const el = findActionable(labels, opts);
+  if (el) {
+    el.click();
     return true;
   }
   return false;
@@ -240,10 +262,10 @@ async function detectMessageability() {
   if (hasPendingInvite()) return { status: 'pending', message: 'Connection request is already pending' };
 
   // Try Message button (may be hidden under "More" dropdown)
-  if (!clickButtonByText('Message')) {
-    if (clickButtonByText('More')) {
-      await sleep(800);
-      clickButtonByText('Message');
+  if (!clickActionable('Message')) {
+    if (clickActionable('More')) {
+      await sleep(1200);
+      clickActionable('Message');
     }
   }
   if (document.querySelector('[contenteditable="true"], div[role="textbox"]')) {
@@ -251,7 +273,7 @@ async function detectMessageability() {
     return { status: 'normal_message_available', message: 'Normal LinkedIn message is available' };
   }
   // Try clicking Message and waiting for the composer to appear
-  if (clickButtonByText('Message')) {
+  if (clickActionable('Message')) {
     await sleep(1500);
     if (hasInmailComposer()) return { status: 'inmail_available', message: 'InMail composer is available' };
     if (document.querySelector('[contenteditable="true"], div[role="textbox"]')) {
@@ -280,28 +302,16 @@ async function sendConnection(note = '') {
   if (allButtons.includes('Message')) return { status: 'connected', message: 'Already connected (Message button found)' };
   if (allButtons.includes('Following')) return { status: 'connected', message: 'Already following/connected' };
 
-  let clicked = clickButtonByText('Connect');
-  if (!clicked && clickButtonByText('More')) {
-    await sleep(1200); // dropdown render can be slower than the 900ms we used to wait
-    clicked = clickLeafByText('Connect');
-    if (!clicked) {
-      // LinkedIn's "More" dropdown item is often not an exact "Connect" text
-      // match (icon + label markup, extra whitespace) - same fragility we
-      // already hit on the Send button. Fall back to substring/aria-label
-      // matching on whatever menu is currently open.
-      const menu = document.querySelector('[role="menu"], .artdeco-dropdown__content') || document;
-      const item = Array.from(menu.querySelectorAll('div[role="button"], button, a, span')).find(el => {
-        if (el.offsetParent === null) return false;
-        const label = (textOf(el) + ' ' + (el.getAttribute('aria-label') || '')).toLowerCase();
-        return /connect/.test(label) && !/disconnect/.test(label);
-      });
-      if (item) { item.click(); clicked = true; }
-    }
+  let clicked = clickActionable('Connect');
+  if (!clicked && clickActionable('More')) {
+    await sleep(1200); // dropdown render can be slower than a quick poll catches
+    const menu = document.querySelector('[role="menu"], .artdeco-dropdown__content') || document;
+    clicked = clickActionable('Connect', { root: menu, exclude: ['disconnect'] });
   }
   if (!clicked) return { status: 'cannot_connect', message: `Connect button not found. Header buttons: [${profileHeaderButtons().join(', ')}]` };
   await sleep(1200);
 
-  if (note && clickButtonByText('Add a note')) {
+  if (note && clickActionable('Add a note')) {
     await sleep(700);
     // LinkedIn's connection dialog uses a React-controlled textarea; setting .value
     // directly doesn't trigger React's synthetic event system, so the note is
@@ -311,27 +321,12 @@ async function sendConnection(note = '') {
       || document.querySelector('textarea[name="message"]');
     if (box) fillContentEditable(box, note.slice(0, 300));
   }
-  if (clickButtonByText(['Send without a note', 'Send invitation', 'Send', 'Done'])) {
-    return { status: 'sent', message: 'Connection request sent' };
-  }
-  // LinkedIn varies this button's exact wording across rollouts/locales
-  // ("Send", "Send invitation", "Send now", etc.) - fall back to a substring/
-  // aria-label match on whatever dialog is currently open instead of failing.
   const dialog = document.querySelector('[role="dialog"], .artdeco-modal') || document;
-  const fallbackBtn = Array.from(dialog.querySelectorAll('button')).find(b => {
-    const label = (textOf(b) + ' ' + (b.getAttribute('aria-label') || '')).toLowerCase();
-    return /send/.test(label) && !/cancel|close|dismiss/.test(label);
-  });
-  if (fallbackBtn && isVisibleEl(fallbackBtn)) {
-    fallbackBtn.click();
-    return { status: 'sent', message: 'Connection request sent (fallback button match)' };
+  if (clickActionable(['Send without a note', 'Send invitation', 'Send', 'Done', 'Send now'], { root: dialog, exclude: ['cancel', 'close', 'dismiss'] })) {
+    return { status: 'sent', message: 'Connection request sent' };
   }
   const dialogButtons = Array.from(dialog.querySelectorAll('button')).map(textOf);
   return { status: 'error', message: `Send button not found in connection dialog. Dialog buttons: [${dialogButtons.join(', ')}]` };
-}
-
-function isVisibleEl(el) {
-  return Boolean(el && el.offsetParent !== null);
 }
 
 function fillContentEditable(box, text) {
@@ -359,13 +354,13 @@ async function sendPreparedMessage(message) {
   await ensureTop();
   if (!message) return { status: 'failed_with_reason', message: 'Message text is empty' };
   { const blocked = detectBlockingState(); if (blocked) return blocked; }
-  if (!clickButtonByText('Message')) {
+  if (!clickActionable('Message')) {
     // Message can be hidden under the "More" actions dropdown
-    if (clickButtonByText('More')) {
-      await sleep(800);
+    if (clickActionable('More')) {
+      await sleep(1200);
     }
-    if (!clickButtonByText('Message')) {
-      return { status: 'failed_with_reason', message: 'Message button not found' };
+    if (!clickActionable('Message')) {
+      return { status: 'failed_with_reason', message: `Message button not found. Header buttons: [${profileHeaderButtons().join(', ')}]` };
     }
   }
   await sleep(1500);
@@ -373,13 +368,10 @@ async function sendPreparedMessage(message) {
   if (!box) return { status: 'failed_with_reason', message: 'Message input not found' };
   fillContentEditable(box, message);
   await sleep(800);
-  const send = Array.from(document.querySelectorAll('button')).find(btn => {
-    const txt = textOf(btn);
-    const aria = btn.getAttribute('aria-label') || '';
-    return txt === 'Send' || /send/i.test(aria);
-  });
-  if (!send) return { status: 'failed_with_reason', message: 'Send button not found' };
-  send.click();
+  const composer = box.closest('[role="dialog"], .msg-form, form') || document;
+  if (!clickActionable('Send', { root: composer, exclude: ['cancel', 'close', 'dismiss'] })) {
+    return { status: 'failed_with_reason', message: 'Send button not found' };
+  }
   return { status: 'message_sent', message: 'Message sent successfully' };
 }
 
@@ -387,7 +379,7 @@ async function sendPreparedInmail(subject, message) {
   await ensureTop();
   if (!subject || !message) return { status: 'failed_with_reason', message: 'Subject or message is empty' };
   { const blocked = detectBlockingState(); if (blocked) return blocked; }
-  clickButtonByText('Message');
+  clickActionable('Message');
   await sleep(1500);
   const subjectInput = document.querySelector('input[name="subject"], input[placeholder*="Subject" i]');
   const body = document.querySelector('textarea[name="message"], div[role="textbox"], [contenteditable="true"]');
@@ -396,9 +388,10 @@ async function sendPreparedInmail(subject, message) {
   subjectInput.dispatchEvent(new Event('input', { bubbles: true }));
   fillContentEditable(body, message);
   await sleep(800);
-  const send = Array.from(document.querySelectorAll('button')).find(btn => textOf(btn) === 'Send' || /send/i.test(btn.getAttribute('aria-label') || ''));
-  if (!send) return { status: 'failed_with_reason', message: 'InMail send button not found' };
-  send.click();
+  const composer = body.closest('[role="dialog"], .msg-form, form') || document;
+  if (!clickActionable('Send', { root: composer, exclude: ['cancel', 'close', 'dismiss'] })) {
+    return { status: 'failed_with_reason', message: 'InMail send button not found' };
+  }
   return { status: 'inmail_sent', message: 'InMail sent successfully' };
 }
 
@@ -429,15 +422,16 @@ async function followProfile() {
   { const blocked = detectBlockingState(); if (blocked) return blocked; }
   if (isAlreadyFollowing()) return { status: 'already_following', message: 'Already following this profile' };
 
-  let clicked = clickButtonByText('Follow');
+  let clicked = clickActionable('Follow');
   if (!clicked) {
     // Sometimes Follow is tucked under the "More" overflow menu
-    if (clickButtonByText('More')) {
-      await sleep(900);
-      clicked = clickLeafByText('Follow');
+    if (clickActionable('More')) {
+      await sleep(1200);
+      const menu = document.querySelector('[role="menu"], .artdeco-dropdown__content') || document;
+      clicked = clickActionable('Follow', { root: menu, exclude: ['unfollow'] });
     }
   }
-  if (!clicked) return { status: 'not_available', message: 'Follow action not found on this profile' };
+  if (!clicked) return { status: 'not_available', message: `Follow action not found on this profile. Header buttons: [${profileHeaderButtons().join(', ')}]` };
   await sleep(1000);
   if (isAlreadyFollowing()) return { status: 'followed', message: 'Now following profile' };
   return { status: 'followed', message: 'Follow clicked' };
@@ -499,7 +493,7 @@ async function checkConnectionStatus() {
 async function checkReply() {
   await ensureTop();
   { const blocked = detectBlockingState(); if (blocked) return blocked; }
-  if (!clickButtonByText('Message')) {
+  if (!clickActionable('Message')) {
     return { status: 'no_reply', message: 'Could not open the message thread' };
   }
   await sleep(1500);
