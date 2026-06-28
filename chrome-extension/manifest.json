@@ -18,7 +18,7 @@
       "run_at": "document_idle"
     }
   ],
-  "permissions": ["alarms", "storage", "tabs", "scripting", "clipboardWrite", "windows"],
+  "permissions": ["alarms", "storage", "tabs", "scripting", "clipboardWrite", "windows", "notifications"],
   "host_permissions": [
     "https://www.linkedin.com/*",
     "https://linkedin-bot-backend-production.up.railway.app/*"

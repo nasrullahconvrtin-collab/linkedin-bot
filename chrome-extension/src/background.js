@@ -5,6 +5,38 @@ const EXT_VERSION = '0.1.0';
 const STORAGE_TAB_KEY  = 'lf_auto_tab_id';
 const STORAGE_WIN_KEY  = 'lf_auto_win_id';
 
+// ── Desktop notifications ──────────────────────────────────────────────────────
+// Deduped per "kind" so a stuck job or a network blip doesn't spam a
+// notification every tick - only fires again once the kind clears or a
+// cooldown passes.
+const NOTIFY_COOLDOWN_MS = 30 * 60 * 1000; // 30 min
+let lastNotifiedAt = {};
+
+// Inline data-URI icon - the extension ships no icon assets, and a data URL
+// avoids adding a binary file just for notifications.create()'s required iconUrl.
+const NOTIFY_ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAF0lEQVR4nGNITvtIEmIY1TCq4eOw1QAAbKy6EKII1UQAAAAASUVORK5CYII=';
+
+function notify(kind, title, message) {
+  const now = Date.now();
+  if (lastNotifiedAt[kind] && now - lastNotifiedAt[kind] < NOTIFY_COOLDOWN_MS) return;
+  lastNotifiedAt[kind] = now;
+  try {
+    chrome.notifications.create(`linkedflow_${kind}_${now}`, {
+      type: 'basic',
+      iconUrl: NOTIFY_ICON,
+      title,
+      message,
+      priority: 2,
+    });
+  } catch (err) {
+    console.error('notify failed', err);
+  }
+}
+
+function clearNotifyCooldown(kind) {
+  delete lastNotifiedAt[kind];
+}
+
 // ── Dedicated invisible automation window + tab ───────────────────────────────
 // We create ONE minimized Chrome window that never appears in the user's
 // main window tab bar. The service worker may restart (MV3), so we persist
@@ -242,9 +274,17 @@ async function runJob(job, cfg) {
   // Account restricted (LinkedIn checkpoint) → stop all automation immediately.
   if (final.status === 'restricted') {
     await saveConfig({ paused: true, lastError: 'Account restricted by LinkedIn - automation paused, manual review required' });
+    notify('restricted', 'LinkedFlow paused - account restricted', 'LinkedIn flagged a checkpoint. Automation stopped; review the account manually before resuming.');
+  }
+  if (final.status === 'session_expired') {
+    notify('session_expired', 'LinkedFlow needs you to log in', 'The LinkedIn session expired - log back in on linkedin.com so automation can resume.');
   }
   if (['error', 'failed_with_reason', 'session_expired', 'restricted', 'limit_reached', 'cannot_connect', 'not_found'].includes(final.status)) {
-    await failJob(job.id, final.message || final.status, final);
+    const failedJob = await failJob(job.id, final.message || final.status, final);
+    if (failedJob?.status === 'failed') {
+      notify(`job_failed_${job.id}`, 'LinkedFlow job permanently failed',
+        `${job.job_type} for ${job.payload?.linkedin_url || 'a prospect'} failed after ${failedJob.retry_count} retries: ${final.message || final.status}`);
+    }
   } else {
     await completeJob(job.id, final);
     // Enforce randomized spacing between sends, per job type, so the NEXT
@@ -265,12 +305,24 @@ async function runJob(job, cfg) {
 // running, and vice versa. Previously both lived in one try/catch, so any
 // heartbeat error silently skipped job processing for that entire tick.
 
+let consecutiveHeartbeatFailures = 0;
+const HEARTBEAT_FAILURE_ALERT_THRESHOLD = 3; // ~3 minutes of failures before alerting
+
 async function tickHeartbeat(cfg) {
   try {
     await heartbeatOnce(cfg);
+    if (consecutiveHeartbeatFailures >= HEARTBEAT_FAILURE_ALERT_THRESHOLD) {
+      clearNotifyCooldown('heartbeat_down');
+    }
+    consecutiveHeartbeatFailures = 0;
     return true;
   } catch (err) {
+    consecutiveHeartbeatFailures += 1;
     await saveConfig({ lastError: `heartbeat: ${String(err.message || err)}` });
+    if (consecutiveHeartbeatFailures >= HEARTBEAT_FAILURE_ALERT_THRESHOLD) {
+      notify('heartbeat_down', 'LinkedFlow can\'t reach the backend',
+        `${consecutiveHeartbeatFailures} heartbeats in a row have failed: ${String(err.message || err)}`);
+    }
     return false;
   }
 }

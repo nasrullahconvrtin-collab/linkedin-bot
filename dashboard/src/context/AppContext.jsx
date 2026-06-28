@@ -1,10 +1,14 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import {
-  getStats, getCampaigns, getProfiles, getProspects,
+  getStats, getCampaigns, getProfiles, getProspects, getJobs,
   runConnections, checkAcceptances, runMessages, runFollowups,
   getSchedules,
 } from '../services/api';
+
+// A profile that hasn't heartbeated in this long is treated as stale/offline
+// even if extension_status still says "online" (e.g. crashed mid-tick).
+const HEARTBEAT_STALE_MS = 3 * 60 * 1000;
 
 const Ctx = createContext(null);
 
@@ -85,6 +89,7 @@ export function AppProvider({ children }) {
   const [campaigns,     setCampaigns]     = useState([]);
   const [profiles,      setProfiles]      = useState([]);
   const [unreadReplies, setUnreadReplies] = useState(0);
+  const [recentFailedJobs, setRecentFailedJobs] = useState([]);
   const [theme,         setThemeState]     = useState(() => localStorage.getItem('lf_theme') || 'dark');
 
   const setTheme = useCallback((nextTheme) => {
@@ -112,13 +117,22 @@ export function AppProvider({ children }) {
     } catch {}
   }, []);
 
+  const fetchFailedJobs = useCallback(async () => {
+    try {
+      const d = await getJobs({ status: 'failed', limit: 10 });
+      const since = Date.now() - 24 * 60 * 60 * 1000;
+      setRecentFailedJobs((d.jobs || []).filter(j => new Date(j.failed_at || j.updated_at).getTime() > since));
+    } catch {}
+  }, []);
+
   // Initial data load + polling
   useEffect(() => {
-    fetchStats(); fetchCampaigns(); fetchProfiles(); fetchReplies();
+    fetchStats(); fetchCampaigns(); fetchProfiles(); fetchReplies(); fetchFailedJobs();
     const s = setInterval(fetchStats,   60_000);
     const p = setInterval(fetchProfiles, 30_000);
     const r = setInterval(fetchReplies, 30_000);
-    return () => { clearInterval(s); clearInterval(p); clearInterval(r); };
+    const f = setInterval(fetchFailedJobs, 60_000);
+    return () => { clearInterval(s); clearInterval(p); clearInterval(r); clearInterval(f); };
   }, []);
 
   // Auto-start overdue tasks when dashboard loads
@@ -133,9 +147,29 @@ export function AppProvider({ children }) {
 
   const executorConnected = profiles.some(p => p.session_active);
 
+  const staleProfiles = profiles.filter(p => {
+    if (p.enabled === false) return false;
+    if (!p.last_extension_heartbeat) return true;
+    return Date.now() - new Date(p.last_extension_heartbeat).getTime() > HEARTBEAT_STALE_MS;
+  });
+
+  const alerts = [
+    ...staleProfiles.map(p => ({
+      id: `stale-${p.profile_key}`,
+      severity: 'error',
+      message: `${p.display_name || p.profile_key} hasn't checked in - extension may be offline, logged out, or stuck.`,
+    })),
+    ...recentFailedJobs.map(j => ({
+      id: `failed-${j.id}`,
+      severity: 'warning',
+      message: `${j.job_type} permanently failed after ${j.retry_count} retries: ${j.error_message || 'unknown error'}`,
+    })),
+  ];
+
   return (
     <Ctx.Provider value={{
       stats, campaigns, profiles, wsConnected: executorConnected, unreadReplies, theme, setTheme,
+      alerts, recentFailedJobs,
       fetchStats, fetchCampaigns, fetchProfiles,
     }}>
       {children}
