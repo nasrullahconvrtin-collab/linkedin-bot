@@ -15,7 +15,7 @@ import {
 // Strip BOM that Windows UTF-8 can inject into env vars
 const _rawApiUrl = import.meta.env.VITE_API_URL || '';
 const API_URL = _rawApiUrl.replace(/^﻿/, '').trim()
-  || 'https://linkedin-bot-backend-production.up.railway.app';
+  || 'http://localhost:8000';
 
 // ── Default schedule ─────────────────────────────────────────────────────────
 const SCHEDULE_DEFAULTS = [

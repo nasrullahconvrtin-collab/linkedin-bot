@@ -3,7 +3,7 @@ import axios from 'axios';
 // Strip BOM (U+FEFF) that Windows UTF-8 env files can inject into the value
 const _raw = import.meta.env.VITE_API_URL || '';
 const BASE = _raw.replace(/^﻿/, '').trim()
-  || 'https://linkedin-bot-backend-production.up.railway.app';
+  || 'http://localhost:8000';
 
 const api = axios.create({
   baseURL: BASE,

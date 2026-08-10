@@ -1,5 +1,5 @@
 export const DEFAULTS = {
-  backendUrl: 'https://linkedin-bot-backend-production.up.railway.app',
+  backendUrl: 'http://localhost:8000',
   profileKey: '',
   extensionId: '',
   displayName: '',

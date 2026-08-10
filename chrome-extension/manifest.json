@@ -21,6 +21,7 @@
   "permissions": ["alarms", "storage", "tabs", "scripting", "clipboardWrite", "windows", "notifications"],
   "host_permissions": [
     "https://www.linkedin.com/*",
-    "https://linkedin-bot-backend-production.up.railway.app/*"
+    "http://localhost/*",
+    "https://*.vercel.app/*"
   ]
 }
