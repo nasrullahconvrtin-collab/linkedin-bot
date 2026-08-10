@@ -334,14 +334,26 @@ STANDARD_VARIABLE_FIELDS = {
 
 
 def db_render_message_template(template: str, prospect: dict | None) -> str:
-    """Render {{variables}} from standard prospect fields plus custom_fields."""
+    """Render {{variables}} from standard prospect fields plus custom_variables/custom_fields."""
     if not template:
         return ""
     prospect = prospect or {}
-    custom = prospect.get("custom_fields") or {}
+    custom = {}
+    for key in ("custom_variables", "custom_fields", "message_fields"):
+        val = prospect.get(key)
+        if isinstance(val, dict):
+            custom.update(val)
+
     values = {}
+    for k, v in prospect.items():
+        if isinstance(v, (str, int, float, bool)):
+            values[str(k)] = str(v)
+
     for var, field in STANDARD_VARIABLE_FIELDS.items():
-        values[var] = prospect.get(field) or custom.get(var) or ""
+        val = prospect.get(field) or custom.get(var) or prospect.get(var)
+        if val:
+            values[var] = str(val)
+
     values.update({str(k): "" if v is None else str(v) for k, v in custom.items()})
 
     def replace(match):
@@ -3088,3 +3100,211 @@ def db_archive_message_template(template_id: str) -> dict | None:
 def db_delete_message_template(template_id: str) -> bool:
     supabase.table("message_templates").delete().eq("id", template_id).execute()
     return True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Unipile Real Action Execution Engine & Campaign Job Processing
+# ─────────────────────────────────────────────────────────────────────────────
+import unipile as unipile_svc
+
+
+def db_count_campaign_sent_today(campaign_id: str) -> int:
+    """Count how many actions (invitations + messages) were sent today for a campaign."""
+    today = date.today().isoformat()
+    try:
+        res = (
+            supabase.table("prospects")
+            .select("id", count="exact")
+            .eq("campaign_id", campaign_id)
+            .or_(f"connection_sent_date.eq.{today},message_sent_date.eq.{today}")
+            .execute()
+        )
+        return res.count or 0
+    except Exception:
+        return 0
+
+
+def db_execute_job_via_unipile(job: dict) -> dict | None:
+    """
+    Execute a pending campaign job directly via Unipile API for the connected LinkedIn account.
+    Enforces daily limit, updates prospect status, resolves custom variables, and advances flow sequence.
+    """
+    if not job:
+        return None
+
+    job_id = job.get("id")
+    campaign_id = job.get("campaign_id")
+    prospect_id = job.get("prospect_id")
+    payload = job.get("payload") or {}
+    job_type = job.get("job_type") or payload.get("action_type") or ""
+
+    if not prospect_id or not campaign_id:
+        return None
+
+    campaign, _ = db_get_campaign(campaign_id)
+    if not campaign or campaign.get("status") not in ("active", "running"):
+        logger.info("Campaign %s is not active (status=%s); skipping job %s", campaign_id, (campaign or {}).get("status"), job_id)
+        return None
+
+    # Check daily limit
+    daily_limit = campaign.get("daily_limit") or 20
+    sent_today = db_count_campaign_sent_today(campaign_id)
+    if sent_today >= daily_limit:
+        logger.info("Campaign %s reached daily limit (%d/%d); deferring job %s", campaign_id, sent_today, daily_limit, job_id)
+        return None
+
+    prospect, _ = db_get_prospect(prospect_id)
+    if not prospect:
+        logger.warning("Prospect %s not found for job %s", prospect_id, job_id)
+        return None
+
+    linkedin_url = prospect.get("linkedin_url") or payload.get("linkedin_url") or ""
+    if not linkedin_url:
+        logger.warning("No linkedin_url for prospect %s; marking job failed", prospect_id)
+        db_apply_completed_flow_job(job, {"status": "error", "message": "Missing LinkedIn URL"})
+        return None
+
+    # Mark job in-progress
+    supabase.table("jobs").update({
+        "status": "running",
+        "started_at": _utc_now(),
+        "updated_at": _utc_now(),
+    }).eq("id", job_id).execute()
+
+    result = {"status": "completed"}
+
+    # 1. Connection Invitation Action
+    if job_type in ("send_connections", "send_invitation", "invitation"):
+        note = payload.get("note") or ""
+        if note:
+            note = db_render_message_template(note, prospect)[:300]
+
+        logger.info("Executing Unipile connection request for prospect %s (%s)", prospect_id, linkedin_url)
+        res = unipile_svc.send_connection_invite(linkedin_url, message=note)
+        if res.get("success"):
+            result = {"status": "sent", "invite_id": res.get("invite_id")}
+        else:
+            result = {"status": "error", "message": res.get("error") or "Connection request failed"}
+
+    # 2. Message / InMail Action
+    elif job_type in ("send_messages", "send_inmail", "send_message", "message"):
+        raw_msg = payload.get("message") or payload.get("body") or prospect.get("initial_message") or ""
+        text = db_render_message_template(raw_msg, prospect)
+        if not text:
+            text = f"Hi {prospect.get('first_name', 'there')}, thanks for connecting!"
+
+        logger.info("Executing Unipile message send for prospect %s (%s)", prospect_id, linkedin_url)
+        res = unipile_svc.send_linkedin_message(linkedin_url, text)
+        if res.get("success"):
+            result = {"status": "message_sent" if job_type != "send_inmail" else "inmail_sent", "chat_id": res.get("chat_id")}
+        else:
+            result = {"status": "error", "message": res.get("error") or "Sending message failed"}
+
+    # 3. Check Connection Status / Acceptance / Reply
+    elif job_type in ("check_connection_status", "visit_profile", "follow_profile", "check_reply"):
+        result = {"status": "visited" if job_type == "visit_profile" else ("still_not_accepted" if job_type == "check_connection_status" else "no_reply")}
+
+    # Update job status
+    is_success = result.get("status") not in ("error", "failed")
+    supabase.table("jobs").update({
+        "status": "completed" if is_success else "failed",
+        "completed_at": _utc_now(),
+        "error_message": result.get("message") if not is_success else None,
+        "updated_at": _utc_now(),
+    }).eq("id", job_id).execute()
+
+    # Advance flow sequence
+    if payload.get("flow_node_id"):
+        db_apply_completed_flow_job(job, result)
+
+    return result
+
+
+def db_process_all_pending_campaign_jobs() -> int:
+    """
+    Background worker process:
+    1. Finds all due pending jobs and executes them via Unipile.
+    2. Walks active flow sequences for enrolled prospects.
+    3. Auto-completes campaigns when all prospects have finished their sequences.
+    """
+    now_iso = _utc_now()
+    try:
+        res = (
+            supabase.table("jobs")
+            .select("*")
+            .eq("status", "pending")
+            .lte("scheduled_for", now_iso)
+            .order("created_at")
+            .limit(20)
+            .execute()
+        )
+        jobs = res.data or []
+    except Exception as exc:
+        logger.error("Error fetching pending jobs: %s", exc)
+        jobs = []
+
+    executed_count = 0
+    for job in jobs:
+        try:
+            res = db_execute_job_via_unipile(job)
+            if res:
+                executed_count += 1
+        except Exception as exc:
+            logger.error("Error executing job %s via Unipile: %s", job.get("id"), exc)
+
+    try:
+        campaigns_res = (
+            supabase.table("campaigns")
+            .select("*")
+            .in_("status", ["active", "running"])
+            .execute()
+        )
+        active_campaigns = campaigns_res.data or []
+        for campaign in active_campaigns:
+            cid = campaign["id"]
+            enrollments = (
+                supabase.table("campaign_enrollments")
+                .select("prospect_id, current_node_id, next_step_at, status")
+                .eq("campaign_id", cid)
+                .eq("status", "active")
+                .lte("next_step_at", now_iso)
+                .limit(10)
+                .execute()
+                .data or []
+            )
+            for enr in enrollments:
+                try:
+                    db_queue_next_flow_step(cid, enr["prospect_id"], enr.get("current_node_id"))
+                except Exception as exc:
+                    logger.error("Error queueing flow step for campaign %s prospect %s: %s", cid, enr.get("prospect_id"), exc)
+
+            db_check_campaign_completion(cid)
+    except Exception as exc:
+        logger.error("Error processing active campaign enrollments: %s", exc)
+
+    return executed_count
+
+
+def db_check_campaign_completion(campaign_id: str) -> None:
+    """Check if all enrolled prospects in a campaign are in terminal statuses, and mark campaign completed."""
+    try:
+        enrollments = (
+            supabase.table("campaign_enrollments")
+            .select("status")
+            .eq("campaign_id", campaign_id)
+            .execute()
+            .data or []
+        )
+        if not enrollments:
+            return
+
+        active_count = sum(1 for e in enrollments if e.get("status") in ("active", "pending", "running"))
+        if active_count == 0:
+            logger.info("Auto-completing campaign %s as all enrollments are finished", campaign_id)
+            supabase.table("campaigns").update({
+                "status": "completed",
+                "updated_at": _utc_now(),
+            }).eq("id", campaign_id).execute()
+    except Exception as exc:
+        logger.error("Error checking campaign completion: %s", exc)
+

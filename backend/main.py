@@ -94,6 +94,14 @@ async def _background_scheduler_loop():
             await _asyncio.sleep(60)          # wake up every minute
             now = _dt.now(_tz.utc)
 
+            # ── Unipile job worker (every 60 sec) ──────────────────────────────
+            try:
+                processed = db.db_process_all_pending_campaign_jobs()
+                if processed > 0:
+                    logger.info("[scheduler] Unipile worker executed %d jobs", processed)
+            except Exception as exc:
+                logger.error("[scheduler] Unipile worker error: %s", exc)
+
             # ── Flow engine (every 10 min) ──────────────────────────────────
             last_flow = last_run.get("flow")
             if not last_flow or (now - last_flow).total_seconds() >= FLOW_INTERVAL_SECS:
@@ -275,6 +283,7 @@ def _map_csv_row(raw_row: dict, campaign_id: str | None) -> dict | None:
     mapped.setdefault("status", "")
     if custom_fields:
         mapped["custom_fields"] = custom_fields
+        mapped["custom_variables"] = custom_fields
     return mapped
 
 
