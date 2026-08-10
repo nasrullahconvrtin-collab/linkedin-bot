@@ -180,6 +180,260 @@ export const directWithdrawOldInvitations = async (maxAgeDays = 90) => {
   return { success: true, withdrawn_count: count };
 };
 
+// ── Unipile & Supabase Campaign / Prospect / List Direct Operations ──
+
+export const directGetCampaigns = async () => {
+  try {
+    const { data, error } = await supabaseDirect.from('campaigns').select('*').order('created_at', { ascending: false });
+    if (!error && data) return data;
+  } catch (e) {
+    console.warn('directGetCampaigns warning:', e);
+  }
+  return [];
+};
+
+export const directCreateCampaign = async (data) => {
+  const payload = {
+    id: data.id || `cmp_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+    name: data.name || 'New Campaign',
+    status: data.status || 'draft',
+    profile_key: data.profile_key || 'profile_1',
+    daily_limit: data.daily_limit || 25,
+    sequence: data.sequence || [],
+    created_at: new Date().toISOString(),
+  };
+  try {
+    const { data: res, error } = await supabaseDirect.from('campaigns').insert([payload]).select();
+    if (!error && res && res[0]) return res[0];
+  } catch (e) {
+    console.warn('directCreateCampaign warning:', e);
+  }
+  return payload;
+};
+
+export const directGetCampaign = async (id) => {
+  try {
+    const { data, error } = await supabaseDirect.from('campaigns').select('*').eq('id', id).single();
+    if (!error && data) return data;
+  } catch (e) {
+    console.warn('directGetCampaign warning:', e);
+  }
+  return { id, name: 'Campaign', status: 'draft', sequence: [] };
+};
+
+export const directUpdateCampaign = async (id, updates) => {
+  try {
+    const { data, error } = await supabaseDirect.from('campaigns').update(updates).eq('id', id).select();
+    if (!error && data && data[0]) return data[0];
+  } catch (e) {
+    console.warn('directUpdateCampaign warning:', e);
+  }
+  return { id, ...updates };
+};
+
+export const directDeleteCampaign = async (id) => {
+  try {
+    await supabaseDirect.from('campaigns').delete().eq('id', id);
+  } catch (e) {
+    console.warn('directDeleteCampaign warning:', e);
+  }
+  return { success: true };
+};
+
+export const directLaunchCampaign = async (id, data = {}) => {
+  return directUpdateCampaign(id, { status: 'active', launched_at: new Date().toISOString() });
+};
+
+// ── Prospects Direct Operations ──────────────────────────────────
+
+export const directGetProspects = async (params = {}) => {
+  try {
+    let query = supabaseDirect.from('prospects').select('*', { count: 'exact' });
+    if (params.campaign_id) query = query.eq('campaign_id', params.campaign_id);
+    if (params.status) query = query.eq('status', params.status);
+    query = query.order('created_at', { ascending: false });
+    
+    const limit = params.limit || 50;
+    const page = params.page || 1;
+    const offset = (page - 1) * limit;
+    query = query.range(offset, offset + limit - 1);
+    
+    const { data, count, error } = await query;
+    if (!error && data) {
+      return { prospects: data, total: count || data.length };
+    }
+  } catch (e) {
+    console.warn('directGetProspects warning:', e);
+  }
+  return { prospects: [], total: 0 };
+};
+
+export const directCreateProspect = async (data) => {
+  const payload = {
+    id: data.id || `pros_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+    first_name: data.first_name || data.name?.split(' ')[0] || '',
+    last_name: data.last_name || data.name?.split(' ').slice(1).join(' ') || '',
+    name: data.name || `${data.first_name || ''} ${data.last_name || ''}`.trim(),
+    headline: data.headline || '',
+    company: data.company || '',
+    linkedin_url: data.linkedin_url || '',
+    status: data.status || 'Not Contacted',
+    campaign_id: data.campaign_id || null,
+    assigned_account: data.assigned_account || 'profile_1',
+    custom_variables: data.custom_variables || {},
+    created_at: new Date().toISOString(),
+  };
+  try {
+    const { data: res, error } = await supabaseDirect.from('prospects').insert([payload]).select();
+    if (!error && res && res[0]) return res[0];
+  } catch (e) {
+    console.warn('directCreateProspect warning:', e);
+  }
+  return payload;
+};
+
+export const directGetProspect = async (id) => {
+  try {
+    const { data, error } = await supabaseDirect.from('prospects').select('*').eq('id', id).single();
+    if (!error && data) return data;
+  } catch (e) {
+    console.warn('directGetProspect warning:', e);
+  }
+  return { id, name: 'Prospect' };
+};
+
+export const directUpdateProspect = async (id, updates) => {
+  try {
+    const { data, error } = await supabaseDirect.from('prospects').update(updates).eq('id', id).select();
+    if (!error && data && data[0]) return data[0];
+  } catch (e) {
+    console.warn('directUpdateProspect warning:', e);
+  }
+  return { id, ...updates };
+};
+
+export const directDeleteProspect = async (id) => {
+  try {
+    await supabaseDirect.from('prospects').delete().eq('id', id);
+  } catch (e) {
+    console.warn('directDeleteProspect warning:', e);
+  }
+  return { success: true };
+};
+
+export const directAddProspectsToCampaign = async (campaignId, prospectIds) => {
+  try {
+    await supabaseDirect
+      .from('prospects')
+      .update({ campaign_id: campaignId })
+      .in('id', prospectIds);
+  } catch (e) {
+    console.warn('directAddProspectsToCampaign warning:', e);
+  }
+  return { success: true };
+};
+
+export const directBulkImportProspects = async (file, campaignId, mode, listId) => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const text = e.target.result;
+        const lines = text.split(/\r?\n/).filter(l => l.trim());
+        if (lines.length <= 1) return resolve({ imported_count: 0 });
+        
+        const headers = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, '').toLowerCase());
+        const prospectsToInsert = [];
+        
+        for (let i = 1; i < lines.length; i += 1) {
+          const cols = lines[i].split(',').map(c => c.trim().replace(/^["']|["']$/g, ''));
+          if (cols.length === 0 || !cols[0]) continue;
+          
+          const rowObj = {};
+          headers.forEach((h, idx) => {
+            rowObj[h] = cols[idx] || '';
+          });
+          
+          const firstName = rowObj.first_name || rowObj.firstname || rowObj.name?.split(' ')[0] || 'Lead';
+          const lastName = rowObj.last_name || rowObj.lastname || rowObj.name?.split(' ').slice(1).join(' ') || '';
+          
+          prospectsToInsert.push({
+            id: `pros_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 4)}`,
+            first_name: firstName,
+            last_name: lastName,
+            name: `${firstName} ${lastName}`.trim(),
+            headline: rowObj.headline || rowObj.title || '',
+            company: rowObj.company || rowObj.organization || '',
+            linkedin_url: rowObj.linkedin_url || rowObj.profile_url || rowObj.url || '',
+            status: 'Not Contacted',
+            campaign_id: campaignId || null,
+            assigned_account: 'profile_1',
+            custom_variables: rowObj,
+            created_at: new Date().toISOString(),
+          });
+        }
+        
+        if (prospectsToInsert.length > 0) {
+          await supabaseDirect.from('prospects').upsert(prospectsToInsert);
+        }
+        
+        resolve({ success: true, imported_count: prospectsToInsert.length });
+      } catch (err) {
+        console.error('directBulkImportProspects error:', err);
+        resolve({ success: false, error: err.message, imported_count: 0 });
+      }
+    };
+    reader.readAsText(file);
+  });
+};
+
+// ── Prospect Lists Direct Operations ────────────────────────────
+
+export const directGetProspectLists = async () => {
+  try {
+    const { data, error } = await supabaseDirect.from('prospect_lists').select('*').order('created_at', { ascending: false });
+    if (!error && data) return data;
+  } catch (e) {
+    console.warn('directGetProspectLists warning:', e);
+  }
+  return [];
+};
+
+export const directCreateProspectList = async (data) => {
+  const payload = {
+    id: data.id || `list_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+    name: data.name || 'New List',
+    description: data.description || '',
+    created_at: new Date().toISOString(),
+  };
+  try {
+    const { data: res, error } = await supabaseDirect.from('prospect_lists').insert([payload]).select();
+    if (!error && res && res[0]) return res[0];
+  } catch (e) {
+    console.warn('directCreateProspectList warning:', e);
+  }
+  return payload;
+};
+
+export const directUpdateProspectList = async (id, updates) => {
+  try {
+    const { data, error } = await supabaseDirect.from('prospect_lists').update(updates).eq('id', id).select();
+    if (!error && data && data[0]) return data[0];
+  } catch (e) {
+    console.warn('directUpdateProspectList warning:', e);
+  }
+  return { id, ...updates };
+};
+
+export const directDeleteProspectList = async (id) => {
+  try {
+    await supabaseDirect.from('prospect_lists').delete().eq('id', id);
+  } catch (e) {
+    console.warn('directDeleteProspectList warning:', e);
+  }
+  return { success: true };
+};
+
 // ── Unipile Campaign Execution Pipeline ──────────────────────────
 
 export const directSendUnipileConnectionInvite = async (prospect, message = '') => {
@@ -314,4 +568,6 @@ export const directRunFlow = async () => {
     messages_sent: msgRes.sent_count,
   };
 };
+
+
 
