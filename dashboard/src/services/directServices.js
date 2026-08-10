@@ -194,7 +194,6 @@ export const directGetCampaigns = async () => {
 
 export const directCreateCampaign = async (data) => {
   const payload = {
-    id: data.id || `cmp_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
     name: data.name || 'New Campaign',
     status: data.status || 'draft',
     profile_key: data.profile_key || 'profile_1',
@@ -270,7 +269,6 @@ export const directGetProspects = async (params = {}) => {
 
 export const directCreateProspect = async (data) => {
   const payload = {
-    id: data.id || `pros_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
     first_name: data.first_name || data.name?.split(' ')[0] || '',
     last_name: data.last_name || data.name?.split(' ').slice(1).join(' ') || '',
     name: data.name || `${data.first_name || ''} ${data.last_name || ''}`.trim(),
@@ -358,7 +356,6 @@ export const directBulkImportProspects = async (file, campaignId, mode, listId) 
           const lastName = rowObj.last_name || rowObj.lastname || rowObj.name?.split(' ').slice(1).join(' ') || '';
           
           prospectsToInsert.push({
-            id: `pros_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 4)}`,
             first_name: firstName,
             last_name: lastName,
             name: `${firstName} ${lastName}`.trim(),
@@ -401,7 +398,6 @@ export const directGetProspectLists = async () => {
 
 export const directCreateProspectList = async (data) => {
   const payload = {
-    id: data.id || `list_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
     name: data.name || 'New List',
     description: data.description || '',
     created_at: new Date().toISOString(),
