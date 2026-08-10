@@ -1726,3 +1726,120 @@ async def root():
     return {"message": "LinkedIn Automation API", "docs": "/docs"}
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Networking & Unipile Connections Endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+import unipile as unipile_svc
+
+
+@app.get("/networking/connections", tags=["Networking"])
+async def get_networking_connections(account_id: Optional[str] = Query(None), cursor: Optional[str] = Query(None)):
+    try:
+        return unipile_svc.list_connections(account_id, cursor)
+    except Exception as exc:
+        logger.error("get_networking_connections error: %s", exc)
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/networking/invitations", tags=["Networking"])
+async def get_networking_invitations(account_id: Optional[str] = Query(None)):
+    try:
+        return unipile_svc.list_invitations(account_id)
+    except Exception as exc:
+        logger.error("get_networking_invitations error: %s", exc)
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/networking/cancel-invitation", tags=["Networking"])
+async def cancel_networking_invitation(body: dict):
+    try:
+        invitation_id = body.get("invitation_id")
+        if not invitation_id:
+            raise HTTPException(400, "invitation_id required")
+        return unipile_svc.cancel_invitation(invitation_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("cancel_networking_invitation error: %s", exc)
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/networking/withdraw-old", tags=["Networking"])
+async def withdraw_old_invitations(body: dict):
+    try:
+        account_id = body.get("account_id")
+        max_age_days = int(body.get("max_age_days") or 90)
+        return unipile_svc.withdraw_old_invitations(account_id, max_age_days)
+    except Exception as exc:
+        logger.error("withdraw_old_invitations error: %s", exc)
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/unipile/account-info", tags=["Unipile Auth"])
+async def get_unipile_account_info(account_id: Optional[str] = Query(None)):
+    try:
+        return unipile_svc.get_unipile_account_info(account_id)
+    except Exception as exc:
+        logger.error("get_unipile_account_info error: %s", exc)
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/unipile/connect-direct", tags=["Unipile Auth"])
+async def connect_unipile_direct(body: dict):
+    try:
+        username = body.get("username")
+        password = body.get("password")
+        if not username:
+            raise HTTPException(400, "username required")
+        res = unipile_svc.connect_linkedin_direct(username, password)
+        if res.get("success") and res.get("account_id"):
+            db.db_create_profile({
+                "profile_key": "profile_1",
+                "display_name": res.get("name") or username,
+                "session_active": True,
+            })
+        return res
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("connect_unipile_direct error: %s", exc)
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/unipile/connect-cookie", tags=["Unipile Auth"])
+async def connect_unipile_cookie(body: dict):
+    try:
+        cookie_val = body.get("cookie_val") or body.get("access_token")
+        if not cookie_val:
+            raise HTTPException(400, "cookie_val required")
+        res = unipile_svc.connect_linkedin_cookie(cookie_val)
+        if res.get("success") and res.get("account_id"):
+            db.db_create_profile({
+                "profile_key": "profile_1",
+                "display_name": res.get("name") or "Connected LinkedIn Account",
+                "session_active": True,
+            })
+        return res
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("connect_unipile_cookie error: %s", exc)
+        raise HTTPException(500, str(exc))
+
+
+@app.post("/unipile/submit-2fa", tags=["Unipile Auth"])
+async def submit_unipile_2fa(body: dict):
+    try:
+        account_id = body.get("account_id")
+        code = body.get("code")
+        if not account_id or not code:
+            raise HTTPException(400, "account_id and code required")
+        return unipile_svc.submit_2fa_code(account_id, code)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("submit_unipile_2fa error: %s", exc)
+        raise HTTPException(500, str(exc))
+
+
+

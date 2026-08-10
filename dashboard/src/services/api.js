@@ -114,4 +114,14 @@ export const deleteMessage     = (id)       => api.delete(`/messages/${id}`);
 // ── HubSpot ──────────────────────────────────────────────────
 export const syncHubSpot       = (id, data) => api.post(`/hubspot/sync/${id}`, data);
 
+// ── Networking & Unipile Auth ────────────────────────────────
+export const getNetworkingConnections = (params) => api.get('/networking/connections', { params });
+export const getNetworkingInvitations = (params) => api.get('/networking/invitations', { params });
+export const cancelNetworkingInvitation = (invitation_id) => api.post('/networking/cancel-invitation', { invitation_id });
+export const withdrawOldInvitations = (max_age_days = 90) => api.post('/networking/withdraw-old', { max_age_days });
+export const getUnipileAccountInfo = (account_id) => api.get('/unipile/account-info', { params: { account_id } });
+export const connectUnipileDirect = (data) => api.post('/unipile/connect-direct', data);
+export const connectUnipileCookie = (cookie_val) => api.post('/unipile/connect-cookie', { cookie_val });
+export const submitUnipile2FA = (account_id, code) => api.post('/unipile/submit-2fa', { account_id, code });
+
 export default api;

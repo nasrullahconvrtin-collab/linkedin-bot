@@ -151,3 +151,209 @@ def get_connected_accounts() -> List[Dict[str, Any]]:
         logger.error("Unipile get_connected_accounts exception: %s", exc)
 
     return []
+
+
+def get_unipile_account_info(account_id: Optional[str] = None) -> Dict[str, Any]:
+    """Fetch detailed profile information for a connected account from Unipile."""
+    acc_id = account_id or get_active_account_id()
+    if not UNIPILE_API_KEY:
+        return {
+            "id": acc_id,
+            "name": "Maryam Ansar",
+            "username": "maryamansar",
+            "provider": "LINKEDIN",
+            "status": "CONNECTED",
+            "headline": "LinkedIn Outreach Specialist",
+        }
+
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(f"{UNIPILE_BASE_URL}/accounts/{acc_id}", headers=get_headers())
+            if resp.status_code == 200:
+                data = resp.json()
+                return {
+                    "id": data.get("id") or acc_id,
+                    "name": data.get("name") or data.get("username") or "Maryam Ansar",
+                    "username": data.get("username") or data.get("email") or "maryamansar",
+                    "provider": data.get("provider") or "LINKEDIN",
+                    "status": data.get("status") or "CONNECTED",
+                    "headline": data.get("headline") or "LinkedIn Profile",
+                    "avatar": data.get("avatar") or data.get("profile_picture_url"),
+                }
+    except Exception as exc:
+        logger.error("Unipile get_unipile_account_info exception: %s", exc)
+
+    return {
+        "id": acc_id,
+        "name": "Maryam Ansar",
+        "username": "maryamansar",
+        "provider": "LINKEDIN",
+        "status": "CONNECTED",
+    }
+
+
+def connect_linkedin_direct(username: str, password: Optional[str] = None) -> Dict[str, Any]:
+    """Connect LinkedIn profile directly in-app via Unipile username/password."""
+    if not UNIPILE_API_KEY:
+        return {"success": True, "account_id": f"acc_mock_{secrets.token_hex(4)}", "name": username}
+
+    payload: dict = {
+        "provider_name": "LINKEDIN",
+        "provider": "LINKEDIN",
+        "username": username,
+    }
+    if password:
+        payload["password"] = password
+
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            resp = client.post(f"{UNIPILE_BASE_URL}/accounts", headers=get_headers(), json=payload)
+            data = resp.json() if resp.content else {}
+            if resp.status_code == 202 or data.get("checkpoint") or data.get("checkpoint_type"):
+                return {
+                    "success": False,
+                    "checkpoint_required": True,
+                    "checkpoint_type": data.get("checkpoint_type") or "2FA",
+                    "account_id": data.get("account_id") or data.get("id"),
+                }
+            if resp.status_code in (200, 201):
+                return {
+                    "success": True,
+                    "account_id": data.get("account_id") or data.get("id"),
+                    "name": data.get("name") or username,
+                }
+            return {"success": False, "error": data.get("message") or f"Unipile error {resp.status_code}"}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+def connect_linkedin_cookie(cookie_val: str) -> Dict[str, Any]:
+    """Connect LinkedIn profile via li_at session cookie."""
+    if not UNIPILE_API_KEY:
+        return {"success": True, "account_id": f"acc_cookie_{secrets.token_hex(4)}", "name": "LinkedIn Profile (Cookie)"}
+
+    payload = {
+        "provider_name": "LINKEDIN",
+        "access_token": cookie_val.strip(),
+    }
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            resp = client.post(f"{UNIPILE_BASE_URL}/accounts", headers=get_headers(), json=payload)
+            data = resp.json() if resp.content else {}
+            if resp.status_code in (200, 201):
+                return {
+                    "success": True,
+                    "account_id": data.get("account_id") or data.get("id"),
+                    "name": data.get("name") or "Connected LinkedIn Account",
+                }
+            return {"success": False, "error": data.get("message") or f"Cookie auth error {resp.status_code}"}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+def submit_2fa_code(account_id: str, code: str) -> Dict[str, Any]:
+    """Submit 2FA / OTP code to resolve authentication checkpoint."""
+    if not UNIPILE_API_KEY:
+        return {"success": True, "account_id": account_id}
+
+    payload = {
+        "account_id": account_id,
+        "provider_name": "LINKEDIN",
+        "code": code,
+    }
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            resp = client.post(f"{UNIPILE_BASE_URL}/accounts/checkpoint", headers=get_headers(), json=payload)
+            data = resp.json() if resp.content else {}
+            if resp.status_code in (200, 201):
+                return {"success": True, "account_id": data.get("account_id") or account_id}
+            return {"success": False, "error": data.get("message") or "2FA verification failed"}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+def list_connections(account_id: Optional[str] = None, cursor: Optional[str] = None) -> Dict[str, Any]:
+    """List 1st-degree connections for the connected profile."""
+    acc_id = account_id or get_active_account_id()
+    if not UNIPILE_API_KEY:
+        return {"success": True, "connections": [], "next_cursor": None}
+
+    try:
+        url = f"{UNIPILE_BASE_URL}/users/relations?account_id={acc_id}&limit=100"
+        if cursor:
+            url += f"&cursor={cursor}"
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.get(url, headers=get_headers())
+            if resp.status_code == 200:
+                data = resp.json()
+                items = data.get("items") or data.get("relations") or (data if isinstance(data, list) else [])
+                return {
+                    "success": True,
+                    "connections": items,
+                    "next_cursor": data.get("cursor") or data.get("next_cursor"),
+                }
+            return {"success": False, "error": f"Unipile API ({resp.status_code}): {resp.text}"}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+def list_invitations(account_id: Optional[str] = None) -> Dict[str, Any]:
+    """List pending outbound invitations."""
+    acc_id = account_id or get_active_account_id()
+    if not UNIPILE_API_KEY:
+        return {"success": True, "invitations": []}
+
+    try:
+        url = f"{UNIPILE_BASE_URL}/users/invites/sent?account_id={acc_id}"
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.get(url, headers=get_headers())
+            if resp.status_code == 200:
+                data = resp.json()
+                items = data.get("items") or data.get("invitations") or (data if isinstance(data, list) else [])
+                return {"success": True, "invitations": items}
+            return {"success": False, "invitations": []}
+    except Exception as exc:
+        logger.error("list_invitations exception: %s", exc)
+        return {"success": False, "invitations": []}
+
+
+def cancel_invitation(invitation_id: str) -> Dict[str, Any]:
+    """Cancel / withdraw a pending connection invitation."""
+    if not UNIPILE_API_KEY:
+        return {"success": True}
+
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.delete(f"{UNIPILE_BASE_URL}/users/invitations/{invitation_id}", headers=get_headers())
+            if resp.status_code in (200, 204):
+                return {"success": True}
+            return {"success": False, "error": resp.text}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+def withdraw_old_invitations(account_id: Optional[str] = None, max_age_days: int = 90) -> Dict[str, Any]:
+    """Withdraw pending outbound invitations older than max_age_days (e.g. 7, 30, 60, 90)."""
+    inv_res = list_invitations(account_id)
+    invitations = inv_res.get("invitations") or []
+    cutoff_ms = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).timestamp() * 1000
+
+    withdrawn_count = 0
+    for inv in invitations:
+        sent_ts = inv.get("sent_at") or inv.get("created_at") or inv.get("timestamp")
+        inv_ms = 0
+        if sent_ts:
+            try:
+                inv_ms = datetime.fromisoformat(str(sent_ts).replace("Z", "+00:00")).timestamp() * 1000
+            except Exception:
+                inv_ms = 0
+
+        if inv_ms > 0 and inv_ms <= cutoff_ms:
+            inv_id = inv.get("id") or inv.get("invitation_id")
+            if inv_id:
+                res = cancel_invitation(inv_id)
+                if res.get("success"):
+                    withdrawn_count += 1
+
+    return {"success": True, "withdrawn_count": withdrawn_count}
+
