@@ -214,11 +214,11 @@ export const directCreateCampaign = async (data) => {
 export const directGetCampaign = async (id) => {
   try {
     const { data, error } = await supabaseDirect.from('campaigns').select('*').eq('id', id).single();
-    if (!error && data) return data;
+    if (!error && data) return { campaign: data, sent: 0, accepted: 0, replied: 0 };
   } catch (e) {
     console.warn('directGetCampaign warning:', e);
   }
-  return { id, name: 'Campaign', status: 'draft', sequence: [] };
+  return { campaign: { id, name: 'Campaign', status: 'draft', sequence: [] }, sent: 0, accepted: 0, replied: 0 };
 };
 
 export const directUpdateCampaign = async (id, updates) => {
@@ -295,11 +295,11 @@ export const directCreateProspect = async (data) => {
 export const directGetProspect = async (id) => {
   try {
     const { data, error } = await supabaseDirect.from('prospects').select('*').eq('id', id).single();
-    if (!error && data) return data;
+    if (!error && data) return { prospect: data, campaign_enrollments: [] };
   } catch (e) {
     console.warn('directGetProspect warning:', e);
   }
-  return { id, name: 'Prospect' };
+  return { prospect: { id, name: 'Prospect' }, campaign_enrollments: [] };
 };
 
 export const directUpdateProspect = async (id, updates) => {
@@ -392,11 +392,11 @@ export const directBulkImportProspects = async (file, campaignId, mode, listId) 
 export const directGetProspectLists = async () => {
   try {
     const { data, error } = await supabaseDirect.from('prospect_lists').select('*').order('created_at', { ascending: false });
-    if (!error && data) return data;
+    if (!error && data) return { lists: data };
   } catch (e) {
     console.warn('directGetProspectLists warning:', e);
   }
-  return [];
+  return { lists: [] };
 };
 
 export const directCreateProspectList = async (data) => {
