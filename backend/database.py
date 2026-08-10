@@ -18,8 +18,8 @@ load_dotenv()
 
 logger = logging.getLogger("linkedin_bot")
 
-SUPABASE_URL: str = os.environ["SUPABASE_URL"]
-SUPABASE_KEY: str = os.environ["SUPABASE_KEY"]
+SUPABASE_URL: str = os.environ.get("SUPABASE_URL", "https://mjwganpjawthnowemabt.supabase.co")
+SUPABASE_KEY: str = os.environ.get("SUPABASE_KEY", "sb_publishable_tkC_z_PpNUMHx1kwJyUH5A_0Qs5Ahbw")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
