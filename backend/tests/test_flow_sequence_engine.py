@@ -401,9 +401,10 @@ def test_wait_acceptance_still_pending_within_window_requeues_another_check(monk
     _patch_common(monkeypatch, campaign, prospect_box, fake_db, jobs)
     # Pretend we entered the wait node ~2 days ago — well inside the (default)
     # 30-day max-wait window for a node with no explicit config.
+    two_days_ago = (datetime.now(timezone.utc) - database.timedelta(days=2)).isoformat()
     fake_db.enrollments[("camp-4", "prospect-4")] = {
         "flow_state": {"wait_monitor": {"node_id": "wait_acc",
-                                         "started_at": "2026-06-06T00:00:00+00:00",
+                                         "started_at": two_days_ago,
                                          "checks": 1}},
     }
 
@@ -422,7 +423,7 @@ def test_wait_acceptance_still_pending_within_window_requeues_another_check(monk
     # Bookkeeping must persist across the loop: started_at preserved, counter incremented.
     monitor = fake_db.enrollments[("camp-4", "prospect-4")]["flow_state"]["wait_monitor"]
     assert monitor["node_id"] == "wait_acc"
-    assert monitor["started_at"] == "2026-06-06T00:00:00+00:00"
+    assert monitor["started_at"] == two_days_ago
     assert monitor["checks"] == 2
     assert monitor["last_status"] == "still_not_accepted"
     # The prospect must stay in-flight, not be marked Completed.

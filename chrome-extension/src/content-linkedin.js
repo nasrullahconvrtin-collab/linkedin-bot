@@ -203,7 +203,9 @@ function detectBlockingState() {
 }
 
 function profileHeaderButtons() {
-  const header = document.querySelector('.pv-top-card, .ph5, main');
+  const header = document.querySelector(
+    '.pv-top-card, .pv-top-card-v2, section[class*="pv-top-card"], .ph5, section.artdeco-card:first-of-type, main section:first-of-type'
+  );
   return Array.from((header || document).querySelectorAll('button')).map(textOf);
 }
 

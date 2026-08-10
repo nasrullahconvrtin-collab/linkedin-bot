@@ -716,6 +716,8 @@ export default function SequenceFlowBuilder({
       ? { x: sourceNode.position.x, y: sourceNode.position.y + 160 }
       : { x: 280, y: 80 };
 
+    const defaultConfig = nodeType === 'wait' ? { days: 0 } : {};
+
     const newNode = {
       id,
       type: 'flowNode',
@@ -723,7 +725,7 @@ export default function SequenceFlowBuilder({
       data: {
         nodeType,
         label: def.label,
-        config: {},
+        config: defaultConfig,
         onDelete: deleteNode,
         onAddNext: handleAddNext,
       },
@@ -827,6 +829,15 @@ export default function SequenceFlowBuilder({
     setSelectedNode(prev => prev?.id === nodeId ? { ...prev, data: { ...newData, onDelete: deleteNode, onAddNext: handleAddNext } } : prev);
   }, [setNodes, deleteNode, handleAddNext]);
 
+  const cleanNodes = (rawNodes) => rawNodes.map(n => {
+    const isWait = n.data?.nodeType === 'wait';
+    let config = { ...n.data?.config };
+    if (isWait && !config.working_days_mode && config.days === undefined) {
+      config.days = 0;
+    }
+    return { ...n, data: { ...n.data, config, onDelete: undefined, onAddNext: undefined } };
+  });
+
   // Save as template
   const handleSaveTemplate = async () => {
     if (!tplName.trim()) return toast.error('Enter a template name');
@@ -834,7 +845,7 @@ export default function SequenceFlowBuilder({
     try {
       await onSaveTemplate?.({
         name: tplName.trim(),
-        nodes: nodes.map(n => ({ ...n, data: { ...n.data, onDelete: undefined, onAddNext: undefined } })),
+        nodes: cleanNodes(nodes),
         edges,
       });
       toast.success('Template saved!');
@@ -848,7 +859,7 @@ export default function SequenceFlowBuilder({
 
   // Export for campaign
   const handleSave = () => {
-    const clean = nodes.map(n => ({ ...n, data: { ...n.data, onDelete: undefined, onAddNext: undefined } }));
+    const clean = cleanNodes(nodes);
     onSave?.({ nodes: clean, edges });
     toast.success('Sequence saved to campaign');
   };
