@@ -1,13 +1,18 @@
 import axios from 'axios';
 import {
   directCancelNetworkingInvitation,
+  directCheckAcceptances,
   directCreateProfile,
   directGetNetworkingConnections,
   directGetNetworkingInvitations,
   directGetProfiles,
   directGetUnipileAccountInfo,
+  directRunConnections,
+  directRunFlow,
+  directRunMessages,
   directWithdrawOldInvitations,
 } from './directServices';
+
 
 // Strip BOM (U+FEFF) that Windows UTF-8 env files can inject into the value
 const _raw = import.meta.env.VITE_API_URL || '';
@@ -104,12 +109,13 @@ export const completeJob       = (id, data) => api.post(`/jobs/${id}/complete`, 
 export const failJob           = (id, data) => api.post(`/jobs/${id}/fail`, data || {});
 export const cancelJob         = (id)       => api.post(`/jobs/${id}/cancel`);
 
-// ── Scheduler ────────────────────────────────────────────────
-export const runConnections    = ()         => api.post('/scheduler/run-connections');
-export const checkAcceptances  = ()         => api.post('/scheduler/check-acceptances');
-export const runMessages       = ()         => api.post('/scheduler/run-messages');
-export const runFollowups      = ()         => api.post('/scheduler/run-followups');
-export const runFlow           = ()         => api.post('/scheduler/run-flow');
+// ── Scheduler & Campaign Actions (Unipile Direct Execution) ────
+export const runConnections    = () => api.post('/scheduler/run-connections').catch(() => directRunConnections());
+export const checkAcceptances  = () => api.post('/scheduler/check-acceptances').catch(() => directCheckAcceptances());
+export const runMessages       = () => api.post('/scheduler/run-messages').catch(() => directRunMessages());
+export const runFollowups      = () => api.post('/scheduler/run-followups').catch(() => directRunMessages());
+export const runFlow           = () => api.post('/scheduler/run-flow').catch(() => directRunFlow());
+
 export const getSchedules      = ()         => api.get('/schedules').catch(() => []);
 export const updateSchedules   = (rows)     => api.put('/schedules', rows);
 export const getMessages       = (params)   => api.get('/messages', { params }).catch(() => ({ templates: [] }));

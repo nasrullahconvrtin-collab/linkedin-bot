@@ -179,3 +179,139 @@ export const directWithdrawOldInvitations = async (maxAgeDays = 90) => {
   }
   return { success: true, withdrawn_count: count };
 };
+
+// ── Unipile Campaign Execution Pipeline ──────────────────────────
+
+export const directSendUnipileConnectionInvite = async (prospect, message = '') => {
+  const provider_id = prospect.provider_id || prospect.member_id || prospect.public_identifier || prospect.linkedin_url;
+  const payload = {
+    account_id: DEFAULT_ACCOUNT_ID,
+    provider_id,
+    message: message || '',
+  };
+  
+  const { ok, data } = await unipileFetch('/users/invite', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+  if (ok) {
+    try {
+      await supabaseDirect.from('prospects').update({
+        status: 'Connection Request Sent',
+        connection_status: 'invitation_sent',
+        connection_sent_date: new Date().toISOString(),
+      }).eq('id', prospect.id);
+    } catch (e) {
+      console.warn('Supabase update warning:', e);
+    }
+    return { success: true, data };
+  }
+  return { success: false, error: data?.detail || 'Unipile invite failed' };
+};
+
+export const directSendUnipileChatMessage = async (prospect, text = '') => {
+  const recipientId = prospect.provider_id || prospect.member_id || prospect.id;
+  const payload = {
+    account_id: DEFAULT_ACCOUNT_ID,
+    attendees_ids: [recipientId],
+    text: text || prospect.initial_message || 'Hello!',
+  };
+
+  const { ok, data } = await unipileFetch('/chats', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+  if (ok) {
+    try {
+      await supabaseDirect.from('prospects').update({
+        status: 'Initial Message Sent',
+        message_sent_date: new Date().toISOString(),
+      }).eq('id', prospect.id);
+    } catch (e) {
+      console.warn('Supabase update warning:', e);
+    }
+    return { success: true, data };
+  }
+  return { success: false, error: data?.detail || 'Unipile chat message failed' };
+};
+
+export const directRunConnections = async () => {
+  let sentCount = 0;
+  try {
+    const { data: prospects } = await supabaseDirect
+      .from('prospects')
+      .select('*')
+      .in('status', ['Not Contacted', 'pending', 'Needs Connection']);
+      
+    for (const p of (prospects || []).slice(0, 10)) {
+      const msg = p.connection_message || `Hi ${p.first_name || ''}, I'd love to connect with you!`.trim();
+      const res = await directSendUnipileConnectionInvite(p, msg);
+      if (res.success) sentCount += 1;
+    }
+  } catch (e) {
+    console.error('directRunConnections error:', e);
+  }
+  return { success: true, sent_count: sentCount };
+};
+
+export const directRunMessages = async () => {
+  let sentCount = 0;
+  try {
+    const { data: prospects } = await supabaseDirect
+      .from('prospects')
+      .select('*')
+      .in('status', ['Ready to Send', 'Connection Accepted']);
+      
+    for (const p of (prospects || []).slice(0, 10)) {
+      const msg = p.initial_message || p.custom_variables?.offer || `Hi ${p.first_name || ''}, thanks for connecting!`.trim();
+      const res = await directSendUnipileChatMessage(p, msg);
+      if (res.success) sentCount += 1;
+    }
+  } catch (e) {
+    console.error('directRunMessages error:', e);
+  }
+  return { success: true, sent_count: sentCount };
+};
+
+export const directCheckAcceptances = async () => {
+  let acceptedCount = 0;
+  try {
+    const { connections } = await directGetNetworkingConnections();
+    const connMap = new Set(connections.map(c => c.public_identifier || c.member_id || c.provider_id));
+    
+    const { data: prospects } = await supabaseDirect
+      .from('prospects')
+      .select('*')
+      .eq('status', 'Connection Request Sent');
+
+    for (const p of (prospects || [])) {
+      const pKey = p.public_identifier || p.member_id || p.provider_id || p.linkedin_url?.split('/in/')?.[1]?.replace(/\//g, '');
+      if (pKey && connMap.has(pKey)) {
+        await supabaseDirect.from('prospects').update({
+          status: 'Connection Accepted',
+          connection_status: 'connected',
+          accepted_at: new Date().toISOString(),
+        }).eq('id', p.id);
+        acceptedCount += 1;
+      }
+    }
+  } catch (e) {
+    console.error('directCheckAcceptances error:', e);
+  }
+  return { success: true, accepted_count: acceptedCount };
+};
+
+export const directRunFlow = async () => {
+  const accRes = await directCheckAcceptances();
+  const connRes = await directRunConnections();
+  const msgRes = await directRunMessages();
+  return {
+    success: true,
+    accepted: accRes.accepted_count,
+    connections_sent: connRes.sent_count,
+    messages_sent: msgRes.sent_count,
+  };
+};
+
