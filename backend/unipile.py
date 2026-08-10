@@ -272,28 +272,12 @@ def submit_2fa_code(account_id: str, code: str) -> Dict[str, Any]:
         return {"success": False, "error": str(exc)}
 
 
-def list_connections(account_id: Optional[str] = None, cursor: Optional[str] = None) -> Dict[str, Any]:
-    """List 1st-degree connections for the connected profile."""
-    acc_id = account_id or get_active_account_id()
-    if not UNIPILE_API_KEY:
-        return {"success": True, "connections": [], "next_cursor": None}
-
-    try:
+def list_connections(account_id: str = None, cursor: str = None) -> List[Dict[str, Any]]:
+    acc_id = account_id or DEFAULT_UNIPILE_ACCOUNT_ID
+    all_items = []
+    curr_cursor = cursor
+    for _ in range(20):
         url = f"{UNIPILE_BASE_URL}/users/relations?account_id={acc_id}&limit=100"
-        if cursor:
-            url += f"&cursor={cursor}"
-        with httpx.Client(timeout=15.0) as client:
-            resp = client.get(url, headers=get_headers())
-            if resp.status_code == 200:
-                data = resp.json()
-                items = data.get("items") or data.get("relations") or (data if isinstance(data, list) else [])
-                return {
-                    "success": True,
-                    "connections": items,
-                    "next_cursor": data.get("cursor") or data.get("next_cursor"),
-                }
-            return {"success": False, "error": f"Unipile API ({resp.status_code}): {resp.text}"}
-    except Exception as exc:
         return {"success": False, "error": str(exc)}
 
 

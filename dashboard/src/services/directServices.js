@@ -101,32 +101,62 @@ export const directGetUnipileAccountInfo = async (accountId) => {
   };
 };
 
-export const directGetNetworkingConnections = async (cursor) => {
-  let path = `/users/relations?account_id=${DEFAULT_ACCOUNT_ID}&limit=100`;
-  if (cursor) path += `&cursor=${cursor}`;
-  const { ok, data } = await unipileFetch(path);
-  if (ok && data) {
+// Fetch ALL 1st-degree connections using cursor pagination loop
+export const directGetNetworkingConnections = async () => {
+  let allItems = [];
+  let cursor = null;
+
+  for (let page = 0; page < 20; page += 1) {
+    let path = `/users/relations?account_id=${DEFAULT_ACCOUNT_ID}&limit=100`;
+    if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
+    
+    const { ok, data } = await unipileFetch(path);
+    if (!ok || !data) break;
+    
     const items = data.items || data.relations || (Array.isArray(data) ? data : []);
-    return {
-      success: true,
-      connections: items,
-      next_cursor: data.cursor || data.next_cursor,
-    };
+    if (items.length > 0) {
+      allItems = allItems.concat(items);
+    }
+    
+    cursor = data.cursor;
+    if (!cursor || items.length === 0) break;
   }
-  return { success: true, connections: [], next_cursor: null };
+
+  return {
+    success: true,
+    connections: allItems,
+    total: allItems.length,
+  };
 };
 
+// Fetch all sent pending invitations via /users/invite/sent
 export const directGetNetworkingInvitations = async () => {
-  const { ok, data } = await unipileFetch(`/users/invites/sent?account_id=${DEFAULT_ACCOUNT_ID}`);
-  if (ok && data) {
+  let allItems = [];
+  let cursor = null;
+
+  for (let page = 0; page < 10; page += 1) {
+    let path = `/users/invite/sent?account_id=${DEFAULT_ACCOUNT_ID}`;
+    if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
+    
+    const { ok, data } = await unipileFetch(path);
+    if (!ok || !data) break;
+    
     const items = data.items || data.invitations || (Array.isArray(data) ? data : []);
-    return { success: true, invitations: items };
+    if (items.length > 0) {
+      allItems = allItems.concat(items);
+    }
+    
+    cursor = data.cursor;
+    if (!cursor || items.length === 0) break;
   }
-  return { success: true, invitations: [] };
+
+  return { success: true, invitations: allItems };
 };
 
 export const directCancelNetworkingInvitation = async (invitationId) => {
-  const { ok } = await unipileFetch(`/users/invitations/${invitationId}`, { method: 'DELETE' });
+  const { ok } = await unipileFetch(`/users/invite/sent/${invitationId}?account_id=${DEFAULT_ACCOUNT_ID}`, {
+    method: 'DELETE',
+  });
   return { success: ok };
 };
 
@@ -134,9 +164,11 @@ export const directWithdrawOldInvitations = async (maxAgeDays = 90) => {
   const { invitations } = await directGetNetworkingInvitations();
   const cutoffMs = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
   let count = 0;
+  
   for (const inv of invitations || []) {
-    const sentTs = inv.sent_at || inv.created_at || inv.timestamp;
+    const sentTs = inv.parsed_datetime || inv.sent_at || inv.created_at || inv.timestamp;
     const invMs = sentTs ? new Date(sentTs).getTime() : 0;
+    
     if (invMs > 0 && invMs <= cutoffMs) {
       const invId = inv.id || inv.invitation_id;
       if (invId) {
