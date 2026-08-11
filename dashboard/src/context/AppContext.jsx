@@ -3,7 +3,7 @@ import toast from 'react-hot-toast';
 import {
   getStats, getCampaigns, getProfiles, getProspects, getJobs,
   runConnections, checkAcceptances, runMessages, runFollowups,
-  getSchedules,
+  getSchedules, runFlow,
 } from '../services/api';
 
 // A profile that hasn't heartbeated in this long is treated as stale/offline
@@ -128,11 +128,21 @@ export function AppProvider({ children }) {
   // Initial data load + polling
   useEffect(() => {
     fetchStats(); fetchCampaigns(); fetchProfiles(); fetchReplies(); fetchFailedJobs();
+    runFlow().catch(err => console.warn('Background runFlow error:', err));
     const s = setInterval(fetchStats,   60_000);
     const p = setInterval(fetchProfiles, 30_000);
     const r = setInterval(fetchReplies, 30_000);
     const f = setInterval(fetchFailedJobs, 60_000);
-    return () => { clearInterval(s); clearInterval(p); clearInterval(r); clearInterval(f); };
+    const fl = setInterval(() => {
+      runFlow().catch(err => console.warn('Background runFlow error:', err));
+    }, 30_000);
+    return () => {
+      clearInterval(s);
+      clearInterval(p);
+      clearInterval(r);
+      clearInterval(f);
+      clearInterval(fl);
+    };
   }, []);
 
   // Auto-start overdue tasks when dashboard loads

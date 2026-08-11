@@ -475,6 +475,27 @@ export const directGetProspectListMembers = async (listId) => {
 
 // ── Unipile Campaign Execution Pipeline ──────────────────────────
 
+export const directVisitProfile = async (prospect) => {
+  const targetId = prospect.public_identifier || prospect.provider_id || prospect.linkedin_url?.split('/in/')?.[1]?.replace(/\//g, '');
+  if (!targetId) return { success: false, error: 'No identifier found for prospect' };
+  const { ok, data } = await unipileFetch(`/users/${targetId}?account_id=${DEFAULT_ACCOUNT_ID}`);
+  return { success: ok, data };
+};
+
+export const directFollowProfile = async (prospect) => {
+  const targetId = prospect.public_identifier || prospect.provider_id || prospect.linkedin_url?.split('/in/')?.[1]?.replace(/\//g, '');
+  if (!targetId) return { success: true };
+  await unipileFetch(`/users/${targetId}?account_id=${DEFAULT_ACCOUNT_ID}`);
+  return { success: true };
+};
+
+export const directEndorseProfile = async (prospect) => {
+  const targetId = prospect.public_identifier || prospect.provider_id || prospect.linkedin_url?.split('/in/')?.[1]?.replace(/\//g, '');
+  if (!targetId) return { success: true };
+  await unipileFetch(`/users/${targetId}?account_id=${DEFAULT_ACCOUNT_ID}`);
+  return { success: true };
+};
+
 export const directSendUnipileConnectionInvite = async (prospect, message = '') => {
   const provider_id = prospect.provider_id || prospect.member_id || prospect.public_identifier || prospect.linkedin_url;
   const payload = {
@@ -530,83 +551,414 @@ export const directSendUnipileChatMessage = async (prospect, text = '') => {
   return { success: false, error: data?.detail || 'Unipile chat message failed' };
 };
 
-export const directRunConnections = async () => {
-  let sentCount = 0;
-  try {
-    const { data: prospects } = await supabaseDirect
-      .from('prospects')
-      .select('*')
-      .in('status', ['Not Contacted', 'pending', 'Needs Connection']);
-      
-    for (const p of (prospects || []).slice(0, 10)) {
-      const msg = p.connection_message || `Hi ${p.first_name || ''}, I'd love to connect with you!`.trim();
-      const res = await directSendUnipileConnectionInvite(p, msg);
-      if (res.success) sentCount += 1;
-    }
-  } catch (e) {
-    console.error('directRunConnections error:', e);
-  }
-  return { success: true, sent_count: sentCount };
+export const directSendUnipileInMail = async (prospect, subject = '', text = '') => {
+  const recipientId = prospect.provider_id || prospect.member_id || prospect.public_identifier || prospect.linkedin_url;
+  const payload = {
+    account_id: DEFAULT_ACCOUNT_ID,
+    attendees_ids: [recipientId],
+    text: text || 'Hello!',
+    subject: subject || 'Introduction',
+    inmail: true,
+  };
+  const { ok, data } = await unipileFetch('/chats', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return { success: ok, data };
 };
 
-export const directRunMessages = async () => {
-  let sentCount = 0;
-  try {
-    const { data: prospects } = await supabaseDirect
-      .from('prospects')
-      .select('*')
-      .in('status', ['Ready to Send', 'Connection Accepted']);
-      
-    for (const p of (prospects || []).slice(0, 10)) {
-      const msg = p.initial_message || p.custom_variables?.offer || `Hi ${p.first_name || ''}, thanks for connecting!`.trim();
-      const res = await directSendUnipileChatMessage(p, msg);
-      if (res.success) sentCount += 1;
+export const directCheckProspectReplied = async (prospect) => {
+  const recipientId = prospect.provider_id || prospect.member_id || prospect.public_identifier || prospect.linkedin_url;
+  if (!recipientId) return { success: true, replied: false };
+  const { ok, data } = await unipileFetch(`/chats?account_id=${DEFAULT_ACCOUNT_ID}&attendees_ids=${encodeURIComponent(recipientId)}`);
+  if (ok && data && Array.isArray(data.items)) {
+    const chat = data.items[0];
+    if (chat && chat.last_message_sender_id && chat.last_message_sender_id !== DEFAULT_ACCOUNT_ID) {
+      return { success: true, replied: true };
     }
-  } catch (e) {
-    console.error('directRunMessages error:', e);
   }
-  return { success: true, sent_count: sentCount };
-};
-
-export const directCheckAcceptances = async () => {
-  let acceptedCount = 0;
-  try {
-    const { connections } = await directGetNetworkingConnections();
-    const connMap = new Set(connections.map(c => c.public_identifier || c.member_id || c.provider_id));
-    
-    const { data: prospects } = await supabaseDirect
-      .from('prospects')
-      .select('*')
-      .eq('status', 'Connection Request Sent');
-
-    for (const p of (prospects || [])) {
-      const pKey = p.public_identifier || p.member_id || p.provider_id || p.linkedin_url?.split('/in/')?.[1]?.replace(/\//g, '');
-      if (pKey && connMap.has(pKey)) {
-        await supabaseDirect.from('prospects').update({
-          status: 'Connection Accepted',
-          connection_status: 'connected',
-          accepted_at: new Date().toISOString(),
-        }).eq('id', p.id);
-        acceptedCount += 1;
-      }
-    }
-  } catch (e) {
-    console.error('directCheckAcceptances error:', e);
-  }
-  return { success: true, accepted_count: acceptedCount };
+  return { success: true, replied: false };
 };
 
 export const directRunFlow = async () => {
-  const accRes = await directCheckAcceptances();
-  const connRes = await directRunConnections();
-  const msgRes = await directRunMessages();
+  let campaigns = [];
+  try {
+    const { data } = await supabaseDirect.from('campaigns').select('*').eq('status', 'running');
+    campaigns = data || [];
+  } catch (err) {
+    console.error('Error fetching running campaigns:', err);
+    return { success: false, error: err.message };
+  }
+
+  let totalExecuted = 0;
+  let totalConnections = 0;
+  let totalMessages = 0;
+
+  for (const campaign of campaigns) {
+    const flowSequence = campaign.sequence_config?.flow_sequence;
+    if (!flowSequence || !Array.isArray(flowSequence.nodes) || flowSequence.nodes.length === 0) {
+      continue;
+    }
+
+    const nodesMap = new Map(flowSequence.nodes.map(n => [n.id, n]));
+    const sourceEdgesMap = new Map();
+    for (const edge of flowSequence.edges || []) {
+      if (!sourceEdgesMap.has(edge.source)) {
+        sourceEdgesMap.set(edge.source, []);
+      }
+      sourceEdgesMap.get(edge.source).push(edge);
+    }
+
+    const incomingEdgeTargets = new Set((flowSequence.edges || []).map(e => e.target));
+    const startNodes = flowSequence.nodes.filter(n => !incomingEdgeTargets.has(n.id));
+    const startNode = startNodes[0] || flowSequence.nodes[0];
+
+    if (!startNode) continue;
+
+    let prospects = [];
+    try {
+      const { data } = await supabaseDirect.from('prospects').eq('campaign_id', campaign.id);
+      prospects = data || [];
+    } catch (err) {
+      console.error(`Error fetching prospects for campaign ${campaign.id}:`, err);
+      continue;
+    }
+
+    let dailyLimit = campaign.daily_limit || 25;
+    let actionsTaken = 0;
+
+    for (const prospect of prospects) {
+      if (actionsTaken >= dailyLimit) break;
+
+      if (['Completed', 'Failed', 'Replied'].includes(prospect.status)) {
+        continue;
+      }
+
+      let currentNodeId = prospect.custom_variables?.current_node_id;
+      if (!currentNodeId) {
+        currentNodeId = startNode.id;
+        prospect.custom_variables = {
+          ...(prospect.custom_variables || {}),
+          current_node_id: currentNodeId,
+          history: [],
+        };
+      }
+
+      let currentNode = nodesMap.get(currentNodeId);
+      if (!currentNode) {
+        currentNodeId = startNode.id;
+        currentNode = nodesMap.get(currentNodeId);
+        if (!currentNode) continue;
+      }
+
+      const nodeType = currentNode.data?.nodeType;
+      const nodeConfig = currentNode.data?.config || {};
+      const nodeLabel = currentNode.data?.label || currentNode.id;
+
+      if (nodeType === 'wait') {
+        const nextScheduledStr = prospect.custom_variables?.next_scheduled_at;
+        if (nextScheduledStr) {
+          const nextScheduled = new Date(nextScheduledStr).getTime();
+          if (Date.now() < nextScheduled) continue;
+        } else {
+          const days = Number(nodeConfig.days) || 1;
+          const nextScheduledAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+          prospect.custom_variables.next_scheduled_at = nextScheduledAt;
+          try {
+            await supabaseDirect.from('prospects').update({ custom_variables: prospect.custom_variables }).eq('id', prospect.id);
+          } catch (e) {
+            console.warn(e);
+          }
+          continue;
+        }
+
+        const edges = sourceEdgesMap.get(currentNode.id) || [];
+        const defaultEdge = edges.find(e => !e.data?.condition || e.data.condition === 'default');
+        if (defaultEdge) {
+          prospect.custom_variables.current_node_id = defaultEdge.target;
+          prospect.custom_variables.next_scheduled_at = null;
+          try {
+            await supabaseDirect.from('prospects').update({ custom_variables: prospect.custom_variables }).eq('id', prospect.id);
+          } catch (e) {
+            console.warn(e);
+          }
+        }
+        continue;
+      }
+
+      if (nodeType === 'wait_acceptance') {
+        const { connections } = await directGetNetworkingConnections();
+        const connMap = new Set(connections.map(c => c.public_identifier || c.member_id || c.provider_id));
+        const pKey = prospect.public_identifier || prospect.member_id || prospect.provider_id || prospect.linkedin_url?.split('/in/')?.[1]?.replace(/\//g, '');
+        
+        const isAccepted = pKey && connMap.has(pKey);
+        const edges = sourceEdgesMap.get(currentNode.id) || [];
+
+        if (isAccepted) {
+          const acceptEdge = edges.find(e => e.data?.condition === 'accepted');
+          if (acceptEdge) {
+            prospect.custom_variables.current_node_id = acceptEdge.target;
+            prospect.status = 'Connection Accepted';
+            try {
+              await supabaseDirect.from('prospects').update({
+                status: 'Connection Accepted',
+                connection_status: 'connected',
+                accepted_at: new Date().toISOString(),
+                custom_variables: prospect.custom_variables,
+              }).eq('id', prospect.id);
+            } catch (e) {
+              console.warn(e);
+            }
+          }
+          continue;
+        } else {
+          const lastActionStr = prospect.custom_variables?.last_action_at || prospect.created_at;
+          const maxWaitDays = Number(nodeConfig.max_wait_days) || 14;
+          const waitTimeElapsed = Date.now() - new Date(lastActionStr).getTime() > maxWaitDays * 24 * 60 * 60 * 1000;
+
+          if (waitTimeElapsed) {
+            const timeoutEdge = edges.find(e => e.data?.condition === 'still_not_accepted');
+            if (timeoutEdge) {
+              prospect.custom_variables.current_node_id = timeoutEdge.target;
+              prospect.status = 'Not Connected';
+              try {
+                await supabaseDirect.from('prospects').update({
+                  status: 'Not Connected',
+                  custom_variables: prospect.custom_variables,
+                }).eq('id', prospect.id);
+              } catch (e) {
+                console.warn(e);
+              }
+            }
+            continue;
+          }
+          continue;
+        }
+      }
+
+      if (nodeType === 'wait_reply') {
+        const { replied } = await directCheckProspectReplied(prospect);
+        const edges = sourceEdgesMap.get(currentNode.id) || [];
+        
+        if (replied) {
+          const repliedEdge = edges.find(e => e.data?.condition === 'replied');
+          if (repliedEdge) {
+            prospect.custom_variables.current_node_id = repliedEdge.target;
+            prospect.status = 'Replied';
+            try {
+              await supabaseDirect.from('prospects').update({
+                status: 'Replied',
+                custom_variables: prospect.custom_variables,
+              }).eq('id', prospect.id);
+            } catch (e) {
+              console.warn(e);
+            }
+          }
+          continue;
+        } else {
+          const lastActionStr = prospect.custom_variables?.last_action_at || prospect.created_at;
+          const maxWaitDays = Number(nodeConfig.max_wait_days) || 14;
+          const waitTimeElapsed = Date.now() - new Date(lastActionStr).getTime() > maxWaitDays * 24 * 60 * 60 * 1000;
+
+          if (waitTimeElapsed) {
+            const notRepliedEdge = edges.find(e => e.data?.condition === 'not_replied');
+            if (notRepliedEdge) {
+              prospect.custom_variables.current_node_id = notRepliedEdge.target;
+              try {
+                await supabaseDirect.from('prospects').update({ custom_variables: prospect.custom_variables }).eq('id', prospect.id);
+              } catch (e) {
+                console.warn(e);
+              }
+            }
+            continue;
+          }
+          continue;
+        }
+      }
+
+      if (nodeType === 'stop_if_replied') {
+        const { replied } = await directCheckProspectReplied(prospect);
+        const edges = sourceEdgesMap.get(currentNode.id) || [];
+        if (replied) {
+          prospect.status = 'Replied';
+          try {
+            await supabaseDirect.from('prospects').update({ status: 'Replied' }).eq('id', prospect.id);
+          } catch (e) {
+            console.warn(e);
+          }
+          continue;
+        } else {
+          const defaultEdge = edges.find(e => !e.data?.condition || e.data.condition === 'default');
+          if (defaultEdge) {
+            prospect.custom_variables.current_node_id = defaultEdge.target;
+            try {
+              await supabaseDirect.from('prospects').update({ custom_variables: prospect.custom_variables }).eq('id', prospect.id);
+            } catch (e) {
+              console.warn(e);
+            }
+          }
+          continue;
+        }
+      }
+
+      if (nodeType === 'completed') {
+        prospect.status = 'Completed';
+        try {
+          await supabaseDirect.from('prospects').update({ status: 'Completed' }).eq('id', prospect.id);
+        } catch (e) {
+          console.warn(e);
+        }
+        continue;
+      }
+
+      if (nodeType === 'failed') {
+        prospect.status = 'Failed';
+        try {
+          await supabaseDirect.from('prospects').update({ status: 'Failed' }).eq('id', prospect.id);
+        } catch (e) {
+          console.warn(e);
+        }
+        continue;
+      }
+
+      const render = (templateText) => {
+        if (!templateText) return '';
+        return String(templateText)
+          .replace(/\{\{\s*first_name\s*\}\}/g, prospect.first_name || 'there')
+          .replace(/\{\{\s*last_name\s*\}\}/g, prospect.last_name || '')
+          .replace(/\{\{\s*company\s*\}\}/g, prospect.company || 'your company')
+          .replace(/\{\{\s*title\s*\}\}/g, prospect.job_title || 'your role')
+          .replace(/\{\{\s*industry\s*\}\}/g, prospect.custom_fields?.industry || '')
+          .replace(/\{\{\s*location\s*\}\}/g, prospect.custom_fields?.location || '');
+      };
+
+      let success = false;
+      let errorMsg = '';
+
+      if (nodeType === 'visit_profile') {
+        const res = await directVisitProfile(prospect);
+        success = res.success;
+        errorMsg = res.error;
+      } 
+      else if (nodeType === 'follow_profile') {
+        const res = await directFollowProfile(prospect);
+        success = res.success;
+      } 
+      else if (nodeType === 'endorse_profile') {
+        const res = await directEndorseProfile(prospect);
+        success = res.success;
+      } 
+      else if (nodeType === 'send_invitation') {
+        const inviteNote = render(nodeConfig.note || '');
+        const res = await directSendUnipileConnectionInvite(prospect, inviteNote);
+        success = res.success;
+        errorMsg = res.error;
+        if (success) totalConnections += 1;
+      } 
+      else if (nodeType === 'send_message') {
+        const msgText = render(nodeConfig.message || '');
+        const res = await directSendUnipileChatMessage(prospect, msgText);
+        success = res.success;
+        errorMsg = res.error;
+        if (success) totalMessages += 1;
+      } 
+      else if (nodeType === 'send_inmail') {
+        const subject = render(nodeConfig.subject || '');
+        const text = render(nodeConfig.message || '');
+        const res = await directSendUnipileInMail(prospect, subject, text);
+        success = res.success;
+        errorMsg = res.error;
+        if (success) totalMessages += 1;
+      } 
+      else if (nodeType === 'check_messageability') {
+        const res = await directVisitProfile(prospect);
+        success = res.success;
+        errorMsg = res.error;
+        
+        if (success) {
+          const isPremium = res.data?.is_premium || false;
+          const openProfile = res.data?.is_open_profile || false;
+          const edges = sourceEdgesMap.get(currentNode.id) || [];
+          
+          let targetEdge = null;
+          if (isPremium || openProfile) {
+            targetEdge = edges.find(e => e.data?.condition === 'inmail');
+          }
+          if (!targetEdge) {
+            targetEdge = edges.find(e => e.data?.condition === 'message' || e.data?.condition === 'default');
+          }
+          
+          if (targetEdge) {
+            prospect.custom_variables.current_node_id = targetEdge.target;
+          }
+        }
+      }
+
+      if (success) {
+        actionsTaken += 1;
+        totalExecuted += 1;
+
+        const historyItem = {
+          node_id: currentNode.id,
+          node_type: nodeType,
+          node_label: nodeLabel,
+          executed_at: new Date().toISOString(),
+          status: 'success',
+        };
+
+        const updatedHistory = [...(prospect.custom_variables.history || []), historyItem];
+        const edges = sourceEdgesMap.get(currentNode.id) || [];
+        const defaultEdge = edges.find(e => !e.data?.condition || e.data.condition === 'default');
+        
+        if (nodeType !== 'check_messageability' && defaultEdge) {
+          prospect.custom_variables.current_node_id = defaultEdge.target;
+        }
+
+        prospect.custom_variables.last_action_at = new Date().toISOString();
+        prospect.custom_variables.history = updatedHistory;
+
+        try {
+          await supabaseDirect.from('prospects').update({
+            custom_variables: prospect.custom_variables,
+            updated_at: new Date().toISOString(),
+          }).eq('id', prospect.id);
+        } catch (e) {
+          console.warn(e);
+        }
+      } else {
+        const historyItem = {
+          node_id: currentNode.id,
+          node_type: nodeType,
+          node_label: nodeLabel,
+          executed_at: new Date().toISOString(),
+          status: 'failed',
+          error: errorMsg,
+        };
+        prospect.custom_variables.history = [...(prospect.custom_variables.history || []), historyItem];
+        try {
+          await supabaseDirect.from('prospects').update({
+            custom_variables: prospect.custom_variables,
+          }).eq('id', prospect.id);
+        } catch (e) {
+          console.warn(e);
+        }
+      }
+    }
+  }
+
   return {
     success: true,
-    accepted: accRes.accepted_count,
-    connections_sent: connRes.sent_count,
-    messages_sent: msgRes.sent_count,
+    accepted: 0,
+    connections_sent: totalConnections,
+    messages_sent: totalMessages,
+    executed_count: totalExecuted,
   };
 };
+
+export const directCheckAcceptances = async () => directRunFlow();
+export const directRunConnections = async () => directRunFlow();
+export const directRunMessages = async () => directRunFlow();
+
 
 
 

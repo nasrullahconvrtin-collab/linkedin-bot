@@ -43,10 +43,6 @@ export const NODE_TYPES_DEF = [
   { type: 'stop_if_replied',      label: 'Stop if Replied',       icon: XCircle,        color: '#dc2626', category: 'control',  description: 'Stop sequence if prospect replied' },
   { type: 'completed',            label: 'Completed',             icon: Flag,           color: '#16a34a', category: 'control',  description: 'End of sequence — mark completed' },
   { type: 'failed',               label: 'Failed / Needs Attention', icon: AlertTriangle, color: '#dc2626', category: 'control', description: 'Stop and flag for review' },
-  // Integrations
-  { type: 'crm_sync',             label: 'CRM Sync',              icon: Database,       color: '#0369a1', category: 'integration', description: 'Push prospect to HubSpot' },
-  { type: 'email_finder',         label: 'Email Finder',          icon: AtSign,         color: '#7c3aed', category: 'integration', description: 'Find prospect email address' },
-  { type: 'send_email',           label: 'Send Email',            icon: Send,           color: '#0891b2', category: 'integration', description: 'Send an approved email' },
 ];
 
 const NODE_MAP = Object.fromEntries(NODE_TYPES_DEF.map(n => [n.type, n]));
