@@ -27,20 +27,11 @@ export const NODE_TYPES_DEF = [
   { type: 'visit_profile',        label: 'Visit Profile',         icon: Eye,            color: '#6366f1', category: 'action',   description: 'Open the prospect profile and record the visit' },
   { type: 'follow_profile',       label: 'Follow Profile',        icon: UserPlus,       color: '#8b5cf6', category: 'action',   description: 'Click Follow on the prospect profile' },
   { type: 'endorse_profile',      label: 'Endorse Profile',       icon: ThumbsUp,       color: '#f59e0b', category: 'action',   description: 'Visit profile and endorse a top skill' },
-  { type: 'send_invitation',      label: 'Send Connection Request', icon: UserCheck,    color: '#7c3aed', category: 'action',   description: 'Visit profile, check connection status, then connect — with or without a note' },
-  { type: 'check_messageability', label: 'Check Messageability',  icon: GitBranch,      color: '#0891b2', category: 'action',   description: 'Open Message and detect normal message vs. InMail vs. nothing' },
-  { type: 'send_inmail',          label: 'Send InMail',           icon: Mail,           color: '#0e7490', category: 'action',   description: 'Visit profile, confirm InMail is available, then send subject + message' },
-  { type: 'send_message',         label: 'Send Message',          icon: MessageSquare,  color: '#7c3aed', category: 'action',   description: 'Open the conversation and send a prepared message' },
-  { type: 'check_reply',          label: 'Check Reply',           icon: MessageSquare,  color: '#059669', category: 'action',   description: 'Open messages and check if the prospect replied' },
-  // Queue steps
-  { type: 'needs_personalization',label: 'Needs Personalization', icon: Settings,       color: '#d97706', category: 'queue',    description: 'Pause — employee writes personalized message' },
-  { type: 'ready_to_send',        label: 'Ready to Send',         icon: CheckCircle2,   color: '#16a34a', category: 'queue',    description: 'Employee approved — agent sends next' },
+  { type: 'send_invitation',      label: 'Connection Request',    icon: UserCheck,    color: '#7c3aed', category: 'action',   description: 'Sends invitation, checks if already connected, and waits for acceptance automatically' },
+  { type: 'send_message',         label: 'Send Message',          icon: MessageSquare,  color: '#7c3aed', category: 'action',   description: 'Delivers a message and checks if they reply automatically' },
   // Delays
   { type: 'wait',                 label: 'Wait / Delay',          icon: Clock,          color: '#475569', category: 'delay',    description: 'Pause for a number of days before the next step' },
-  { type: 'wait_acceptance',      label: 'Wait for Acceptance',   icon: Clock,          color: '#475569', category: 'delay',    description: 'Polls the profile on a schedule for the Message button (= accepted) until it shows up or the max wait elapses' },
-  { type: 'wait_reply',          label: 'Wait for InMail Reply',  icon: Clock,          color: '#475569', category: 'delay',    description: 'Polls the profile on a schedule for a normal message box (InMail accepted) until it shows up or the max wait elapses' },
   // Control
-  { type: 'stop_if_replied',      label: 'Stop if Replied',       icon: XCircle,        color: '#dc2626', category: 'control',  description: 'Stop sequence if prospect replied' },
   { type: 'completed',            label: 'Completed',             icon: Flag,           color: '#16a34a', category: 'control',  description: 'End of sequence — mark completed' },
   { type: 'failed',               label: 'Failed / Needs Attention', icon: AlertTriangle, color: '#dc2626', category: 'control', description: 'Stop and flag for review' },
 ];
