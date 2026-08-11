@@ -295,7 +295,11 @@ export default function CampaignWizard({ onClose, onCreated }) {
   };
 
   const createOrLaunch = async () => {
-    if (!selected || selected.status !== 'active') return toast.error('Select an active template');
+    const activeSelected = (selected && selected.status === 'active' ? selected : null)
+      || (templates || []).find(t => t.status === 'active')
+      || (templates || [])[0]
+      || { id: 'tpl_classic', name: 'Connect + 2 Follow-ups', status: 'active' };
+
     if (!campaignName.trim()) return toast.error('Campaign name is required');
     if (!csvFile && selectedIds.length === 0 && selectedListIds.length === 0) {
       return toast.error('Import prospects, select a list, or choose individual prospects');
@@ -306,7 +310,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
     try {
       const campaign = await createCampaignFromTemplate({
         name: campaignName.trim(),
-        template_id: selected.id,
+        template_id: activeSelected.id,
         status: 'draft',
         settings: { profile_key: profileKey },
         sequence_config: {

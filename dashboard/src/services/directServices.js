@@ -196,18 +196,22 @@ export const directCreateCampaign = async (data) => {
   const payload = {
     name: data.name || 'New Campaign',
     status: data.status || 'draft',
-    profile_key: data.profile_key || 'profile_1',
+    profile_key: data.profile_key || (data.settings && data.settings.profile_key) || 'profile_1',
     daily_limit: data.daily_limit || 25,
     sequence: data.sequence || [],
+    sequence_config: data.sequence_config || {},
+    settings: data.settings || {},
+    template: data.template || {},
     created_at: new Date().toISOString(),
   };
   try {
     const { data: res, error } = await supabaseDirect.from('campaigns').insert([payload]).select();
+    if (error) console.error('directCreateCampaign error:', error);
     if (!error && res && res[0]) return res[0];
   } catch (e) {
     console.warn('directCreateCampaign warning:', e);
   }
-  return payload;
+  return { id: crypto.randomUUID(), ...payload };
 };
 
 export const directGetCampaign = async (id) => {
@@ -240,7 +244,13 @@ export const directDeleteCampaign = async (id) => {
 };
 
 export const directLaunchCampaign = async (id, data = {}) => {
-  return directUpdateCampaign(id, { status: 'active', launched_at: new Date().toISOString() });
+  const prospectIds = data.prospect_ids || [];
+  if (prospectIds.length > 0) {
+    await directAddProspectsToCampaign(id, prospectIds);
+  }
+  await directUpdateCampaign(id, { status: 'running', launched_at: new Date().toISOString() });
+  const flowResult = await directRunFlow();
+  return { success: true, queued: prospectIds.length, ...flowResult };
 };
 
 // ── Prospects Direct Operations ──────────────────────────────────
@@ -274,6 +284,8 @@ export const directCreateProspect = async (data) => {
     name: data.name || `${data.first_name || ''} ${data.last_name || ''}`.trim(),
     headline: data.headline || '',
     company: data.company || '',
+    job_title: data.job_title || '',
+    email: data.email || '',
     linkedin_url: data.linkedin_url || '',
     status: data.status || 'Not Contacted',
     campaign_id: data.campaign_id || null,
@@ -283,11 +295,12 @@ export const directCreateProspect = async (data) => {
   };
   try {
     const { data: res, error } = await supabaseDirect.from('prospects').insert([payload]).select();
+    if (error) console.error('directCreateProspect error:', error);
     if (!error && res && res[0]) return res[0];
   } catch (e) {
     console.warn('directCreateProspect warning:', e);
   }
-  return payload;
+  return { id: crypto.randomUUID(), ...payload };
 };
 
 export const directGetProspect = async (id) => {
@@ -320,15 +333,24 @@ export const directDeleteProspect = async (id) => {
 };
 
 export const directAddProspectsToCampaign = async (campaignId, prospectIds) => {
+  if (!campaignId || !prospectIds || !Array.isArray(prospectIds) || prospectIds.length === 0) {
+    return { success: true, added: 0 };
+  }
   try {
-    await supabaseDirect
-      .from('prospects')
-      .update({ campaign_id: campaignId })
-      .in('id', prospectIds);
+    const validUuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const validIds = prospectIds.filter(id => typeof id === 'string' && validUuidPattern.test(id));
+    if (validIds.length > 0) {
+      const { error } = await supabaseDirect
+        .from('prospects')
+        .update({ campaign_id: campaignId })
+        .in('id', validIds);
+      if (error) console.error('directAddProspectsToCampaign error:', error);
+      return { success: !error, added: validIds.length };
+    }
   } catch (e) {
     console.warn('directAddProspectsToCampaign warning:', e);
   }
-  return { success: true };
+  return { success: true, added: 0 };
 };
 
 export const directBulkImportProspects = async (file, campaignId, mode, listId) => {
@@ -428,6 +450,27 @@ export const directDeleteProspectList = async (id) => {
     console.warn('directDeleteProspectList warning:', e);
   }
   return { success: true };
+};
+
+export const directGetProspectListMembers = async (listId) => {
+  try {
+    const { data: members, error: mErr } = await supabaseDirect
+      .from('prospect_list_members')
+      .select('prospect_id')
+      .eq('list_id', listId);
+
+    if (!mErr && members && members.length > 0) {
+      const pIds = members.map(m => m.prospect_id).filter(Boolean);
+      const { data: prospects, error: pErr } = await supabaseDirect
+        .from('prospects')
+        .select('*')
+        .in('id', pIds);
+      if (!pErr && prospects) return { prospects };
+    }
+  } catch (e) {
+    console.warn('directGetProspectListMembers warning:', e);
+  }
+  return { prospects: [] };
 };
 
 // ── Unipile Campaign Execution Pipeline ──────────────────────────

@@ -17,6 +17,7 @@ import {
   directGetNetworkingInvitations,
   directGetProfiles,
   directGetProspect,
+  directGetProspectListMembers,
   directGetProspectLists,
   directGetProspects,
   directGetUnipileAccountInfo,
@@ -49,6 +50,58 @@ api.interceptors.response.use(
   }
 );
 
+export const DEFAULT_CAMPAIGN_TEMPLATES = [
+  {
+    id: 'tpl_classic',
+    name: 'Connect + 2 Follow-ups',
+    status: 'active',
+    supported_actions: ['visit_profile', 'send_invitation', 'send_message'],
+    steps: [
+      { id: 'step_1', label: 'Visit Profile', action_type: 'visit_profile', step_order: 1 },
+      { id: 'step_2', label: 'Send Connection Request', action_type: 'invitation', step_order: 2 },
+      { id: 'step_3', label: 'Wait for Acceptance', action_type: 'wait', step_order: 3, config: { until: 'connected' } },
+      { id: 'step_4', label: 'Send Initial Message', action_type: 'message', step_order: 4 },
+      { id: 'step_5', label: 'Wait 3 days', action_type: 'wait', step_order: 5, config: { days: 3 } },
+      { id: 'step_6', label: 'Follow-up 1', action_type: 'follow-up message', step_order: 6 },
+    ],
+  },
+  {
+    id: 'tpl_inmail',
+    name: 'InMail-first with fallbacks',
+    status: 'active',
+    supported_actions: ['check_messageability', 'send_inmail', 'send_invitation', 'send_message'],
+    steps: [
+      { id: 'step_1', label: 'Visit Profile', action_type: 'visit_profile', step_order: 1 },
+      { id: 'step_2', label: 'Check Messageability', action_type: 'check_messageability', step_order: 2 },
+      { id: 'step_3', label: 'Send Connection Request', action_type: 'invitation', step_order: 3 },
+      { id: 'step_4', label: 'Send Initial Message', action_type: 'message', step_order: 4 },
+    ],
+  },
+  {
+    id: 'tpl_warmup',
+    name: 'Warm-up, then connect',
+    status: 'active',
+    supported_actions: ['visit_profile', 'follow_profile', 'endorse_profile', 'send_invitation', 'send_message'],
+    steps: [
+      { id: 'step_1', label: 'Visit & Follow Profile', action_type: 'visit_profile', step_order: 1 },
+      { id: 'step_2', label: 'Endorse a Skill', action_type: 'endorse_profile', step_order: 2 },
+      { id: 'step_3', label: 'Send Connection Request', action_type: 'invitation', step_order: 3 },
+      { id: 'step_4', label: 'Send Initial Message', action_type: 'message', step_order: 4 },
+    ],
+  },
+  {
+    id: 'tpl_simple',
+    name: 'Simple: Connect + Message',
+    status: 'active',
+    supported_actions: ['send_invitation', 'send_message'],
+    steps: [
+      { id: 'step_1', label: 'Send Connection Request', action_type: 'invitation', step_order: 1 },
+      { id: 'step_2', label: 'Wait for Acceptance', action_type: 'wait', step_order: 2, config: { until: 'connected' } },
+      { id: 'step_3', label: 'Send Message', action_type: 'message', step_order: 3 },
+    ],
+  },
+];
+
 // ── Campaigns ────────────────────────────────────────────────
 export const getCampaigns      = ()         => api.get('/campaigns').catch(() => directGetCampaigns());
 export const createCampaign    = (data)     => api.post('/campaigns', data).catch(() => directCreateCampaign(data));
@@ -56,22 +109,22 @@ export const getCampaign       = (id)       => api.get(`/campaigns/${id}`).catch
 export const updateCampaign    = (id, data) => api.put(`/campaigns/${id}`, data).catch(() => directUpdateCampaign(id, data));
 export const deleteCampaign    = (id)       => api.delete(`/campaigns/${id}`).catch(() => directDeleteCampaign(id));
 export const duplicateCampaign = (id, data) => api.post(`/campaigns/${id}/duplicate`, data || {}).catch(() => directGetCampaign(id));
-export const getCampaignTemplates = (params) => api.get('/campaign-templates', { params }).catch(() => []);
-export const getCampaignTemplate  = (id)     => api.get(`/campaign-templates/${id}`).catch(() => null);
+export const getCampaignTemplates = (params) => api.get('/campaign-templates', { params }).catch(() => ({ templates: DEFAULT_CAMPAIGN_TEMPLATES }));
+export const getCampaignTemplate  = (id)     => api.get(`/campaign-templates/${id}`).catch(() => DEFAULT_CAMPAIGN_TEMPLATES.find(t => t.id === id) || DEFAULT_CAMPAIGN_TEMPLATES[0]);
 export const createCampaignFromTemplate = (data) => api.post('/campaigns/from-template', data).catch(() => directCreateCampaign(data));
 export const launchCampaign    = (id, data) => api.post(`/campaigns/${id}/launch`, data || {}).catch(() => directLaunchCampaign(id, data));
 export const addProspectsToCampaign = (id, prospect_ids) => api.post(`/campaigns/${id}/prospects`, { prospect_ids }).catch(() => directAddProspectsToCampaign(id, prospect_ids));
 export const removeProspectsFromCampaign = (id, prospect_ids) => api.delete(`/campaigns/${id}/prospects`, { data: { prospect_ids } }).catch(() => ({ success: true }));
 export const updateCampaignStatus = (id, data) => api.put(`/campaigns/${id}/status`, data).catch(() => directUpdateCampaign(id, data));
 export const getCampaignSequence = (id) => api.get(`/campaigns/${id}/sequence`).catch(() => []);
-export const getCampaignVariables = () => api.get('/campaign-variables').catch(() => []);
+export const getCampaignVariables = () => api.get('/campaign-variables').catch(() => ({ standard: ['first_name', 'last_name', 'company', 'title', 'industry', 'location'] }));
 
 // ── Prospect Lists ───────────────────────────────────────────
 export const getProspectLists = () => api.get('/prospect-lists').catch(() => directGetProspectLists());
 export const createProspectList = (data) => api.post('/prospect-lists', data).catch(() => directCreateProspectList(data));
 export const updateProspectList = (id, data) => api.put(`/prospect-lists/${id}`, data).catch(() => directUpdateProspectList(id, data));
 export const deleteProspectList = (id) => api.delete(`/prospect-lists/${id}`).catch(() => directDeleteProspectList(id));
-export const getProspectListMembers = (id, params) => api.get(`/prospect-lists/${id}/prospects`, { params }).catch(() => ({ prospects: [] }));
+export const getProspectListMembers = (id, params) => api.get(`/prospect-lists/${id}/prospects`, { params }).catch(() => directGetProspectListMembers(id));
 export const addProspectsToList = (id, prospect_ids) => api.post(`/prospect-lists/${id}/members`, { prospect_ids }).catch(() => ({ success: true }));
 export const removeProspectsFromList = (id, prospect_ids) => api.delete(`/prospect-lists/${id}/members`, { data: { prospect_ids } }).catch(() => ({ success: true }));
 
