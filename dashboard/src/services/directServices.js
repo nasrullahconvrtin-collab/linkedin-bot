@@ -475,29 +475,58 @@ export const directGetProspectListMembers = async (listId) => {
 
 // ── Unipile Campaign Execution Pipeline ──────────────────────────
 
+const getLinkedinId = (prospect) => {
+  if (prospect.provider_id) return prospect.provider_id;
+  if (prospect.public_identifier) return prospect.public_identifier;
+  if (prospect.member_id) return prospect.member_id;
+  if (prospect.linkedin_url) {
+    const parts = prospect.linkedin_url.split('/in/');
+    if (parts[1]) {
+      return parts[1].split('?')[0].replace(/\//g, '').trim();
+    }
+  }
+  return prospect.id;
+};
+
 export const directVisitProfile = async (prospect) => {
-  const targetId = prospect.public_identifier || prospect.provider_id || prospect.linkedin_url?.split('/in/')?.[1]?.replace(/\//g, '');
+  const targetId = getLinkedinId(prospect);
   if (!targetId) return { success: false, error: 'No identifier found for prospect' };
+  
   const { ok, data } = await unipileFetch(`/users/${targetId}?account_id=${DEFAULT_ACCOUNT_ID}`);
+  if (ok && data) {
+    try {
+      await supabaseDirect.from('prospects').update({
+        public_identifier: data.public_identifier || '',
+        provider_id: data.provider_id || '',
+        member_id: data.member_urn || '',
+      }).eq('id', prospect.id);
+      // Update local object fields for immediate subsequent steps in the loop
+      prospect.public_identifier = data.public_identifier || '';
+      prospect.provider_id = data.provider_id || '';
+      prospect.member_id = data.member_urn || '';
+    } catch (e) {
+      console.warn('Failed to update prospect identifiers:', e);
+    }
+  }
   return { success: ok, data };
 };
 
 export const directFollowProfile = async (prospect) => {
-  const targetId = prospect.public_identifier || prospect.provider_id || prospect.linkedin_url?.split('/in/')?.[1]?.replace(/\//g, '');
+  const targetId = getLinkedinId(prospect);
   if (!targetId) return { success: true };
   await unipileFetch(`/users/${targetId}?account_id=${DEFAULT_ACCOUNT_ID}`);
   return { success: true };
 };
 
 export const directEndorseProfile = async (prospect) => {
-  const targetId = prospect.public_identifier || prospect.provider_id || prospect.linkedin_url?.split('/in/')?.[1]?.replace(/\//g, '');
+  const targetId = getLinkedinId(prospect);
   if (!targetId) return { success: true };
   await unipileFetch(`/users/${targetId}?account_id=${DEFAULT_ACCOUNT_ID}`);
   return { success: true };
 };
 
 export const directSendUnipileConnectionInvite = async (prospect, message = '') => {
-  const provider_id = prospect.provider_id || prospect.member_id || prospect.public_identifier || prospect.linkedin_url;
+  const provider_id = getLinkedinId(prospect);
   const payload = {
     account_id: DEFAULT_ACCOUNT_ID,
     provider_id,
@@ -525,7 +554,7 @@ export const directSendUnipileConnectionInvite = async (prospect, message = '') 
 };
 
 export const directSendUnipileChatMessage = async (prospect, text = '') => {
-  const recipientId = prospect.provider_id || prospect.member_id || prospect.id;
+  const recipientId = getLinkedinId(prospect);
   const payload = {
     account_id: DEFAULT_ACCOUNT_ID,
     attendees_ids: [recipientId],
@@ -552,7 +581,7 @@ export const directSendUnipileChatMessage = async (prospect, text = '') => {
 };
 
 export const directSendUnipileInMail = async (prospect, subject = '', text = '') => {
-  const recipientId = prospect.provider_id || prospect.member_id || prospect.public_identifier || prospect.linkedin_url;
+  const recipientId = getLinkedinId(prospect);
   const payload = {
     account_id: DEFAULT_ACCOUNT_ID,
     attendees_ids: [recipientId],
@@ -568,7 +597,7 @@ export const directSendUnipileInMail = async (prospect, subject = '', text = '')
 };
 
 export const directCheckProspectReplied = async (prospect) => {
-  const recipientId = prospect.provider_id || prospect.member_id || prospect.public_identifier || prospect.linkedin_url;
+  const recipientId = getLinkedinId(prospect);
   if (!recipientId) return { success: true, replied: false };
   const { ok, data } = await unipileFetch(`/chats?account_id=${DEFAULT_ACCOUNT_ID}&attendees_ids=${encodeURIComponent(recipientId)}`);
   if (ok && data && Array.isArray(data.items)) {
