@@ -146,11 +146,17 @@ export default function CampaignWizard({ onClose, onCreated }) {
       getMessages().catch(() => ({ messages: [] })),
     ])
       .then(([templateData, variableData, prospectData, listData, profileData, messageTemplateData]) => {
-        const allTemplates = templateData.templates || [];
+        const rawTemplates = templateData.templates || (Array.isArray(templateData) ? templateData : []);
+        const allTemplates = rawTemplates.length > 0 ? rawTemplates : [
+          { id: 'tpl_classic', name: 'Connect + 2 Follow-ups', status: 'active', supported_actions: ['visit_profile', 'send_invitation', 'send_message'] },
+          { id: 'tpl_inmail', name: 'InMail-first with fallbacks', status: 'active', supported_actions: ['check_messageability', 'send_invitation', 'send_message'] },
+          { id: 'tpl_warmup', name: 'Warm-up, then connect', status: 'active', supported_actions: ['visit_profile', 'endorse_profile', 'send_invitation', 'send_message'] },
+          { id: 'tpl_simple', name: 'Simple: Connect + Message', status: 'active', supported_actions: ['send_invitation', 'send_message'] },
+        ];
         setTemplates(allTemplates);
-        const firstActive = allTemplates.find(t => t.status === 'active') || allTemplates[0] || null;
+        const firstActive = allTemplates.find(t => t.status === 'active') || allTemplates[0];
         setSelected(firstActive);
-        setCampaignName(firstActive?.name || '');
+        setCampaignName(firstActive?.name || 'Connect + 2 Follow-ups');
         // Pre-populate sequence builder with matching template on initial load
         if (firstActive?.name) {
           const seqTpl = pickSequenceTemplate(firstActive.name);

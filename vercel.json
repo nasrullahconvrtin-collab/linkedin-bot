@@ -1,0 +1,9 @@
+{
+  "buildCommand": "cd dashboard && npm run build",
+  "outputDirectory": "dashboard/dist",
+  "framework": "vite",
+  "rewrites": [
+    { "source": "/downloads/(.*)", "destination": "/downloads/$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

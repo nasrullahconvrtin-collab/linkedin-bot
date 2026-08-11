@@ -1,0 +1,7 @@
+{
+  "name": "linkedin-bot",
+  "private": true,
+  "scripts": {
+    "build": "cd dashboard && npm run build"
+  }
+}
