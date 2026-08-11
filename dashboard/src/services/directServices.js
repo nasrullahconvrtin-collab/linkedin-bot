@@ -684,6 +684,13 @@ export const directRunFlow = async () => {
       const nodeConfig = currentNode.data?.config || {};
       const nodeLabel = currentNode.data?.label || currentNode.id;
 
+      // Auto-resolve LinkedIn IDs if the prospect has not been visited/resolved yet
+      const isActionNode = ['follow_profile', 'endorse_profile', 'send_invitation', 'send_message', 'send_inmail', 'check_messageability', 'check_reply'].includes(nodeType);
+      if (isActionNode && !prospect.provider_id && !prospect.member_id) {
+        console.log(`Prospect ${prospect.name || prospect.id} does not have resolved provider IDs. Performing auto-visit resolution...`);
+        await directVisitProfile(prospect);
+      }
+
       if (nodeType === 'wait') {
         const nextScheduledStr = prospect.custom_variables?.next_scheduled_at;
         if (nextScheduledStr) {
