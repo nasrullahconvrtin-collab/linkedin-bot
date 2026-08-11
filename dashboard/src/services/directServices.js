@@ -359,31 +359,83 @@ export const directBulkImportProspects = async (file, campaignId, mode, listId) 
     reader.onload = async (e) => {
       try {
         const text = e.target.result;
-        const lines = text.split(/\r?\n/).filter(l => l.trim());
-        if (lines.length <= 1) return resolve({ imported_count: 0 });
         
-        const headers = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, '').toLowerCase());
+        // RFC-4180 compliant CSV parser to handle quotes, newlines, and commas inside fields
+        const parseCSV = (csvText) => {
+          const lines = [];
+          let row = [""];
+          let inQuotes = false;
+
+          for (let i = 0; i < csvText.length; i++) {
+            const char = csvText[i];
+            const nextChar = csvText[i + 1];
+
+            if (char === '"') {
+              if (inQuotes && nextChar === '"') {
+                row[row.length - 1] += '"';
+                i++; // Skip double double-quote
+              } else {
+                inQuotes = !inQuotes;
+              }
+            } else if (char === ',' && !inQuotes) {
+              row.push("");
+            } else if ((char === '\r' || char === '\n') && !inQuotes) {
+              if (char === '\r' && nextChar === '\n') {
+                i++; // Skip CR LF
+              }
+              // End of row
+              lines.push(row.map(c => c.trim()));
+              row = [""];
+            } else {
+              row[row.length - 1] += char;
+            }
+          }
+          if (row.length > 1 || row[0] !== "") {
+            lines.push(row.map(c => c.trim()));
+          }
+          return lines;
+        };
+
+        const parsedData = parseCSV(text);
+        if (parsedData.length <= 1) return resolve({ imported_count: 0 });
+
+        const rawHeaders = parsedData[0];
+        const headers = rawHeaders.map(h => h.trim().replace(/^["']|["']$/g, '').toLowerCase());
         const prospectsToInsert = [];
-        
-        for (let i = 1; i < lines.length; i += 1) {
-          const cols = lines[i].split(',').map(c => c.trim().replace(/^["']|["']$/g, ''));
-          if (cols.length === 0 || !cols[0]) continue;
-          
+
+        for (let i = 1; i < parsedData.length; i += 1) {
+          const cols = parsedData[i];
+          if (cols.length === 0 || (cols.length === 1 && !cols[0])) continue;
+
           const rowObj = {};
           headers.forEach((h, idx) => {
             rowObj[h] = cols[idx] || '';
           });
-          
+
+          // Check if it's a completely empty line
+          const values = Object.values(rowObj).filter(Boolean);
+          if (values.length === 0) continue;
+
           const firstName = rowObj.first_name || rowObj.firstname || rowObj.name?.split(' ')[0] || 'Lead';
           const lastName = rowObj.last_name || rowObj.lastname || rowObj.name?.split(' ').slice(1).join(' ') || '';
-          
+          const linkedinUrl = rowObj.linkedin_url || rowObj.linkedinurl || rowObj.profile_url || rowObj.url || '';
+
+          // Look for any headers matching linkedin_url or linkedinurl to make sure we resolve it
+          let resolvedLinkedinUrl = linkedinUrl;
+          if (!resolvedLinkedinUrl) {
+            const foundKey = Object.keys(rowObj).find(k => k.replace(/[^a-z]/g, '') === 'linkedinurl');
+            if (foundKey) {
+              resolvedLinkedinUrl = rowObj[foundKey];
+            }
+          }
+
           prospectsToInsert.push({
             first_name: firstName,
             last_name: lastName,
             name: `${firstName} ${lastName}`.trim(),
             headline: rowObj.headline || rowObj.title || '',
             company: rowObj.company || rowObj.organization || '',
-            linkedin_url: rowObj.linkedin_url || rowObj.profile_url || rowObj.url || '',
+            linkedin_url: resolvedLinkedinUrl || '',
             status: 'Not Contacted',
             campaign_id: campaignId || null,
             assigned_account: 'profile_1',
@@ -391,11 +443,11 @@ export const directBulkImportProspects = async (file, campaignId, mode, listId) 
             created_at: new Date().toISOString(),
           });
         }
-        
+
         if (prospectsToInsert.length > 0) {
           await supabaseDirect.from('prospects').upsert(prospectsToInsert);
         }
-        
+
         resolve({ success: true, imported_count: prospectsToInsert.length });
       } catch (err) {
         console.error('directBulkImportProspects error:', err);
@@ -663,6 +715,38 @@ export const directRunFlow = async () => {
         continue;
       }
 
+      const render = (templateText) => {
+        if (!templateText) return '';
+        let text = String(templateText);
+        
+        const matches = text.match(/\{\{\s*([a-zA-Z0-9_\-\s]+)\s*\}\}/g) || [];
+        for (const m of matches) {
+          const varName = m.replace(/\{\{\s*|\s*\}\}/g, '').trim();
+          const norm = (v) => v.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const normVar = norm(varName);
+
+          let resolvedValue = '';
+          
+          if (normVar === 'firstname' || normVar === 'first_name') resolvedValue = prospect.first_name || '';
+          else if (normVar === 'lastname' || normVar === 'last_name') resolvedValue = prospect.last_name || '';
+          else if (normVar === 'company') resolvedValue = prospect.company || '';
+          else if (normVar === 'title') resolvedValue = prospect.job_title || '';
+          else {
+            if (prospect[varName] !== undefined) resolvedValue = prospect[varName];
+            else if (prospect.custom_variables) {
+              const matchKey = Object.keys(prospect.custom_variables).find(k => norm(k) === normVar);
+              if (matchKey !== undefined) {
+                resolvedValue = prospect.custom_variables[matchKey];
+              }
+            }
+          }
+          
+          text = text.replace(m, resolvedValue !== undefined ? String(resolvedValue) : '');
+        }
+        
+        return text;
+      };
+
       let currentNodeId = prospect.custom_variables?.current_node_id;
       if (!currentNodeId) {
         currentNodeId = startNode.id;
@@ -925,17 +1009,6 @@ export const directRunFlow = async () => {
         }
         continue;
       }
-
-      const render = (templateText) => {
-        if (!templateText) return '';
-        return String(templateText)
-          .replace(/\{\{\s*first_name\s*\}\}/g, prospect.first_name || 'there')
-          .replace(/\{\{\s*last_name\s*\}\}/g, prospect.last_name || '')
-          .replace(/\{\{\s*company\s*\}\}/g, prospect.company || 'your company')
-          .replace(/\{\{\s*title\s*\}\}/g, prospect.job_title || 'your role')
-          .replace(/\{\{\s*industry\s*\}\}/g, prospect.custom_fields?.industry || '')
-          .replace(/\{\{\s*location\s*\}\}/g, prospect.custom_fields?.location || '');
-      };
 
       let success = false;
       let errorMsg = '';
