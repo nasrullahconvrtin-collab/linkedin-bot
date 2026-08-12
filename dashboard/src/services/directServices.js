@@ -787,7 +787,7 @@ export const directRunFlow = async () => {
 
     let prospects = [];
     try {
-      const { data } = await supabaseDirect.from('prospects').eq('campaign_id', campaign.id);
+      const { data } = await supabaseDirect.from('prospects').select('*').eq('campaign_id', campaign.id);
       prospects = data || [];
     } catch (err) {
       console.error(`Error fetching prospects for campaign ${campaign.id}:`, err);
