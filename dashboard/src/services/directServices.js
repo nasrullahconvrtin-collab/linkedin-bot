@@ -865,12 +865,13 @@ export const directRunFlow = async () => {
       }
 
       if (nodeType === 'wait') {
+        const days = Number(nodeConfig.days) || 0;
         const nextScheduledStr = prospect.custom_variables?.next_scheduled_at;
-        if (nextScheduledStr) {
+
+        if (days > 0 && nextScheduledStr) {
           const nextScheduled = new Date(nextScheduledStr).getTime();
           if (Date.now() < nextScheduled) continue;
-        } else {
-          const days = Number(nodeConfig.days) || 1;
+        } else if (days > 0 && !nextScheduledStr) {
           const nextScheduledAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
           prospect.custom_variables.next_scheduled_at = nextScheduledAt;
           try {
@@ -882,7 +883,7 @@ export const directRunFlow = async () => {
         }
 
         const edges = sourceEdgesMap.get(currentNode.id) || [];
-        const defaultEdge = edges.find(e => !e.data?.condition || e.data.condition === 'default');
+        const defaultEdge = edges.find(e => !e.data?.condition || e.data.condition === 'default') || edges[0];
         if (defaultEdge) {
           prospect.custom_variables.current_node_id = defaultEdge.target;
           prospect.custom_variables.next_scheduled_at = null;
@@ -891,8 +892,18 @@ export const directRunFlow = async () => {
           } catch (e) {
             console.warn(e);
           }
+
+          if (nodesMap.get(defaultEdge.target)) {
+            currentNodeId = defaultEdge.target;
+            currentNode = nodesMap.get(currentNodeId);
+            nodeType = currentNode?.data?.nodeType || currentNode?.type;
+            nodeConfig = currentNode?.data?.config || {};
+          } else {
+            continue;
+          }
+        } else {
+          continue;
         }
-        continue;
       }
 
       if (nodeType === 'send_invitation') {
@@ -1099,8 +1110,16 @@ export const directRunFlow = async () => {
             } catch (e) {
               console.warn(e);
             }
+
+            if (defaultEdge && nodesMap.get(defaultEdge.target)) {
+              currentNodeId = defaultEdge.target;
+              currentNode = nodesMap.get(currentNodeId);
+              nodeType = currentNode?.data?.nodeType || currentNode?.type;
+              nodeConfig = currentNode?.data?.config || {};
+            } else {
+              continue;
+            }
           }
-          continue;
         }
       }
 
