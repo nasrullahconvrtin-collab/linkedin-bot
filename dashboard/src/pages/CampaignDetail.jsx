@@ -9,6 +9,7 @@ import MessageEditorModal from '../components/MessageEditorModal';
 import ProspectTable from '../components/ProspectTable';
 import SequenceFlowBuilder from '../components/SequenceFlowBuilder';
 import { pickSequenceTemplate } from '../data/sequenceTemplates';
+import { deduplicateVariables } from '../utils/messageTools';
 import StatusBadge from '../components/StatusBadge';
 import { useApp } from '../context/AppContext';
 import {
@@ -327,12 +328,12 @@ export default function CampaignDetail() {
   const campaignVariables = (campaign?.sequence_config || {}).variables || [];
   // All variables available in message templates for this campaign
   const allSequenceVars = (() => {
-    const standard = ['first_name','last_name','company','title','industry','location','email','linkedin_url','sender_name','sender_company','sender_email','sender_linkedin','inmail_message','initial_message','followup_1','followup_2','followup_3','followup_4'];
+    const standard = ['first_name','last_name','company','title','industry','location','email','linkedin_url','sender_name','sender_company','sender_email','sender_linkedin','initial_message','follow_up_1','follow_up_2','follow_up_3','follow_up_4','follow_up_5'];
     const custom = campaignVariables || [];
     const mapped = Object.values(campaign?.sequence_config?.variable_mappings || {})
       .map(v => (typeof v === 'object' ? (v.target || v.customName) : v))
       .filter(Boolean);
-    return [...new Set([...standard, ...custom, ...mapped])];
+    return deduplicateVariables([...standard, ...custom, ...mapped]);
   })();
 
   const saveCampaignVariables = async (vars) => {

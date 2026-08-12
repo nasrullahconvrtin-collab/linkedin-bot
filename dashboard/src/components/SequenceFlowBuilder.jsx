@@ -19,6 +19,7 @@ import {
 import toast from 'react-hot-toast';
 import { EDGE_CONDITIONS, EDGE_COLORS } from '../data/flowEdgeConditions';
 import { SEQUENCE_TEMPLATES } from '../data/sequenceTemplates';
+import { deduplicateVariables } from '../utils/messageTools';
 
 // ─── Node type definitions ────────────────────────────────────────────────────
 
@@ -150,13 +151,13 @@ const nodeTypes = { flowNode: FlowNode };
 const DEFAULT_VARS = [
   'first_name', 'last_name', 'company', 'title', 'industry', 'location',
   'email', 'linkedin_url', 'sender_name', 'sender_company', 'sender_email', 'sender_linkedin',
-  // Per-prospect message fields (set during CSV import)
-  'inmail_message', 'initial_message', 'followup_1', 'followup_2', 'followup_3', 'followup_4',
+  'initial_message', 'follow_up_1', 'follow_up_2', 'follow_up_3', 'follow_up_4', 'follow_up_5',
 ];
 
 function VarChips({ onInsert, vars }) {
   const [custom, setCustom] = useState('');
-  const allVars = vars && vars.length ? vars : DEFAULT_VARS;
+  const rawVars = vars && vars.length ? vars : DEFAULT_VARS;
+  const allVars = deduplicateVariables(rawVars);
   const insertCustom = () => {
     const v = custom.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
     if (v) { onInsert('{{' + v + '}}'); setCustom(''); }

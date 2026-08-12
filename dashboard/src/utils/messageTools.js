@@ -169,3 +169,37 @@ export function qualityChecks(template = '', availableVariables = [], samplePros
 
   return checks;
 }
+
+export function canonicalizeVariable(v) {
+  if (!v || typeof v !== 'string') return '';
+  const s = v.trim().toLowerCase();
+  
+  if (s === 'followup_1' || s === 'followup 1' || s === 'follow-up 1') return 'follow_up_1';
+  if (s === 'followup_2' || s === 'followup 2' || s === 'follow-up 2') return 'follow_up_2';
+  if (s === 'followup_3' || s === 'followup 3' || s === 'follow-up 3') return 'follow_up_3';
+  if (s === 'followup_4' || s === 'followup 4' || s === 'follow-up 4') return 'follow_up_4';
+  if (s === 'followup_5' || s === 'followup 5' || s === 'follow-up 5') return 'follow_up_5';
+
+  if (s === 'campaign/list' || s === 'campaignlist') return 'campaign_list';
+
+  if (s === 'firstname') return 'first_name';
+  if (s === 'lastname') return 'last_name';
+  if (s === 'linkedinurl') return 'linkedin_url';
+  if (s === 'jobtitle' || s === 'title') return 'job_title';
+
+  return s.replace(/[\s\/-]+/g, '_');
+}
+
+export function deduplicateVariables(varsList = []) {
+  const seen = new Set();
+  const result = [];
+  for (const raw of varsList) {
+    if (!raw) continue;
+    const clean = canonicalizeVariable(raw);
+    if (clean && !seen.has(clean)) {
+      seen.add(clean);
+      result.push(clean);
+    }
+  }
+  return result;
+}
