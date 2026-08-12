@@ -150,6 +150,8 @@ export const bulkImportProspects = (file, campaignId, mode = 'create_or_update',
   }).catch(() => directBulkImportProspects(file, campaignId, mode, listId));
 };
 
+export { downloadSampleCSVTemplate } from './directServices';
+
 
 // ── Activity Log ─────────────────────────────────────────────
 export const getActivityLog    = (params)   => api.get('/activity-log', { params }).catch(() => ({ logs: [] }));

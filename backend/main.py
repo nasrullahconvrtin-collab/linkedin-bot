@@ -252,39 +252,102 @@ _CSV_MAP: dict[str, str] = {
 }
 
 
+_VALID_PROSPECT_DB_COLUMNS = {
+    "id", "first_name", "last_name", "name", "headline", "company", "job_title",
+    "email", "linkedin_url", "public_identifier", "member_id", "provider_id",
+    "status", "connection_status", "connection_message", "connection_sent_date",
+    "accepted_at", "message_sent_date", "assigned_account", "campaign_id",
+    "list_id", "custom_fields", "custom_variables", "created_at", "updated_at"
+}
+
+def _is_valid_linkedin_url_or_id(url: str) -> bool:
+    if not url or not isinstance(url, str):
+        return False
+    u = url.strip()
+    if not u or len(u) > 250:
+        return False
+    if " " in u and not ("http" in u or "linkedin" in u):
+        return False
+    return True
+
+def _is_valid_email(email: str) -> bool:
+    if not email or not isinstance(email, str):
+        return False
+    e = email.strip()
+    return "@" in e and "." in e and len(e) < 150 and " " not in e
+
 def _map_csv_row(raw_row: dict, campaign_id: str | None) -> dict | None:
-    """Map a raw CSV row to a DB-ready dict. Returns None if linkedin_url missing."""
+    """Map a raw CSV row to a DB-ready dict. Preserves all custom fields & variables."""
     mapped: dict = {}
-    custom_fields: dict = {}
+    custom_variables: dict = {}
+
     for key, value in raw_row.items():
-        clean_key = key.strip()
-        clean_value = value.strip() if isinstance(value, str) else value
+        if key is None:
+            continue
+        clean_key = str(key).strip()
+        clean_value = str(value).strip() if value is not None else ""
+        if not clean_key or not clean_value:
+            continue
+
+        custom_variables[clean_key] = clean_value
+        norm_key = clean_key.lower().replace(" ", "_").replace("-", "_")
+        custom_variables[norm_key] = clean_value
+
         db_key = _CSV_MAP.get(clean_key.lower().replace("  ", " "))
-        if db_key and clean_value:
+        if db_key:
             if db_key == "tags":
                 mapped[db_key] = [t.strip() for t in str(clean_value).replace(";", ",").split(",") if t.strip()]
             else:
                 mapped[db_key] = clean_value
-        elif clean_key and clean_value:
-            custom_key = clean_key.strip().lower().replace(" ", "_").replace("-", "_")
-            custom_fields[custom_key] = clean_value
 
-    if not mapped.get("linkedin_url") and not mapped.get("email"):
+    url = mapped.get("linkedin_url", "")
+    email = mapped.get("email", "")
+
+    if not url:
+        for k in ("linkedinurl", "linkedin_url", "profile_url", "url"):
+            if custom_variables.get(k):
+                url = custom_variables[k]
+                mapped["linkedin_url"] = url
+                break
+
+    if not email:
+        for k in ("email", "linkedinemail", "linkedin_email"):
+            if custom_variables.get(k):
+                email = custom_variables[k]
+                mapped["email"] = email
+                break
+
+    has_valid_url = _is_valid_linkedin_url_or_id(url)
+    has_valid_email = _is_valid_email(email)
+
+    if not has_valid_url and not has_valid_email:
         return None
-    if not mapped.get("linkedin_url"):
-        logger.warning("CSV row has no linkedin_url — jobs for this prospect will navigate to feed: %s", mapped.get("email", "(no email)"))
 
-    # Apply campaign override
+    if not has_valid_url:
+        mapped.pop("linkedin_url", None)
+
+    first_name = mapped.get("first_name") or custom_variables.get("firstname") or custom_variables.get("first_name") or ""
+    last_name = mapped.get("last_name") or custom_variables.get("lastname") or custom_variables.get("last_name") or ""
+    if not first_name and mapped.get("name"):
+        parts = mapped["name"].split(" ", 1)
+        first_name = parts[0]
+        last_name = parts[1] if len(parts) > 1 else ""
+
+    mapped["first_name"] = first_name or "Lead"
+    mapped["last_name"] = last_name
+    mapped["name"] = f"{first_name} {last_name}".strip()
+
     if campaign_id:
         mapped["campaign_id"] = campaign_id
 
-    # Defaults
     mapped.setdefault("assigned_account", "profile_1")
-    mapped.setdefault("status", "")
-    if custom_fields:
-        mapped["custom_fields"] = custom_fields
-        mapped["custom_variables"] = custom_fields
-    return mapped
+    mapped.setdefault("status", "Not Contacted")
+
+    mapped["custom_variables"] = custom_variables
+    mapped["custom_fields"] = custom_variables
+
+    db_ready: dict = {k: v for k, v in mapped.items() if k in _VALID_PROSPECT_DB_COLUMNS}
+    return db_ready
 
 
 def _profile_can_queue(profile_key: str) -> tuple[bool, str]:

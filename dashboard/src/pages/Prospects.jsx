@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Download, Edit3, FileUp, ListPlus, Plus, Save, Search, Trash2, X } from 'lucide-react';
+import { ChevronDown, Download, Edit3, FileSpreadsheet, FileUp, ListPlus, Plus, Save, Search, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
 import StatusBadge from '../components/StatusBadge';
@@ -11,6 +11,7 @@ import {
   createProspectList,
   deleteProspect,
   deleteProspectList,
+  downloadSampleCSVTemplate,
   getCampaigns,
   getProspect,
   getProspectLists,
@@ -361,6 +362,9 @@ export default function Prospects() {
             <option value="create">Create new only</option>
             <option value="update">Update existing only</option>
           </select>
+          <button onClick={downloadSampleCSVTemplate} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#818cf8] hover:text-white text-sm" title="Download Standard CSV Template">
+            <FileSpreadsheet size={15} /> Template
+          </button>
           <button onClick={() => fileRef.current?.click()} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-sm">
             <FileUp size={15} /> Import
           </button>

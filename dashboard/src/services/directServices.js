@@ -408,25 +408,33 @@ export const directBulkImportProspects = async (file, campaignId, mode, listId) 
           if (cols.length === 0 || (cols.length === 1 && !cols[0])) continue;
 
           const rowObj = {};
-          headers.forEach((h, idx) => {
-            rowObj[h] = cols[idx] || '';
+          const customVars = {};
+
+          rawHeaders.forEach((rawH, idx) => {
+            const val = cols[idx] || '';
+            const cleanH = rawH.trim();
+            if (cleanH) {
+              rowObj[cleanH.toLowerCase()] = val;
+              customVars[cleanH] = val;
+              const normKey = cleanH.toLowerCase().replace(/[^a-z0-9]/g, '_');
+              customVars[normKey] = val;
+            }
           });
 
           // Check if it's a completely empty line
-          const values = Object.values(rowObj).filter(Boolean);
+          const values = Object.values(customVars).filter(Boolean);
           if (values.length === 0) continue;
 
-          const firstName = rowObj.first_name || rowObj.firstname || rowObj.name?.split(' ')[0] || 'Lead';
-          const lastName = rowObj.last_name || rowObj.lastname || rowObj.name?.split(' ').slice(1).join(' ') || '';
-          const linkedinUrl = rowObj.linkedin_url || rowObj.linkedinurl || rowObj.profile_url || rowObj.url || '';
+          const firstName = rowObj.first_name || rowObj.firstname || rowObj.name?.split(' ')[0] || customVars.firstname || customVars.first_name || 'Lead';
+          const lastName = rowObj.last_name || rowObj.lastname || rowObj.name?.split(' ').slice(1).join(' ') || customVars.lastname || customVars.last_name || '';
+          const linkedinUrl = rowObj.linkedin_url || rowObj.linkedinurl || rowObj.profile_url || rowObj.url || customVars.linkedinurl || customVars.linkedin_url || '';
 
-          // Look for any headers matching linkedin_url or linkedinurl to make sure we resolve it
-          let resolvedLinkedinUrl = linkedinUrl;
-          if (!resolvedLinkedinUrl) {
-            const foundKey = Object.keys(rowObj).find(k => k.replace(/[^a-z]/g, '') === 'linkedinurl');
-            if (foundKey) {
-              resolvedLinkedinUrl = rowObj[foundKey];
-            }
+          const isValidUrl = linkedinUrl && linkedinUrl.length < 250 && (!linkedinUrl.includes(' ') || linkedinUrl.includes('http') || linkedinUrl.includes('linkedin'));
+          const emailVal = rowObj.email || customVars.email || '';
+          const isValidEmail = emailVal && emailVal.includes('@') && emailVal.includes('.') && !emailVal.includes(' ');
+
+          if (!isValidUrl && !isValidEmail) {
+            continue; // Skip invalid or split line fragment
           }
 
           prospectsToInsert.push({
@@ -435,11 +443,13 @@ export const directBulkImportProspects = async (file, campaignId, mode, listId) 
             name: `${firstName} ${lastName}`.trim(),
             headline: rowObj.headline || rowObj.title || '',
             company: rowObj.company || rowObj.organization || '',
-            linkedin_url: resolvedLinkedinUrl || '',
+            linkedin_url: isValidUrl ? linkedinUrl : '',
+            email: isValidEmail ? emailVal : '',
             status: 'Not Contacted',
             campaign_id: campaignId || null,
             assigned_account: 'profile_1',
-            custom_variables: rowObj,
+            custom_variables: customVars,
+            custom_fields: customVars,
             created_at: new Date().toISOString(),
           });
         }
@@ -456,6 +466,54 @@ export const directBulkImportProspects = async (file, campaignId, mode, listId) 
     };
     reader.readAsText(file);
   });
+};
+
+export const downloadSampleCSVTemplate = () => {
+  const headers = [
+    'first_name',
+    'last_name',
+    'linkedin_url',
+    'company',
+    'job_title',
+    'email',
+    'initial_message',
+    'follow_up_1',
+    'follow_up_2',
+    'follow_up_3',
+    'follow_up_4',
+    'follow_up_5',
+    'company_pain_points',
+    'growth_goals',
+    'our_tailored_offer'
+  ];
+  
+  const sampleRow = [
+    'Craig',
+    'Wilber',
+    'https://www.linkedin.com/in/craig-wilber-0b332525',
+    'Lead Service Group LLC',
+    'CEO',
+    'craig@leadservicegroup.com',
+    '"Hi {{first_name}}, ConvrtIn\'s B2B outbound expertise addresses your lead flow needs."',
+    '"The fact that you operate both as publisher and buyer across 100+ verticals is rare. Curious what the biggest gap is right now?"',
+    '"We work with outbound B2B operations on building and qualifying lead sources. Figured worth mentioning as you expand."',
+    '"That\'s exactly why call center operators who move fastest lock in publisher relationships early."',
+    '"We built a clean verified list of qualified US-based publishers. Happy to walk you through how we structured it."',
+    '"Hope the new hires ramp fast and expansion goes smoothly!"',
+    'Scaling lead sourcing across verticals',
+    'Building direct publisher partnerships',
+    'Qualified B2B traffic sources'
+  ];
+
+  const content = `${headers.join(',')}\n${sampleRow.join(',')}`;
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute('download', 'linkedflow_prospects_template.csv');
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 };
 
 // ── Prospect Lists Direct Operations ────────────────────────────
