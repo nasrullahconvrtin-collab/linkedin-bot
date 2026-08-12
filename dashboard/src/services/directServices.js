@@ -853,8 +853,8 @@ export const directRunFlow = async () => {
         if (!currentNode) continue;
       }
 
-      const nodeType = currentNode.data?.nodeType;
-      const nodeConfig = currentNode.data?.config || {};
+      let nodeType = currentNode.data?.nodeType;
+      let nodeConfig = currentNode.data?.config || {};
       const nodeLabel = currentNode.data?.label || currentNode.id;
 
       // Auto-resolve LinkedIn IDs if the prospect has not been visited/resolved yet
@@ -896,16 +896,33 @@ export const directRunFlow = async () => {
       }
 
       if (nodeType === 'send_invitation') {
-        const { connections } = await directGetNetworkingConnections();
-        const connMap = new Set(connections.map(c => c.public_identifier || c.member_id || c.provider_id || c.member_urn).filter(Boolean));
-        const pKey = prospect.public_identifier || prospect.member_id || prospect.provider_id || prospect.linkedin_url?.split('/in/')?.[1]?.replace(/\//g, '').split('?')[0];
+        let isConnected = prospect.connection_status === 'connected' || prospect.status === 'Connection Accepted';
         
-        const isConnected = pKey && connMap.has(pKey);
+        if (!isConnected) {
+          const userProfileData = await directResolveLinkedinProfile(prospect);
+          if (userProfileData) {
+            const dist = userProfileData.network_distance || userProfileData.distance;
+            const isRel = userProfileData.is_relationship || userProfileData.is_connection;
+            if (dist === 'FIRST_DEGREE' || dist === 'DISTANCE_1' || dist === 'FIRST' || isRel === true) {
+              isConnected = true;
+            }
+          }
+        }
+
+        if (!isConnected) {
+          const { connections } = await directGetNetworkingConnections();
+          const connSet = new Set(connections.map(c => (c.public_identifier || c.provider_id || c.member_id || '').toLowerCase()).filter(Boolean));
+          const pKey = (prospect.public_identifier || prospect.provider_id || prospect.linkedin_url?.split('/in/')?.[1]?.replace(/\//g, '').split('?')[0] || '').toLowerCase();
+          if (pKey && connSet.has(pKey)) {
+            isConnected = true;
+          }
+        }
+
         const edges = sourceEdgesMap.get(currentNode.id) || [];
-        const defaultEdge = edges.find(e => !e.data?.condition || e.data.condition === 'default');
+        const defaultEdge = edges.find(e => !e.data?.condition || e.data.condition === 'default') || edges[0];
 
         if (isConnected) {
-          console.log(`Prospect ${prospect.name} is already connected. Skipping invitation node.`);
+          console.log(`Prospect ${prospect.name} is ALREADY CONNECTED! Skipping invitation node and moving to next node.`);
           prospect.status = 'Connection Accepted';
           prospect.connection_status = 'connected';
           if (defaultEdge) {
@@ -922,10 +939,18 @@ export const directRunFlow = async () => {
           } catch (e) {
             console.warn(e);
           }
-          continue;
+
+          if (defaultEdge && nodesMap.get(defaultEdge.target)) {
+            currentNodeId = defaultEdge.target;
+            currentNode = nodesMap.get(currentNodeId);
+            nodeType = currentNode?.type || currentNode?.data?.action_type || 'send_message';
+            nodeConfig = currentNode?.data || {};
+          } else {
+            continue;
+          }
         }
 
-        if (prospect.status !== 'Connection Request Sent') {
+        if (!isConnected && prospect.status !== 'Connection Request Sent') {
           const inviteNote = render(nodeConfig.note || '');
           console.log(`Sending connection invite to ${prospect.name}...`);
           const res = await directSendUnipileConnectionInvite(prospect, inviteNote);
