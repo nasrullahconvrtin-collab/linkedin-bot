@@ -184,8 +184,39 @@ export const directWithdrawOldInvitations = async (maxAgeDays = 90) => {
 
 export const directGetCampaigns = async () => {
   try {
-    const { data, error } = await supabaseDirect.from('campaigns').select('*').order('created_at', { ascending: false });
-    if (!error && data) return data;
+    const { data: campaigns, error } = await supabaseDirect.from('campaigns').select('*').order('created_at', { ascending: false });
+    if (!error && campaigns) {
+      const { data: prospects } = await supabaseDirect.from('prospects').select('id, campaign_id, status');
+      const prospectMap = new Map();
+      (prospects || []).forEach(p => {
+        if (!p.campaign_id) return;
+        if (!prospectMap.has(p.campaign_id)) {
+          prospectMap.set(p.campaign_id, { total: 0, sent: 0, accepted: 0, replied: 0 });
+        }
+        const stats = prospectMap.get(p.campaign_id);
+        stats.total += 1;
+        if (p.status && p.status !== 'Not Contacted' && p.status !== '') {
+          stats.sent += 1;
+        }
+        if (['Connection Accepted', 'CONNECTED', 'Replied'].includes(p.status)) {
+          stats.accepted += 1;
+        }
+        if (p.status === 'Replied') {
+          stats.replied += 1;
+        }
+      });
+
+      return campaigns.map(c => {
+        const stats = prospectMap.get(c.id) || { total: 0, sent: 0, accepted: 0, replied: 0 };
+        return {
+          ...c,
+          prospect_count: stats.total,
+          sent: stats.sent,
+          accepted: stats.accepted,
+          replied: stats.replied,
+        };
+      });
+    }
   } catch (e) {
     console.warn('directGetCampaigns warning:', e);
   }
