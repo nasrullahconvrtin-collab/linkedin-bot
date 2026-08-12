@@ -717,7 +717,7 @@ def db_enrich_profile(profile: dict) -> dict:
 def db_get_all_profiles() -> list[dict]:
     db_mark_stale_profiles_offline()
     profiles = (
-        supabase.table("linkedin_profiles")
+        supabase.table("profiles")
         .select("*")
         .neq("profile_key", "dashboard")
         .order("profile_key")
@@ -740,13 +740,13 @@ def db_create_profile(profile_key: str, display_name: str, run_mode: str | None 
         "run_mode": run_mode,
     }
     try:
-        result = supabase.table("linkedin_profiles").insert(data).execute()
+        result = supabase.table("profiles").insert(data).execute()
     except Exception as exc:
         if "run_mode" not in str(exc):
             raise
         fallback = dict(data)
         fallback.pop("run_mode", None)
-        result = supabase.table("linkedin_profiles").insert(fallback).execute()
+        result = supabase.table("profiles").insert(fallback).execute()
     return db_enrich_profile(result.data[0]) if result.data else None
 
 
@@ -764,6 +764,8 @@ PROFILE_RUNTIME_FIELDS = {
     "linkedin_login_status",
     "extension_version",
     "automation_paused",
+    "session_active",
+    "daily_sent",
 }
 
 
@@ -777,7 +779,7 @@ def db_update_profile(profile_key: str, data: dict) -> dict | None:
         return None
     try:
         result = (
-            supabase.table("linkedin_profiles")
+            supabase.table("profiles")
             .update(clean)
             .eq("profile_key", profile_key)
             .execute()
@@ -789,7 +791,7 @@ def db_update_profile(profile_key: str, data: dict) -> dict | None:
         if not fallback:
             return db_get_profile(profile_key)
         result = (
-            supabase.table("linkedin_profiles")
+            supabase.table("profiles")
             .update(fallback)
             .eq("profile_key", profile_key)
             .execute()
@@ -800,7 +802,7 @@ def db_update_profile(profile_key: str, data: dict) -> dict | None:
 def db_mark_stale_profiles_offline(seconds: int = 90):
     cutoff = (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
     try:
-        supabase.table("linkedin_profiles").update({
+        supabase.table("profiles").update({
             "session_active": False,
             "extension_status": "offline",
         }).lt("last_active", cutoff).execute()
@@ -813,7 +815,7 @@ def db_upsert_profile(profile_key: str, updates: dict) -> dict | None:
     updates["profile_key"] = profile_key
     try:
         result = (
-            supabase.table("linkedin_profiles")
+            supabase.table("profiles")
             .upsert(updates, on_conflict="profile_key")
             .execute()
         )
@@ -823,7 +825,7 @@ def db_upsert_profile(profile_key: str, updates: dict) -> dict | None:
             raise
         fallback = _without_profile_runtime_fields(updates)
         result = (
-            supabase.table("linkedin_profiles")
+            supabase.table("profiles")
             .upsert(fallback, on_conflict="profile_key")
             .execute()
         )
@@ -832,7 +834,7 @@ def db_upsert_profile(profile_key: str, updates: dict) -> dict | None:
 
 def db_get_profile(profile_key: str) -> dict | None:
     result = (
-        supabase.table("linkedin_profiles")
+        supabase.table("profiles")
         .select("*")
         .eq("profile_key", profile_key)
         .limit(1)
@@ -1418,7 +1420,7 @@ def db_delete_profile(profile_key: str) -> bool:
     except Exception as exc:
         if "profile_key" not in str(exc):
             raise
-    result = supabase.table("linkedin_profiles").delete().eq("profile_key", profile_key).execute()
+    result = supabase.table("profiles").delete().eq("profile_key", profile_key).execute()
     return bool(result.data)
 
 
