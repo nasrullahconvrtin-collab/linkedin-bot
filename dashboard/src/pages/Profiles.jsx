@@ -30,8 +30,13 @@ export default function Profiles() {
   const [directEmail, setDirectEmail] = useState('');
   const [directPassword, setDirectPassword] = useState('');
   const [cookieVal, setCookieVal] = useState('');
-  const [existingAccId, setExistingAccId] = useState('bBzuBoeOQAuBCQNFu7shyQ');
-  const [displayName, setDisplayName] = useState('Maryam Ansar');
+  const [existingAccId, setExistingAccId] = useState('');
+  const [displayName, setDisplayName] = useState('');
+
+  // Editable Account Settings state
+  const [editName, setEditName] = useState('');
+  const [editAccId, setEditAccId] = useState('');
+  const [savingSettings, setSavingSettings] = useState(false);
 
   // 2FA Checkpoint state
   const [checkpointReq, setCheckpointReq] = useState(false);
@@ -56,13 +61,39 @@ export default function Profiles() {
         getNetworkingConnections().catch(() => ({ connections: [] })),
         getNetworkingInvitations().catch(() => ({ invitations: [] })),
       ]);
-      if (accRes) setAccountInfo(accRes);
+      if (accRes) {
+        setAccountInfo(accRes);
+        setEditName(accRes.name || '');
+        setEditAccId(accRes.id || '');
+        setExistingAccId(accRes.id || '');
+        setDisplayName(accRes.name || '');
+      }
       if (connRes?.connections) setConnections(connRes.connections);
       if (invRes?.invitations) setInvitations(invRes.invitations);
     } catch (err) {
       console.error('Failed loading network data:', err);
     } finally {
       setNetLoading(false);
+    }
+  };
+
+  const handleSaveAccountSettings = async (e) => {
+    e.preventDefault();
+    setSavingSettings(true);
+    try {
+      await createProfile({
+        profile_key: 'profile_1',
+        display_name: editName || 'LinkedIn User',
+        unipile_account_id: editAccId,
+        session_active: true,
+      });
+      toast.success('Account settings saved and updated!');
+      await fetchProfiles();
+      await loadNetworkData();
+    } catch (err) {
+      toast.error(err.message || 'Failed to save account settings');
+    } finally {
+      setSavingSettings(false);
     }
   };
 
@@ -254,18 +285,18 @@ export default function Profiles() {
       <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-6 mb-6 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-xl">
         <div className="flex items-center gap-5">
           <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#6366f1] via-indigo-600 to-purple-600 text-white font-bold text-2xl flex items-center justify-center shadow-lg">
-            {accountInfo?.name ? accountInfo.name[0] : 'M'}
+            {accountInfo?.name ? accountInfo.name[0] : 'L'}
           </div>
           <div>
             <div className="flex items-center gap-3">
-              <h2 className="text-white text-xl font-bold">{accountInfo?.name || 'Maryam Ansar'}</h2>
+              <h2 className="text-white text-xl font-bold">{accountInfo?.name || 'LinkedIn Account'}</h2>
               <span className="text-xs px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                 Unipile Connected
               </span>
             </div>
-            <p className="text-[#9ca3af] text-sm mt-1">{accountInfo?.headline || 'LinkedIn Outreach Specialist'}</p>
-            <p className="text-[#6b7280] text-xs font-mono mt-1">Unipile Account ID: {accountInfo?.id || 'bBzuBoeOQAuBCQNFu7shyQ'}</p>
+            <p className="text-[#9ca3af] text-sm mt-1">{accountInfo?.headline || 'LinkedIn Outreach Account'}</p>
+            <p className="text-[#6b7280] text-xs font-mono mt-1">Unipile Account ID: {accountInfo?.id || 'Connected'}</p>
           </div>
         </div>
 
@@ -434,30 +465,54 @@ export default function Profiles() {
         </div>
       ) : (
         /* Account Settings Tab */
-        <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-6 space-y-6 max-w-2xl">
+        <form onSubmit={handleSaveAccountSettings} className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-6 space-y-6 max-w-2xl">
           <div>
             <h2 className="text-white font-bold text-lg">Connected LinkedIn Account Settings</h2>
-            <p className="text-[#6b7280] text-xs mt-1">Each workspace profile links to one primary LinkedIn account via Unipile.</p>
+            <p className="text-[#6b7280] text-xs mt-1">Each workspace profile links to one primary LinkedIn account via Unipile. Update your display name and Unipile Account ID below.</p>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 text-xs">
-            <div className="rounded-xl border border-[#2a2a2a] bg-[#111111] p-4">
-              <p className="text-[#6b7280]">Account Name</p>
-              <p className="text-white font-bold text-sm mt-1">{accountInfo?.name || 'Maryam Ansar'}</p>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-[#9ca3af] mb-1.5">Account Display Name</label>
+              <input
+                type="text"
+                required
+                value={editName}
+                onChange={e => setEditName(e.target.value)}
+                placeholder="e.g. Fatima Maqsood or Maryam Ansar"
+                className="w-full bg-[#111111] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+              />
             </div>
-            <div className="rounded-xl border border-[#2a2a2a] bg-[#111111] p-4">
-              <p className="text-[#6b7280]">Unipile Account ID</p>
-              <p className="text-[#6366f1] font-mono text-xs truncate mt-1">{accountInfo?.id || 'bBzuBoeOQAuBCQNFu7shyQ'}</p>
+            <div>
+              <label className="block text-xs font-medium text-[#9ca3af] mb-1.5">Unipile Account ID</label>
+              <input
+                type="text"
+                required
+                value={editAccId}
+                onChange={e => setEditAccId(e.target.value)}
+                placeholder="e.g. bwtWImSiR5SCqIzFVSZdgA"
+                className="w-full bg-[#111111] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-xs font-mono focus:outline-none focus:border-[#6366f1]"
+              />
             </div>
           </div>
 
-          <button
-            onClick={() => setModal(true)}
-            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold text-sm transition-all"
-          >
-            Reconnect / Switch LinkedIn Account
-          </button>
-        </div>
+          <div className="flex gap-3">
+            <button
+              type="submit"
+              disabled={savingSettings}
+              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold text-sm transition-all disabled:opacity-50"
+            >
+              {savingSettings ? <Loader2 size={16} className="animate-spin" /> : 'Save Account Settings'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setModal(true)}
+              className="px-4 py-3 rounded-xl bg-[#2a2a2a] hover:bg-[#3a3a3a] text-white font-medium text-sm transition-all"
+            >
+              Reconnect Account
+            </button>
+          </div>
+        </form>
       )}
 
       {/* ── ADD / CONNECT ACCOUNT MODAL ─────────────────────────────────────── */}

@@ -24,14 +24,19 @@ export const unipileFetch = async (endpoint, options = {}) => {
   }
 };
 
+let activeAccountId = 'bBzuBoeOQAuBCQNFu7shyQ';
+
 export const directGetProfiles = async () => {
   try {
     const { data, error } = await supabaseDirect.from('profiles').select('*');
     if (!error && data && data.length > 0) {
+      if (data[0].unipile_account_id) {
+        activeAccountId = data[0].unipile_account_id;
+      }
       return data.map(p => ({
         profile_key: p.profile_key || p.id || 'profile_1',
-        display_name: p.display_name || p.name || 'Maryam Ansar',
-        unipile_account_id: p.unipile_account_id || DEFAULT_ACCOUNT_ID,
+        display_name: p.display_name || p.name || 'LinkedIn User',
+        unipile_account_id: p.unipile_account_id || activeAccountId,
         session_active: p.session_active ?? true,
         enabled: p.enabled ?? true,
         daily_sent: p.daily_sent || 0,
@@ -43,8 +48,8 @@ export const directGetProfiles = async () => {
   return [
     {
       profile_key: 'profile_1',
-      display_name: 'Maryam Ansar',
-      unipile_account_id: DEFAULT_ACCOUNT_ID,
+      display_name: 'LinkedIn User',
+      unipile_account_id: activeAccountId,
       session_active: true,
       enabled: true,
       daily_sent: 0,
@@ -54,8 +59,13 @@ export const directGetProfiles = async () => {
 
 export const directCreateProfile = async (data) => {
   const profile_key = data.profile_key || 'profile_1';
-  const display_name = data.display_name || 'Maryam Ansar';
-  const unipile_account_id = data.unipile_account_id || DEFAULT_ACCOUNT_ID;
+  const display_name = data.display_name || 'LinkedIn User';
+  const unipile_account_id = data.unipile_account_id || activeAccountId;
+  
+  if (unipile_account_id) {
+    activeAccountId = unipile_account_id;
+  }
+
   try {
     await supabaseDirect.from('profiles').upsert([
       {
@@ -79,25 +89,54 @@ export const directCreateProfile = async (data) => {
 };
 
 export const directGetUnipileAccountInfo = async (accountId) => {
-  const accId = accountId || DEFAULT_ACCOUNT_ID;
-  const { ok, data } = await unipileFetch(`/accounts/${accId}`);
-  if (ok && data) {
-    return {
-      id: data.id || accId,
-      name: data.name || data.username || 'Maryam Ansar',
-      username: data.username || data.email || 'maryamansar',
-      provider: data.provider || 'LINKEDIN',
-      status: data.status || 'CONNECTED',
-      headline: data.headline || 'LinkedIn Outreach Specialist',
-    };
+  try {
+    const { data: dbProfiles } = await supabaseDirect.from('profiles').select('*').limit(1);
+    const dbProfile = dbProfiles?.[0];
+    if (dbProfile?.unipile_account_id) {
+      activeAccountId = dbProfile.unipile_account_id;
+    }
+
+    const { ok: listOk, data: listData } = await unipileFetch('/accounts');
+    if (listOk && listData) {
+      const items = listData.items || listData.accounts || (Array.isArray(listData) ? listData : []);
+      if (items.length > 0) {
+        const primary = items.find(a => a.id === (accountId || activeAccountId)) || items[0];
+        const imParam = primary.connection_params?.im || {};
+        return {
+          id: primary.id,
+          name: dbProfile?.display_name || primary.name || imParam.username || 'Connected LinkedIn User',
+          username: imParam.publicIdentifier || imParam.username || primary.name || 'connected_user',
+          provider: primary.type || 'LINKEDIN',
+          status: primary.sources?.[0]?.status || 'CONNECTED',
+          headline: imParam.headline || 'LinkedIn Outreach Account',
+        };
+      }
+    }
+
+    const accId = accountId || activeAccountId;
+    const { ok, data } = await unipileFetch(`/accounts/${accId}`);
+    if (ok && data) {
+      const imParam = data.connection_params?.im || {};
+      return {
+        id: data.id || accId,
+        name: dbProfile?.display_name || data.name || imParam.username || 'Connected LinkedIn User',
+        username: imParam.publicIdentifier || data.username || data.email || 'connected_user',
+        provider: data.provider || 'LINKEDIN',
+        status: data.status || 'CONNECTED',
+        headline: imParam.headline || 'LinkedIn Outreach Account',
+      };
+    }
+  } catch (e) {
+    console.warn('directGetUnipileAccountInfo error:', e);
   }
+
   return {
-    id: accId,
-    name: 'Maryam Ansar',
-    username: 'maryamansar',
+    id: activeAccountId,
+    name: 'LinkedIn User',
+    username: 'account',
     provider: 'LINKEDIN',
     status: 'CONNECTED',
-    headline: 'LinkedIn Outreach Specialist',
+    headline: 'LinkedIn Outreach Account',
   };
 };
 
