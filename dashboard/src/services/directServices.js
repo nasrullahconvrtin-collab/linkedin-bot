@@ -668,27 +668,31 @@ const getLinkedinId = (prospect) => {
   return prospect.id;
 };
 
-export const directVisitProfile = async (prospect) => {
+export const directResolveLinkedinProfile = async (prospect) => {
   const targetId = getLinkedinId(prospect);
-  if (!targetId) return { success: false, error: 'No identifier found for prospect' };
-  
-  const { ok, data } = await unipileFetch(`/users/${targetId}?account_id=${DEFAULT_ACCOUNT_ID}`);
+  if (!targetId) return null;
+  const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(targetId)}?account_id=${DEFAULT_ACCOUNT_ID}`);
   if (ok && data) {
     try {
       await supabaseDirect.from('prospects').update({
-        public_identifier: data.public_identifier || '',
-        provider_id: data.provider_id || '',
-        member_id: data.member_urn || '',
+        public_identifier: data.public_identifier || prospect.public_identifier || '',
+        provider_id: data.provider_id || prospect.provider_id || '',
+        member_id: data.member_urn || prospect.member_id || '',
       }).eq('id', prospect.id);
-      // Update local object fields for immediate subsequent steps in the loop
-      prospect.public_identifier = data.public_identifier || '';
-      prospect.provider_id = data.provider_id || '';
-      prospect.member_id = data.member_urn || '';
+      if (data.public_identifier) prospect.public_identifier = data.public_identifier;
+      if (data.provider_id) prospect.provider_id = data.provider_id;
+      if (data.member_urn) prospect.member_id = data.member_urn;
     } catch (e) {
       console.warn('Failed to update prospect identifiers:', e);
     }
+    return data;
   }
-  return { success: ok, data };
+  return null;
+};
+
+export const directVisitProfile = async (prospect) => {
+  const data = await directResolveLinkedinProfile(prospect);
+  return { success: Boolean(data), data };
 };
 
 export const directFollowProfile = async (prospect) => {
