@@ -564,6 +564,27 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
         const parsedData = parseCSV(text);
         if (parsedData.length <= 1) return resolve({ success: true, imported_count: 0 });
 
+        // 1. Fetch existing prospects to build duplicate check maps
+        const { data: existingList } = await supabaseDirect
+          .from('prospects')
+          .select('id, linkedin_url, email');
+
+        const linkedinMap = new Map();
+        const emailMap = new Map();
+
+        if (existingList) {
+          existingList.forEach(p => {
+            if (p.linkedin_url) {
+              const cleaned = p.linkedin_url.trim().toLowerCase();
+              if (cleaned) linkedinMap.set(cleaned, p.id);
+            }
+            if (p.email) {
+              const cleaned = p.email.trim().toLowerCase();
+              if (cleaned) emailMap.set(cleaned, p.id);
+            }
+          });
+        }
+
         const rawHeaders = parsedData[0].map(h => h.trim().replace(/^["']|["']$/g, ''));
         const prospectsToInsert = [];
 
@@ -579,7 +600,6 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             const mappedTarget = columnMapping?.[rawH] || autoGuessHeader(rawH);
 
             if (mappedTarget === 'skip') {
-              // 🚫 Explicitly skipped column
               return;
             }
 
@@ -606,7 +626,22 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             continue;
           }
 
-          prospectsToInsert.push({
+          let existingId = null;
+          if (isValidUrl) {
+            existingId = linkedinMap.get(linkedinUrl.trim().toLowerCase());
+          }
+          if (!existingId && isValidEmail) {
+            existingId = emailMap.get(emailVal.trim().toLowerCase());
+          }
+
+          if (importMode === 'create' && existingId) {
+            continue;
+          }
+          if (importMode === 'update' && !existingId) {
+            continue;
+          }
+
+          const prospectObj = {
             first_name: firstName,
             last_name: lastName,
             name: rowData.name || `${firstName} ${lastName}`.trim(),
@@ -632,7 +667,16 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             custom_variables: customVars,
             custom_fields: customVars,
             created_at: new Date().toISOString(),
-          });
+          };
+
+          if (existingId) {
+            prospectObj.id = existingId;
+            delete prospectObj.status;
+            delete prospectObj.created_at;
+            prospectObj.updated_at = new Date().toISOString();
+          }
+
+          prospectsToInsert.push(prospectObj);
         }
 
         let createdCount = 0;
@@ -641,7 +685,17 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
         if (prospectsToInsert.length > 0) {
           const { data: insertedData, error } = await supabaseDirect.from('prospects').upsert(prospectsToInsert).select();
           if (error) console.error('Supabase prospect import error:', error);
-          createdCount = prospectsToInsert.length;
+          
+          if (insertedData) {
+            insertedData.forEach(p => {
+              const orig = prospectsToInsert.find(x => x.linkedin_url === p.linkedin_url || x.email === p.email);
+              if (orig && orig.id) {
+                updatedCount++;
+              } else {
+                createdCount++;
+              }
+            });
+          }
 
           // If targetListId provided, associate prospects to list
           if (listId && insertedData && insertedData.length > 0) {
@@ -658,14 +712,15 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             const enrollments = insertedData.map(p => ({
               campaign_id: campaignId,
               prospect_id: p.id,
-              status: 'enrolled',
+              status: 'active',
               created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
             }));
-            await supabaseDirect.from('campaign_prospects').upsert(enrollments);
+            await supabaseDirect.from('campaign_enrollments').upsert(enrollments);
           }
         }
 
-        resolve({ success: true, created_count: createdCount, updated_count: updatedCount, imported_count: createdCount });
+        resolve({ success: true, created_count: createdCount, updated_count: updatedCount, imported_count: createdCount + updatedCount });
       } catch (err) {
         console.error('directBulkImportProspects error:', err);
         resolve({ success: false, error: err.message, imported_count: 0 });
