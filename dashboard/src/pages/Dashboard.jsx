@@ -290,8 +290,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* 1. TOP KPI CARDS ROW (6 Cards matching Screenshot 1) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+      {/* 1. TOP KPI CARDS ROW (5 Cards) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 mb-6">
         
         {/* Card 1: Invites Sent */}
         <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-4 flex items-center justify-between shadow-xl">
@@ -351,17 +351,6 @@ export default function Dashboard() {
           </div>
           <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
             <Eye size={20} />
-          </div>
-        </div>
-
-        {/* Card 6: Greetings */}
-        <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-4 flex items-center justify-between shadow-xl">
-          <div>
-            <p className="text-[#9ca3af] text-xs font-medium">Greetings / Likes</p>
-            <p className="text-white font-extrabold text-2xl mt-1">{metrics.greetingsCount}</p>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 shrink-0">
-            <ThumbsUp size={20} />
           </div>
         </div>
 
