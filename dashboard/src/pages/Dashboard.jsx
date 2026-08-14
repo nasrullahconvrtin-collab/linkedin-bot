@@ -144,29 +144,20 @@ export default function Dashboard() {
       }
     });
 
-    // Realistic demo fallbacks if database records are few
-    const multiplier = timeRange === 'today' ? 0.3 : timeRange === 'yesterday' ? 0.4 : timeRange === 'week' ? 0.7 : 1;
-    const displayInvites = invitesSent > 0 ? invitesSent : Math.round(36 * multiplier);
-    const displayAccepted = acceptedCount > 0 ? acceptedCount : Math.round(23 * multiplier);
-    const displayMessages = messagesSent > 0 ? messagesSent : Math.round(131 * multiplier);
-    const displayReplies = repliesCount > 0 ? repliesCount : Math.round(12 * multiplier);
-    const displayViews = profileViews > 0 ? profileViews : Math.round(18 * multiplier);
-    const displayGreetings = greetingsCount > 0 ? greetingsCount : Math.round(14 * multiplier);
-
-    const acceptanceRate = displayInvites > 0 ? Math.round((displayAccepted / displayInvites) * 100) : 64;
-    const replyRate = displayMessages > 0 ? Math.round((displayReplies / displayMessages) * 100) : 7;
+    const acceptanceRate = invitesSent > 0 ? Math.round((acceptedCount / invitesSent) * 100) : 0;
+    const replyRate = messagesSent > 0 ? Math.round((repliesCount / messagesSent) * 100) : 0;
 
     return {
-      invitesSent: displayInvites,
-      acceptedCount: displayAccepted,
+      invitesSent,
+      acceptedCount,
       acceptanceRate,
-      messagesSent: displayMessages,
-      repliesCount: displayReplies,
+      messagesSent,
+      repliesCount,
       replyRate,
-      profileViews: displayViews,
-      greetingsCount: displayGreetings,
+      profileViews,
+      greetingsCount,
     };
-  }, [filteredProspects, timeRange]);
+  }, [filteredProspects]);
 
   // Extract Replies & Activity for the selected timeline
   const timelineReplies = useMemo(() => {
