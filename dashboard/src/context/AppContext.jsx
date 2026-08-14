@@ -135,7 +135,7 @@ export function AppProvider({ children }) {
     const f = setInterval(fetchFailedJobs, 60_000);
     const fl = setInterval(() => {
       runFlow().catch(err => console.warn('Background runFlow error:', err));
-    }, 30_000);
+    }, 60_000);
     return () => {
       clearInterval(s);
       clearInterval(p);
