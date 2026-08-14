@@ -8,6 +8,7 @@ import { ReactFlowProvider } from 'reactflow';
 import SequenceFlowBuilder from '../components/SequenceFlowBuilder';
 import { SEQUENCE_TEMPLATES, pickSequenceTemplate } from '../data/sequenceTemplates';
 import VariableMappingPanel, { autoVariableMappings } from '../components/VariableMappingPanel';
+import CSVImportWizardModal from '../components/CSVImportWizardModal';
 import {
   addProspectsToCampaign,
   bulkImportProspects,
@@ -130,6 +131,8 @@ export default function CampaignWizard({ onClose, onCreated }) {
   const [flowSequence, setFlowSequence] = useState(null);
   const [messageTemplates, setMessageTemplates] = useState([]);
   const [variableMappings, setVariableMappings] = useState({});
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
+  const [wizardColumnMapping, setWizardColumnMapping] = useState(null);
   const [launchNow, setLaunchNow] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -329,7 +332,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
         },
       });
 
-      if (csvFile) await bulkImportProspects(csvFile, campaign.id, importMode);
+      if (csvFile) await bulkImportProspects(csvFile, wizardColumnMapping || variableMappings, importMode, null, campaign.id);
 
       const listProspectIds = await getSelectedListProspectIds();
       const enrollmentIds = [...new Set([...selectedIds, ...listProspectIds])];
@@ -444,7 +447,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
                     <option value="update">Update existing only</option>
                   </select>
                   <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={e => handleCSV(e.target.files?.[0])} />
-                  <div className="rounded-xl border border-dashed border-[#2a2a2a] bg-[#111111] p-7 text-center">
+                  <div onClick={() => csvFile ? setIsWizardOpen(true) : fileRef.current?.click()} className="rounded-xl border border-dashed border-[#6366f1]/40 bg-[#6366f1]/5 hover:bg-[#6366f1]/10 p-7 text-center cursor-pointer transition-all">
                     <FileUp size={28} className="mx-auto mb-3 text-[#6366f1]" />
                     <p className="text-white text-sm font-medium">{csvFile ? csvFile.name : 'Upload a prospect CSV'}</p>
                     <p className="text-[#6b7280] text-xs mt-1">Extra columns become custom variables.</p>
