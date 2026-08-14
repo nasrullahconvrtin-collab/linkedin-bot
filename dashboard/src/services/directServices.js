@@ -24,7 +24,7 @@ export const unipileFetch = async (endpoint, options = {}) => {
   }
 };
 
-let activeAccountId = 'bBzuBoeOQAuBCQNFu7shyQ';
+let activeAccountId = DEFAULT_ACCOUNT_ID;
 
 export const directGetProfiles = async () => {
   try {
@@ -35,7 +35,7 @@ export const directGetProfiles = async () => {
       }
       return data.map(p => ({
         profile_key: p.profile_key || p.id || 'profile_1',
-        display_name: p.display_name || p.name || 'LinkedIn User',
+        display_name: p.display_name && p.display_name !== 'Maryam Ansar' ? p.display_name : 'Fatima Maqsood',
         unipile_account_id: p.unipile_account_id || activeAccountId,
         session_active: p.session_active ?? true,
         enabled: p.enabled ?? true,
@@ -48,8 +48,8 @@ export const directGetProfiles = async () => {
   return [
     {
       profile_key: 'profile_1',
-      display_name: 'LinkedIn User',
-      unipile_account_id: activeAccountId,
+      display_name: 'Fatima Maqsood',
+      unipile_account_id: DEFAULT_ACCOUNT_ID,
       session_active: true,
       enabled: true,
       daily_sent: 0,
@@ -59,7 +59,7 @@ export const directGetProfiles = async () => {
 
 export const directCreateProfile = async (data) => {
   const profile_key = data.profile_key || 'profile_1';
-  const display_name = data.display_name || 'LinkedIn User';
+  const display_name = data.display_name || 'Fatima Maqsood';
   const unipile_account_id = data.unipile_account_id || activeAccountId;
   
   if (unipile_account_id) {
@@ -102,10 +102,11 @@ export const directGetUnipileAccountInfo = async (accountId) => {
       if (items.length > 0) {
         const primary = items.find(a => a.id === (accountId || activeAccountId)) || items[0];
         const imParam = primary.connection_params?.im || {};
+        const realName = primary.name || imParam.username || (dbProfile?.display_name !== 'Maryam Ansar' ? dbProfile?.display_name : null) || 'Fatima Maqsood';
         return {
           id: primary.id,
-          name: dbProfile?.display_name || primary.name || imParam.username || 'Connected LinkedIn User',
-          username: imParam.publicIdentifier || imParam.username || primary.name || 'connected_user',
+          name: realName,
+          username: imParam.publicIdentifier || imParam.username || realName || 'connected_user',
           provider: primary.type || 'LINKEDIN',
           status: primary.sources?.[0]?.status || 'CONNECTED',
           headline: imParam.headline || 'LinkedIn Outreach Account',
@@ -117,9 +118,10 @@ export const directGetUnipileAccountInfo = async (accountId) => {
     const { ok, data } = await unipileFetch(`/accounts/${accId}`);
     if (ok && data) {
       const imParam = data.connection_params?.im || {};
+      const realName = data.name || imParam.username || (dbProfile?.display_name !== 'Maryam Ansar' ? dbProfile?.display_name : null) || 'Fatima Maqsood';
       return {
         id: data.id || accId,
-        name: dbProfile?.display_name || data.name || imParam.username || 'Connected LinkedIn User',
+        name: realName,
         username: imParam.publicIdentifier || data.username || data.email || 'connected_user',
         provider: data.provider || 'LINKEDIN',
         status: data.status || 'CONNECTED',
@@ -132,8 +134,8 @@ export const directGetUnipileAccountInfo = async (accountId) => {
 
   return {
     id: activeAccountId,
-    name: 'LinkedIn User',
-    username: 'account',
+    name: 'Fatima Maqsood',
+    username: 'connected_user',
     provider: 'LINKEDIN',
     status: 'CONNECTED',
     headline: 'LinkedIn Outreach Account',
