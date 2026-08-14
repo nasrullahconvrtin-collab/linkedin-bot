@@ -29,27 +29,36 @@ let activeAccountId = DEFAULT_ACCOUNT_ID;
 export const directGetProfiles = async () => {
   try {
     const { data, error } = await supabaseDirect.from('profiles').select('*');
-    if (!error && data) {
-      if (data.length > 0) {
-        if (data[0].unipile_account_id) {
-          activeAccountId = data[0].unipile_account_id;
-        }
-        return data.map(p => ({
-          profile_key: p.profile_key || p.id || 'profile_1',
-          display_name: p.display_name && p.display_name !== 'Maryam Ansar' ? p.display_name : 'Fatima Maqsood',
-          unipile_account_id: p.unipile_account_id || activeAccountId,
-          session_active: p.session_active ?? true,
-          enabled: p.enabled ?? true,
-          daily_sent: p.daily_sent || 0,
-        }));
-      } else {
-        // Database is empty (account disconnected)
-        return [];
+    if (!error && data && data.length > 0) {
+      if (data[0].unipile_account_id) {
+        activeAccountId = data[0].unipile_account_id;
       }
+      return data.map(p => ({
+        profile_key: p.profile_key || p.id || 'profile_1',
+        display_name: p.display_name && p.display_name !== 'Maryam Ansar' ? p.display_name : 'Fatima Maqsood',
+        unipile_account_id: p.unipile_account_id || activeAccountId,
+        session_active: p.session_active ?? true,
+        enabled: p.enabled ?? true,
+        daily_sent: p.daily_sent || 0,
+      }));
     }
   } catch (e) {
     console.warn('Supabase fetch error:', e);
   }
+
+  if (activeAccountId) {
+    return [
+      {
+        profile_key: 'profile_1',
+        display_name: 'Fatima Maqsood',
+        unipile_account_id: activeAccountId,
+        session_active: true,
+        enabled: true,
+        daily_sent: 0,
+      },
+    ];
+  }
+
   return [];
 };
 

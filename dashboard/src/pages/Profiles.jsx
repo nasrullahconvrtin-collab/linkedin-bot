@@ -75,18 +75,6 @@ export default function Profiles() {
   const loadNetworkData = async () => {
     setNetLoading(true);
     try {
-      // 1. Check if an active profile exists in database
-      const { data: dbProfiles } = await supabaseDirect.from('profiles').select('*');
-      if (!dbProfiles || dbProfiles.length === 0) {
-        setAccountInfo(null);
-        setEditName('');
-        setEditAccId('');
-        setConnections([]);
-        setInvitations([]);
-        setNetLoading(false);
-        return;
-      }
-
       const [accRes, connRes, invRes, pRes] = await Promise.all([
         getUnipileAccountInfo().catch(() => null),
         getNetworkingConnections().catch(() => ({ connections: [] })),
@@ -94,14 +82,15 @@ export default function Profiles() {
         supabaseDirect.from('prospects').select('*').catch(() => ({ data: [] })),
       ]);
 
-      if (accRes) {
+      if (accRes && accRes.id) {
         setAccountInfo(accRes);
-        const resolvedName = accRes.name && accRes.name !== 'Maryam Ansar' ? accRes.name : (dbProfiles[0]?.display_name || 'Fatima Maqsood');
+        const resolvedName = accRes.name && accRes.name !== 'Maryam Ansar' ? accRes.name : 'Fatima Maqsood';
         setEditName(resolvedName);
-        setEditAccId(accRes.id || dbProfiles[0]?.unipile_account_id || '');
-      } else if (dbProfiles.length > 0) {
-        setEditName(dbProfiles[0].display_name || '');
-        setEditAccId(dbProfiles[0].unipile_account_id || '');
+        setEditAccId(accRes.id || 'zXneBg9WRZ-m7iFuKULo1Q');
+        setExistingAccId(accRes.id || 'zXneBg9WRZ-m7iFuKULo1Q');
+        setDisplayName(resolvedName);
+      } else {
+        setAccountInfo(null);
       }
 
       if (connRes?.connections) setConnections(connRes.connections);
