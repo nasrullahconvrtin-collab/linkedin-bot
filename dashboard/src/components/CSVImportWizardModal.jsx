@@ -249,49 +249,126 @@ export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete
 
           {/* STEP 2: MAP FIELDS & CUSTOM VARIABLES */}
           {step === 2 && (
-            <div className="space-y-5">
-              <div className="flex items-center justify-between bg-[#181818] p-3.5 rounded-xl border border-[#2a2a2a]">
-                <span className="text-xs text-[#9ca3af]">
-                  Uploaded: <strong className="text-white">{file?.name}</strong> ({totalRowCount} rows)
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setStep(1)}
-                  className="text-xs text-[#6366f1] hover:underline"
-                >
-                  Change File
-                </button>
-              </div>
-
-              <div className="border border-[#2a2a2a] rounded-xl overflow-hidden bg-[#111111]">
-                <div className="p-3 bg-[#1a1a1a] border-b border-[#2a2a2a] grid grid-cols-12 text-xs font-bold text-[#9ca3af]">
-                  <div className="col-span-4">CSV Column Header</div>
-                  <div className="col-span-3">Sample Value</div>
-                  <div className="col-span-5">Mapped Field / Action</div>
+            <div className="space-y-4">
+              
+              {/* File details & Top Action Toolbar */}
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-[#181818] p-3.5 rounded-xl border border-[#2a2a2a]">
+                <div className="flex items-center gap-2 text-xs text-[#9ca3af]">
+                  <span>Uploaded: <strong className="text-white">{file?.name}</strong> ({totalRowCount} prospects)</span>
+                  <span className="text-[#4b5563]">•</span>
+                  <span className="text-emerald-400 font-semibold">
+                    {Object.values(columnMapping).filter(v => v !== 'skip').length} Mapped
+                  </span>
+                  <span className="text-[#4b5563]">•</span>
+                  <span className="text-red-400 font-semibold">
+                    {Object.values(columnMapping).filter(v => v === 'skip').length} Skipped
+                  </span>
                 </div>
 
-                <div className="divide-y divide-[#2a2a2a] max-h-[340px] overflow-y-auto">
+                {/* Bulk Quick Action Buttons */}
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated = { ...columnMapping };
+                      csvHeaders.forEach(h => {
+                        if (updated[h] === 'custom_var') updated[h] = 'skip';
+                      });
+                      setColumnMapping(updated);
+                      toast.success('Skipped all unmapped columns');
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-[11px] font-semibold transition-colors flex items-center gap-1"
+                  >
+                    🚫 Skip All Unmapped
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated = { ...columnMapping };
+                      csvHeaders.forEach(h => {
+                        if (updated[h] === 'skip') updated[h] = 'custom_var';
+                      });
+                      setColumnMapping(updated);
+                      toast.success('Converted all to Custom Variables');
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 text-[11px] font-semibold transition-colors flex items-center gap-1"
+                  >
+                    ✨ Map All Unmapped
+                  </button>
+                </div>
+              </div>
+
+              {/* Mapping Table */}
+              <div className="border border-[#2a2a2a] rounded-xl overflow-hidden bg-[#111111]">
+                <div className="p-3 bg-[#1a1a1a] border-b border-[#2a2a2a] grid grid-cols-12 text-xs font-bold text-[#9ca3af]">
+                  <div className="col-span-3">CSV Column Header</div>
+                  <div className="col-span-3">Sample Value</div>
+                  <div className="col-span-6">Mapping & Quick Action</div>
+                </div>
+
+                <div className="divide-y divide-[#2a2a2a] max-h-[360px] overflow-y-auto">
                   {csvHeaders.map((header, idx) => {
                     const sampleVal = sampleRows[0]?.[idx] || '';
                     const currentTarget = columnMapping[header] || 'custom_var';
+                    const isSkipped = currentTarget === 'skip';
+                    const isCustomVar = currentTarget === 'custom_var';
 
                     return (
-                      <div key={header} className="p-3 grid grid-cols-12 items-center gap-2 text-xs hover:bg-[#181818] transition-colors">
-                        <div className="col-span-4 font-mono font-bold text-white truncate" title={header}>
-                          {header}
+                      <div key={header} className={`p-3 grid grid-cols-12 items-center gap-2 text-xs transition-colors ${isSkipped ? 'bg-red-950/10 opacity-75' : 'hover:bg-[#181818]'}`}>
+                        
+                        {/* Header Name */}
+                        <div className="col-span-3 font-mono font-bold truncate" title={header}>
+                          <span className={isSkipped ? 'line-through text-red-400' : 'text-white'}>
+                            {header}
+                          </span>
                         </div>
+
+                        {/* Sample Value */}
                         <div className="col-span-3 text-[#9ca3af] truncate font-mono text-[11px]" title={sampleVal}>
                           {sampleVal || <span className="text-[#4b5563] italic">empty</span>}
                         </div>
-                        <div className="col-span-5">
+
+                        {/* Quick Actions & Field Dropdown */}
+                        <div className="col-span-6 flex items-center gap-2">
+                          
+                          {/* Dedicated 1-Click SKIP Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleMappingChange(header, isSkipped ? autoGuessMapping(header) : 'skip')}
+                            className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all border flex items-center gap-1 shrink-0 ${
+                              isSkipped
+                                ? 'bg-red-500 text-white border-red-600 shadow-sm'
+                                : 'bg-[#1a1a1a] text-[#9ca3af] border-[#2a2a2a] hover:text-red-400 hover:border-red-500/40'
+                            }`}
+                            title={isSkipped ? 'Click to Restore Column' : 'Click to Skip / Exclude this Column'}
+                          >
+                            {isSkipped ? '🚫 SKIPPED' : '🚫 Skip'}
+                          </button>
+
+                          {/* Dedicated 1-Click Custom Variable Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleMappingChange(header, isCustomVar ? 'skip' : 'custom_var')}
+                            className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all border flex items-center gap-1 shrink-0 ${
+                              isCustomVar
+                                ? 'bg-[#6366f1] text-white border-[#4f46e5] shadow-sm'
+                                : 'bg-[#1a1a1a] text-[#9ca3af] border-[#2a2a2a] hover:text-[#818cf8] hover:border-[#6366f1]/40'
+                            }`}
+                            title="Save as {{custom_variable}} for messaging"
+                          >
+                            ✨ Custom
+                          </button>
+
+                          {/* Field Selector Dropdown */}
                           <select
                             value={currentTarget}
                             onChange={(e) => handleMappingChange(header, e.target.value)}
-                            className={`w-full bg-[#141414] border rounded-lg px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:border-[#6366f1] ${
-                              currentTarget === 'skip'
+                            className={`flex-1 bg-[#141414] border rounded-lg px-2.5 py-1 text-xs font-medium focus:outline-none focus:border-[#6366f1] truncate ${
+                              isSkipped
                                 ? 'text-red-400 border-red-500/30'
-                                : currentTarget === 'custom_var'
-                                ? 'text-indigo-400 border-indigo-500/30'
+                                : isCustomVar
+                                ? 'text-indigo-300 border-indigo-500/30'
                                 : 'text-white border-[#2a2a2a]'
                             }`}
                           >
