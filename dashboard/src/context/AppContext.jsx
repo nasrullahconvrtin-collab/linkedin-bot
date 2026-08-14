@@ -5,6 +5,7 @@ import {
   runConnections, checkAcceptances, runMessages, runFollowups,
   getSchedules, runFlow,
 } from '../services/api';
+import { directGetAppSettings } from '../services/directServices';
 
 // A profile that hasn't heartbeated in this long is treated as stale/offline
 // even if extension_status still says "online" (e.g. crashed mid-tick).
@@ -133,15 +134,25 @@ export function AppProvider({ children }) {
     const p = setInterval(fetchProfiles, 30_000);
     const r = setInterval(fetchReplies, 30_000);
     const f = setInterval(fetchFailedJobs, 60_000);
-    const fl = setInterval(() => {
-      runFlow().catch(err => console.warn('Background runFlow error:', err));
-    }, 60_000);
+    
+    let fl;
+    directGetAppSettings().then(settings => {
+      const intervalMs = settings?.runner_interval_ms || 60_000;
+      fl = setInterval(() => {
+        runFlow().catch(err => console.warn('Background runFlow error:', err));
+      }, intervalMs);
+    }).catch(() => {
+      fl = setInterval(() => {
+        runFlow().catch(err => console.warn('Background runFlow error:', err));
+      }, 60_000);
+    });
+
     return () => {
       clearInterval(s);
       clearInterval(p);
       clearInterval(r);
       clearInterval(f);
-      clearInterval(fl);
+      if (fl) clearInterval(fl);
     };
   }, []);
 

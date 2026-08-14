@@ -793,7 +793,91 @@ export const directCheckProspectReplied = async (prospect) => {
   return { success: true, replied: false };
 };
 
+export const DEFAULT_APP_SETTINGS = {
+  daily_visit_limit: 50,
+  daily_follow_limit: 30,
+  daily_connection_limit: 25,
+  daily_message_limit: 40,
+  enable_working_hours: true,
+  start_time: '09:00',
+  end_time: '18:00',
+  timezone: 'Asia/Karachi',
+  skip_weekends: true,
+  random_jitter: true,
+  auto_warmup: true,
+  runner_interval_ms: 60000,
+};
+
+export const directGetAppSettings = async () => {
+  try {
+    const { data } = await supabaseDirect.from('profiles').select('settings').eq('profile_key', 'profile_1');
+    if (data && data[0] && data[0].settings && Object.keys(data[0].settings).length > 0) {
+      return { ...DEFAULT_APP_SETTINGS, ...data[0].settings };
+    }
+  } catch (e) {
+    console.warn('Failed to load settings from Supabase:', e);
+  }
+  try {
+    const raw = localStorage.getItem('lf_app_settings');
+    if (raw) return { ...DEFAULT_APP_SETTINGS, ...JSON.parse(raw) };
+  } catch {}
+  return { ...DEFAULT_APP_SETTINGS };
+};
+
+export const directSaveAppSettings = async (newSettings) => {
+  const merged = { ...DEFAULT_APP_SETTINGS, ...newSettings };
+  try {
+    localStorage.setItem('lf_app_settings', JSON.stringify(merged));
+  } catch {}
+  try {
+    await supabaseDirect.from('profiles').update({ settings: merged }).eq('profile_key', 'profile_1');
+  } catch (e) {
+    console.warn('Failed to save settings to Supabase:', e);
+  }
+  return merged;
+};
+
+export const isWithinWorkingHours = (settings) => {
+  if (!settings || !settings.enable_working_hours) return { allowed: true, reason: '' };
+
+  const tz = settings.timezone || 'UTC';
+  let nowInTz;
+  try {
+    const dateStr = new Date().toLocaleString('en-US', { timeZone: tz });
+    nowInTz = new Date(dateStr);
+  } catch {
+    nowInTz = new Date();
+  }
+
+  const day = nowInTz.getDay();
+  if (settings.skip_weekends && (day === 0 || day === 6)) {
+    return { allowed: false, reason: `Weekend safety rule active (${day === 0 ? 'Sunday' : 'Saturday'} in ${tz})` };
+  }
+
+  const currentMinutes = nowInTz.getHours() * 60 + nowInTz.getMinutes();
+  const [startH, startM] = (settings.start_time || '09:00').split(':').map(Number);
+  const [endH, endM] = (settings.end_time || '18:00').split(':').map(Number);
+  const startMinutes = startH * 60 + startM;
+  const endMinutes = endH * 60 + endM;
+
+  if (currentMinutes < startMinutes || currentMinutes > endMinutes) {
+    return {
+      allowed: false,
+      reason: `Outside working hours (${settings.start_time} - ${settings.end_time} in ${tz})`
+    };
+  }
+
+  return { allowed: true, reason: '' };
+};
+
 export const directRunFlow = async () => {
+  const appSettings = await directGetAppSettings();
+  const hoursCheck = isWithinWorkingHours(appSettings);
+  if (!hoursCheck.allowed) {
+    console.log(`Campaign flow engine paused: ${hoursCheck.reason}`);
+    return { success: true, message: hoursCheck.reason, totalExecuted: 0 };
+  }
+
   let campaigns = [];
   try {
     const { data } = await supabaseDirect.from('campaigns').select('*').eq('status', 'running');
