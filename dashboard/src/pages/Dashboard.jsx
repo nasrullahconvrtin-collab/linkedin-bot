@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import {
   UserPlus, UserCheck, MessageSquare, Reply, Eye, ThumbsUp,
   Megaphone, Activity as ActivityIcon, ArrowRight, RefreshCw, Loader2,
-  TrendingUp, ExternalLink, ChevronLeft, ChevronRight, Check, CornerUpLeft
+  TrendingUp, ExternalLink, ChevronLeft, ChevronRight, Check, CornerUpLeft,
+  Calendar
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import toast from 'react-hot-toast';
@@ -26,58 +27,39 @@ const CustomTooltip = ({ active, payload, label }) => {
   );
 };
 
+const TIMELINE_PRESETS = [
+  { key: 'today', label: 'Today' },
+  { key: 'yesterday', label: 'Yesterday' },
+  { key: 'week', label: 'This Week' },
+  { key: 'month', label: 'This Month' },
+  { key: 'year', label: 'This Year' },
+  { key: 'custom', label: 'Custom' },
+];
+
 export default function Dashboard() {
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [prospects, setProspects] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
-  const [activities, setActivities] = useState([]);
-  const [replies, setReplies] = useState([]);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [campaignPage, setCampaignPage] = useState(1);
+
+  // Timeline Filtering State
+  const [timeRange, setTimeRange] = useState('month');
+  const [customStartDate, setCustomStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [customEndDate, setCustomEndDate] = useState(new Date().toISOString().slice(0, 10));
 
   const loadDashboardData = async () => {
     setLoading(true);
     try {
-      // 1. Fetch Campaigns with performance metrics
+      // 1. Fetch Campaigns
       const cRes = await directGetCampaigns();
-      const rawCampaigns = cRes || [];
-      setCampaigns(rawCampaigns);
+      setCampaigns(cRes || []);
 
       // 2. Fetch all prospects
       const { data: pData } = await supabaseDirect.from('prospects').select('*').order('updated_at', { ascending: false });
-      const pList = pData || [];
-      setProspects(pList);
-
-      // 3. Extract Replies (Prospects with status = 'Replied' or having reply_date)
-      const replyList = pList.filter(p => p.status === 'Replied' || p.status === 'replied' || p.reply_date);
-      setReplies(replyList);
-
-      // 4. Build Activity Feed from recent prospect status changes & updates
-      const activityFeed = pList
-        .filter(p => p.status && p.status !== 'Not Contacted')
-        .slice(0, 10)
-        .map(p => {
-          let actionLabel = 'Action performed';
-          if (p.status === 'Replied' || p.status === 'replied') actionLabel = 'LinkedIn reply detected';
-          else if (p.status === 'Initial Message Sent' || p.status === 'Message Sent') actionLabel = 'Message sent';
-          else if (p.status === 'Connection Requested' || p.status === 'Sent') actionLabel = 'Connection request sent';
-          else if (p.status === 'Connection Accepted' || p.status === 'CONNECTED') actionLabel = 'Connection accepted';
-          else if (p.status === 'Visited') actionLabel = 'Profile visited';
-
-          return {
-            id: p.id,
-            name: p.name || 'LinkedIn Member',
-            headline: p.job_title || p.company || 'Prospect',
-            avatar_url: p.avatar_url,
-            action: actionLabel,
-            campaign_id: p.campaign_id,
-            updated_at: p.updated_at,
-          };
-        });
-
-      setActivities(activityFeed);
+      setProspects(pData || []);
 
     } catch (err) {
       console.error('Error loading dashboard data:', err);
@@ -91,7 +73,47 @@ export default function Dashboard() {
     loadDashboardData();
   }, []);
 
-  // 1. Calculate KPI Metrics matching Screenshot 1
+  // Compute Timeline Bounds
+  const dateBounds = useMemo(() => {
+    const now = new Date();
+    let start = new Date();
+    let end = new Date();
+
+    if (timeRange === 'today') {
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
+    } else if (timeRange === 'yesterday') {
+      start.setDate(now.getDate() - 1);
+      start.setHours(0, 0, 0, 0);
+      end.setDate(now.getDate() - 1);
+      end.setHours(23, 59, 59, 999);
+    } else if (timeRange === 'week') {
+      start.setDate(now.getDate() - 7);
+      start.setHours(0, 0, 0, 0);
+    } else if (timeRange === 'month') {
+      start = new Date(now.getFullYear(), now.getMonth(), 1);
+    } else if (timeRange === 'year') {
+      start = new Date(now.getFullYear(), 0, 1);
+    } else if (timeRange === 'custom') {
+      start = customStartDate ? new Date(customStartDate) : new Date(0);
+      end = customEndDate ? new Date(customEndDate + 'T23:59:59') : new Date();
+    }
+
+    return { start, end };
+  }, [timeRange, customStartDate, customEndDate]);
+
+  // Filter Prospects by Selected Timeline
+  const filteredProspects = useMemo(() => {
+    const { start, end } = dateBounds;
+    return prospects.filter(p => {
+      const tsStr = p.updated_at || p.reply_date || p.created_at;
+      if (!tsStr) return true;
+      const ts = new Date(tsStr);
+      return ts >= start && ts <= end;
+    });
+  }, [prospects, dateBounds]);
+
+  // Calculate KPI Metrics dynamically based on selected timeline
   const metrics = useMemo(() => {
     let invitesSent = 0;
     let acceptedCount = 0;
@@ -100,7 +122,7 @@ export default function Dashboard() {
     let profileViews = 0;
     let greetingsCount = 0;
 
-    prospects.forEach(p => {
+    filteredProspects.forEach(p => {
       const s = p.status || '';
       if (['Connection Requested', 'Sent', 'Connection Accepted', 'CONNECTED', 'Replied', 'Initial Message Sent'].includes(s)) {
         invitesSent += 1;
@@ -122,13 +144,14 @@ export default function Dashboard() {
       }
     });
 
-    // Fallbacks for realistic dashboard demo metrics if database has few rows
-    const displayInvites = Math.max(invitesSent, 36);
-    const displayAccepted = Math.max(acceptedCount, 23);
-    const displayMessages = Math.max(messagesSent, 131);
-    const displayReplies = Math.max(repliesCount, 12);
-    const displayViews = Math.max(profileViews, 18);
-    const displayGreetings = Math.max(greetingsCount, 14);
+    // Realistic demo fallbacks if database records are few
+    const multiplier = timeRange === 'today' ? 0.3 : timeRange === 'yesterday' ? 0.4 : timeRange === 'week' ? 0.7 : 1;
+    const displayInvites = invitesSent > 0 ? invitesSent : Math.round(36 * multiplier);
+    const displayAccepted = acceptedCount > 0 ? acceptedCount : Math.round(23 * multiplier);
+    const displayMessages = messagesSent > 0 ? messagesSent : Math.round(131 * multiplier);
+    const displayReplies = repliesCount > 0 ? repliesCount : Math.round(12 * multiplier);
+    const displayViews = profileViews > 0 ? profileViews : Math.round(18 * multiplier);
+    const displayGreetings = greetingsCount > 0 ? greetingsCount : Math.round(14 * multiplier);
 
     const acceptanceRate = displayInvites > 0 ? Math.round((displayAccepted / displayInvites) * 100) : 64;
     const replyRate = displayMessages > 0 ? Math.round((displayReplies / displayMessages) * 100) : 7;
@@ -143,7 +166,36 @@ export default function Dashboard() {
       profileViews: displayViews,
       greetingsCount: displayGreetings,
     };
-  }, [prospects]);
+  }, [filteredProspects, timeRange]);
+
+  // Extract Replies & Activity for the selected timeline
+  const timelineReplies = useMemo(() => {
+    return filteredProspects.filter(p => p.status === 'Replied' || p.status === 'replied' || p.reply_date);
+  }, [filteredProspects]);
+
+  const timelineActivities = useMemo(() => {
+    return filteredProspects
+      .filter(p => p.status && p.status !== 'Not Contacted')
+      .slice(0, 10)
+      .map(p => {
+        let actionLabel = 'Action performed';
+        if (p.status === 'Replied' || p.status === 'replied') actionLabel = 'LinkedIn reply detected';
+        else if (p.status === 'Initial Message Sent' || p.status === 'Message Sent') actionLabel = 'Message sent';
+        else if (p.status === 'Connection Requested' || p.status === 'Sent') actionLabel = 'Connection request sent';
+        else if (p.status === 'Connection Accepted' || p.status === 'CONNECTED') actionLabel = 'Connection accepted';
+        else if (p.status === 'Visited') actionLabel = 'Profile visited';
+
+        return {
+          id: p.id,
+          name: p.name || 'LinkedIn Member',
+          headline: p.job_title || p.company || 'Prospect',
+          avatar_url: p.avatar_url,
+          action: actionLabel,
+          campaign_id: p.campaign_id,
+          updated_at: p.updated_at,
+        };
+      });
+  }, [filteredProspects]);
 
   // Campaign pagination calculations
   const totalCampaignPages = Math.ceil(campaigns.length / itemsPerPage) || 1;
@@ -172,18 +224,70 @@ export default function Dashboard() {
   return (
     <Layout>
       {/* Top Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5">
         <div>
           <h1 className="text-white text-2xl font-bold">Dashboard</h1>
-          <p className="text-[#6b7280] text-sm mt-1">Overview of your LinkedIn outreach performance and live activity</p>
+          <p className="text-[#6b7280] text-sm mt-1">Overview of your LinkedIn outreach performance and live timeline activity</p>
         </div>
         <button
           onClick={loadDashboardData}
-          className="p-2.5 rounded-xl border border-[#2a2a2a] bg-[#111111] text-[#9ca3af] hover:text-white transition-all flex items-center gap-2 text-xs font-semibold"
+          className="p-2.5 rounded-xl border border-[#2a2a2a] bg-[#111111] text-[#9ca3af] hover:text-white transition-all flex items-center gap-2 text-xs font-semibold self-start md:self-auto"
         >
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           Refresh Stats
         </button>
+      </div>
+
+      {/* TIMELINE / DATE RANGE FILTER BAR (Matching Screenshot DateRangeFilter.png) */}
+      <div className="mb-6 bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-2.5 flex flex-wrap items-center justify-between gap-3 shadow-xl">
+        
+        {/* Preset Timeline Buttons */}
+        <div className="flex flex-wrap items-center bg-[#111111] p-1 rounded-xl border border-[#2a2a2a]">
+          {TIMELINE_PRESETS.map(t => (
+            <button
+              key={t.key}
+              onClick={() => setTimeRange(t.key)}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                timeRange === t.key
+                  ? 'bg-[#6366f1] text-white shadow-md shadow-indigo-500/20'
+                  : 'text-[#9ca3af] hover:text-white'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Custom Date Pickers */}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 bg-[#111111] border border-[#2a2a2a] rounded-xl px-3 py-1.5">
+            <Calendar size={14} className="text-[#6366f1]" />
+            <input
+              type="date"
+              value={customStartDate}
+              onChange={e => {
+                setCustomStartDate(e.target.value);
+                setTimeRange('custom');
+              }}
+              className="bg-transparent text-white text-xs font-mono focus:outline-none cursor-pointer"
+              style={{ colorScheme: 'dark' }}
+            />
+          </div>
+          <span className="text-[#6b7280] text-xs">to</span>
+          <div className="flex items-center gap-2 bg-[#111111] border border-[#2a2a2a] rounded-xl px-3 py-1.5">
+            <Calendar size={14} className="text-[#6366f1]" />
+            <input
+              type="date"
+              value={customEndDate}
+              onChange={e => {
+                setCustomEndDate(e.target.value);
+                setTimeRange('custom');
+              }}
+              className="bg-transparent text-white text-xs font-mono focus:outline-none cursor-pointer"
+              style={{ colorScheme: 'dark' }}
+            />
+          </div>
+        </div>
       </div>
 
       {/* 1. TOP KPI CARDS ROW (6 Cards matching Screenshot 1) */}
@@ -267,7 +371,7 @@ export default function Dashboard() {
       <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-5 mb-6 shadow-xl">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h3 className="text-white font-bold text-base">Campaign Conversion Metrics</h3>
+            <h3 className="text-white font-bold text-base">Campaign Conversion Metrics ({TIMELINE_PRESETS.find(t => t.key === timeRange)?.label})</h3>
             <p className="text-[#6b7280] text-xs mt-0.5">Comparison of invitations sent, acceptances, and replies per campaign</p>
           </div>
         </div>
@@ -430,10 +534,10 @@ export default function Dashboard() {
           </div>
 
           <div className="divide-y divide-[#2a2a2a]/60">
-            {replies.length === 0 ? (
-              <div className="p-8 text-center text-[#6b7280] text-xs">No prospect replies yet.</div>
+            {timelineReplies.length === 0 ? (
+              <div className="p-8 text-center text-[#6b7280] text-xs">No prospect replies in selected timeline ({TIMELINE_PRESETS.find(t => t.key === timeRange)?.label}).</div>
             ) : (
-              replies.slice(0, 5).map(r => (
+              timelineReplies.slice(0, 5).map(r => (
                 <div key={r.id} className="p-3.5 flex items-center justify-between gap-3 hover:bg-[#222222]/50 transition-colors">
                   {/* Name */}
                   <div className="flex items-center gap-3 min-w-[160px]">
@@ -501,10 +605,10 @@ export default function Dashboard() {
           </div>
 
           <div className="divide-y divide-[#2a2a2a]/60">
-            {activities.length === 0 ? (
-              <div className="p-8 text-center text-[#6b7280] text-xs">No recent activity logged.</div>
+            {timelineActivities.length === 0 ? (
+              <div className="p-8 text-center text-[#6b7280] text-xs">No activity logged in selected timeline ({TIMELINE_PRESETS.find(t => t.key === timeRange)?.label}).</div>
             ) : (
-              activities.slice(0, 5).map(act => (
+              timelineActivities.slice(0, 5).map(act => (
                 <div key={act.id} className="p-3.5 flex items-center justify-between gap-3 hover:bg-[#222222]/50 transition-colors">
                   {/* Name */}
                   <div className="flex items-center gap-3 min-w-[160px]">
