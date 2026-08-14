@@ -205,20 +205,45 @@ export const deleteMessage     = (id)       => api.delete(`/messages/${id}`).cat
 export const syncHubSpot       = (id, data) => api.post(`/hubspot/sync/${id}`, data).catch(() => ({ success: true }));
 
 // ── Networking & Unipile Auth (Direct Fallbacks) ─────────────
-export const getNetworkingConnections = (params) =>
-  api.get('/networking/connections', { params }).catch(() => directGetNetworkingConnections(params?.cursor));
+export const getNetworkingConnections = async (params) => {
+  try {
+    const res = await api.get('/networking/connections', { params, timeout: 1500 });
+    if (res && res.connections && res.connections.length > 0) return res;
+  } catch (e) {}
+  return directGetNetworkingConnections(params?.cursor);
+};
 
-export const getNetworkingInvitations = (params) =>
-  api.get('/networking/invitations', { params }).catch(() => directGetNetworkingInvitations());
+export const getNetworkingInvitations = async (params) => {
+  try {
+    const res = await api.get('/networking/invitations', { params, timeout: 1500 });
+    if (res && res.invitations && res.invitations.length > 0) return res;
+  } catch (e) {}
+  return directGetNetworkingInvitations();
+};
 
-export const cancelNetworkingInvitation = (invitation_id) =>
-  api.post('/networking/cancel-invitation', { invitation_id }).catch(() => directCancelNetworkingInvitation(invitation_id));
+export const cancelNetworkingInvitation = async (invitation_id) => {
+  try {
+    const res = await api.post('/networking/cancel-invitation', { invitation_id }, { timeout: 1500 });
+    if (res && res.success) return res;
+  } catch (e) {}
+  return directCancelNetworkingInvitation(invitation_id);
+};
 
-export const withdrawOldInvitations = (max_age_days = 90) =>
-  api.post('/networking/withdraw-old', { max_age_days }).catch(() => directWithdrawOldInvitations(max_age_days));
+export const withdrawOldInvitations = async (max_age_days = 90) => {
+  try {
+    const res = await api.post('/networking/withdraw-old', { max_age_days }, { timeout: 1500 });
+    if (res && res.success) return res;
+  } catch (e) {}
+  return directWithdrawOldInvitations(max_age_days);
+};
 
-export const getUnipileAccountInfo = (account_id) =>
-  api.get('/unipile/account-info', { params: { account_id } }).catch(() => directGetUnipileAccountInfo(account_id));
+export const getUnipileAccountInfo = async (account_id) => {
+  try {
+    const res = await api.get('/unipile/account-info', { params: { account_id }, timeout: 1500 });
+    if (res && res.id) return res;
+  } catch (e) {}
+  return directGetUnipileAccountInfo(account_id);
+};
 
 export const connectUnipileDirect = (data) =>
   api.post('/unipile/connect-direct', data).catch(() => ({ success: true, account_id: 'bBzuBoeOQAuBCQNFu7shyQ' }));

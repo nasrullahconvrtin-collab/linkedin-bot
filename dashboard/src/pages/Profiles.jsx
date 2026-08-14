@@ -422,19 +422,23 @@ export default function Profiles() {
   return (
     <Layout>
       
-      {/* ── 1. TOP SECTION: PROFILE NAME & STATUS BANNER (ONLY WHEN CONNECTED) ── */}
+      {/* ── 1. TOP SECTION: PROFILE NAME, STATUS BANNER & CONNECTION COUNT ── */}
       {isAccountConnected && (
         <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-6 mb-6 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-xl">
           <div className="flex items-center gap-5">
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#6366f1] via-indigo-600 to-purple-600 text-white font-bold text-2xl flex items-center justify-center shadow-lg">
-              {profileDisplayName ? profileDisplayName[0] : 'L'}
+              {profileDisplayName ? profileDisplayName[0] : 'F'}
             </div>
             <div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <h1 className="text-white text-2xl font-extrabold">{profileDisplayName}</h1>
                 <span className="text-xs px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                   LinkedIn Connected
+                </span>
+                <span className="text-xs px-3.5 py-1 rounded-full bg-[#6366f1]/10 text-[#6366f1] border border-[#6366f1]/20 font-bold flex items-center gap-1.5 shadow-sm">
+                  <Users size={14} />
+                  {connections.length} 1st-Degree Connections
                 </span>
               </div>
               <p className="text-[#9ca3af] text-sm mt-1">{accountInfo?.headline || 'LinkedIn Outreach Profile'}</p>
@@ -475,130 +479,7 @@ export default function Profiles() {
         </div>
       ) : (
         <>
-          {/* ── 2. SECOND SECTION: OVERALL PROFILE STATS & TIMELINE FILTER ───────── */}
-          <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-5 mb-6 shadow-xl space-y-4">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#2a2a2a] pb-4">
-              <div>
-                <h2 className="text-white font-bold text-lg">Overall Profile Activity Performance</h2>
-                <p className="text-[#6b7280] text-xs mt-0.5">Aggregated metrics for all automated outreach activities executed on this profile</p>
-              </div>
-
-              {/* Timeline Preset & Pickers Bar */}
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center bg-[#111111] p-1 rounded-xl border border-[#2a2a2a]">
-                  {TIMELINE_PRESETS.map(t => (
-                    <button
-                      key={t.key}
-                      onClick={() => setTimeRange(t.key)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                        timeRange === t.key
-                          ? 'bg-[#6366f1] text-white shadow-md'
-                          : 'text-[#9ca3af] hover:text-white'
-                      }`}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-2 bg-[#111111] border border-[#2a2a2a] rounded-xl px-3 py-1.5">
-                    <Calendar size={13} className="text-[#6366f1]" />
-                    <input
-                      type="date"
-                      value={customStartDate}
-                      onChange={e => {
-                        setCustomStartDate(e.target.value);
-                        setTimeRange('custom');
-                      }}
-                      className="bg-transparent text-white text-xs font-mono focus:outline-none cursor-pointer"
-                      style={{ colorScheme: 'dark' }}
-                    />
-                  </div>
-                  <span className="text-[#6b7280] text-xs">to</span>
-                  <div className="flex items-center gap-2 bg-[#111111] border border-[#2a2a2a] rounded-xl px-3 py-1.5">
-                    <Calendar size={13} className="text-[#6366f1]" />
-                    <input
-                      type="date"
-                      value={customEndDate}
-                      onChange={e => {
-                        setCustomEndDate(e.target.value);
-                        setTimeRange('custom');
-                      }}
-                      className="bg-transparent text-white text-xs font-mono focus:outline-none cursor-pointer"
-                      style={{ colorScheme: 'dark' }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 5 Compact Metric Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 pt-1">
-              {/* Card 1: Invites Sent */}
-              <div className="rounded-2xl border border-[#2a2a2a] bg-[#111111] p-3.5 flex items-center justify-between shadow-md">
-                <div>
-                  <p className="text-[#9ca3af] text-[11px] font-medium">Invites Sent</p>
-                  <p className="text-white font-extrabold text-xl mt-0.5">{metrics.invitesSent}</p>
-                </div>
-                <div className="w-8 h-8 rounded-xl bg-[#6366f1]/10 border border-[#6366f1]/20 flex items-center justify-center text-[#6366f1] shrink-0">
-                  <UserPlus size={16} />
-                </div>
-              </div>
-
-              {/* Card 2: Accepted */}
-              <div className="rounded-2xl border border-[#2a2a2a] bg-[#111111] p-3.5 flex items-center justify-between shadow-md">
-                <div>
-                  <p className="text-[#9ca3af] text-[11px] font-medium">Accepted</p>
-                  <div className="flex items-baseline gap-1 mt-0.5">
-                    <span className="text-white font-extrabold text-xl">{metrics.acceptedCount}</span>
-                    <span className="text-emerald-400 text-[10px] font-bold font-mono">({metrics.acceptanceRate}%)</span>
-                  </div>
-                </div>
-                <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
-                  <UserCheck size={16} />
-                </div>
-              </div>
-
-              {/* Card 3: Messages */}
-              <div className="rounded-2xl border border-[#2a2a2a] bg-[#111111] p-3.5 flex items-center justify-between shadow-md">
-                <div>
-                  <p className="text-[#9ca3af] text-[11px] font-medium">Messages</p>
-                  <p className="text-white font-extrabold text-xl mt-0.5">{metrics.messagesSent}</p>
-                </div>
-                <div className="w-8 h-8 rounded-xl bg-[#6366f1]/10 border border-[#6366f1]/20 flex items-center justify-center text-[#6366f1] shrink-0">
-                  <MessageSquare size={16} />
-                </div>
-              </div>
-
-              {/* Card 4: Replies */}
-              <div className="rounded-2xl border border-[#2a2a2a] bg-[#111111] p-3.5 flex items-center justify-between shadow-md">
-                <div>
-                  <p className="text-[#9ca3af] text-[11px] font-medium">Replies</p>
-                  <div className="flex items-baseline gap-1 mt-0.5">
-                    <span className="text-white font-extrabold text-xl">{metrics.repliesCount}</span>
-                    <span className="text-amber-400 text-[10px] font-bold font-mono">({metrics.replyRate}%)</span>
-                  </div>
-                </div>
-                <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
-                  <Reply size={16} />
-                </div>
-              </div>
-
-              {/* Card 5: Profile Views */}
-              <div className="rounded-2xl border border-[#2a2a2a] bg-[#111111] p-3.5 flex items-center justify-between shadow-md">
-                <div>
-                  <p className="text-[#9ca3af] text-[11px] font-medium">Profile Views</p>
-                  <p className="text-white font-extrabold text-xl mt-0.5">{metrics.profileViews}</p>
-                </div>
-                <div className="w-8 h-8 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
-                  <Eye size={16} />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* ── 3. THIRD SECTION: NETWORK & CONNECTIONS ────────────────────────────────────────── */}
+          {/* ── 2. NETWORK & CONNECTIONS SECTION ────────────────────────────────────────── */}
           <div className="space-y-6">
             
             {/* Pending Sent Invitations Section */}
