@@ -797,6 +797,16 @@ export const directGetChatMessages = async (chatId, limit = 50) => {
   return { success: false, messages: [] };
 };
 
+export const directGetUnipileUserProfile = async (identifier) => {
+  if (!identifier) return { success: false, profile: null };
+  const cleanId = String(identifier).trim().replace(/^https?:\/\/(www\.)?linkedin\.com\/in\//i, '').replace(/\/$/, '');
+  const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(cleanId)}?account_id=${DEFAULT_ACCOUNT_ID}`);
+  if (ok && data) {
+    return { success: true, profile: data };
+  }
+  return { success: false, profile: null };
+};
+
 export const directCheckProspectReplied = async (prospect) => {
   const recipientId = getLinkedinId(prospect);
   if (!recipientId) return { success: true, replied: false };
