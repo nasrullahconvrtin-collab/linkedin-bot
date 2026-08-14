@@ -24,9 +24,22 @@ export const unipileFetch = async (endpoint, options = {}) => {
   }
 };
 
-let activeAccountId = DEFAULT_ACCOUNT_ID;
+const getStoredDisconnectedFlag = () => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return localStorage.getItem('lf_account_disconnected') === 'true';
+    }
+  } catch (e) {}
+  return false;
+};
+
+let activeAccountId = getStoredDisconnectedFlag() ? null : DEFAULT_ACCOUNT_ID;
 
 export const directGetProfiles = async () => {
+  if (getStoredDisconnectedFlag()) {
+    return [];
+  }
+
   try {
     const { data, error } = await supabaseDirect.from('profiles').select('*');
     if (!error && data && data.length > 0) {
@@ -46,30 +59,30 @@ export const directGetProfiles = async () => {
     console.warn('Supabase fetch error:', e);
   }
 
-  if (activeAccountId) {
-    return [
-      {
-        profile_key: 'profile_1',
-        display_name: 'Fatima Maqsood',
-        unipile_account_id: activeAccountId,
-        session_active: true,
-        enabled: true,
-        daily_sent: 0,
-      },
-    ];
-  }
-
-  return [];
+  const currentId = activeAccountId || DEFAULT_ACCOUNT_ID;
+  return [
+    {
+      profile_key: 'profile_1',
+      display_name: 'Fatima Maqsood',
+      unipile_account_id: currentId,
+      session_active: true,
+      enabled: true,
+      daily_sent: 0,
+    },
+  ];
 };
 
 export const directCreateProfile = async (data) => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.removeItem('lf_account_disconnected');
+    }
+  } catch (e) {}
+
   const profile_key = data.profile_key || 'profile_1';
   const display_name = data.display_name || 'Fatima Maqsood';
-  const unipile_account_id = data.unipile_account_id || activeAccountId || DEFAULT_ACCOUNT_ID;
-  
-  if (unipile_account_id) {
-    activeAccountId = unipile_account_id;
-  }
+  const unipile_account_id = data.unipile_account_id || DEFAULT_ACCOUNT_ID;
+  activeAccountId = unipile_account_id;
 
   try {
     await supabaseDirect.from('profiles').upsert([
@@ -95,7 +108,12 @@ export const directCreateProfile = async (data) => {
 
 export const directDisconnectProfile = async () => {
   try {
-    // Delete all profiles from Supabase database table
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.setItem('lf_account_disconnected', 'true');
+    }
+  } catch (e) {}
+
+  try {
     await supabaseDirect.from('profiles').delete().gt('created_at', '1970-01-01T00:00:00Z');
     await supabaseDirect.from('profiles').delete().neq('profile_key', 'dummy_key_none');
   } catch (err) {
@@ -107,7 +125,7 @@ export const directDisconnectProfile = async () => {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       Object.keys(localStorage).forEach(key => {
-        if (key.startsWith('lf_chat_sent_messages_') || key === 'lf_active_account_id') {
+        if (key.startsWith('lf_chat_sent_messages_')) {
           localStorage.removeItem(key);
         }
       });
@@ -118,6 +136,9 @@ export const directDisconnectProfile = async () => {
 };
 
 export const directGetUnipileAccountInfo = async (accountId) => {
+  if (getStoredDisconnectedFlag()) {
+    return null;
+  }
   try {
     const { data: dbProfiles } = await supabaseDirect.from('profiles').select('*').limit(1);
     const dbProfile = dbProfiles?.[0];
@@ -179,6 +200,9 @@ export const directGetUnipileAccountInfo = async (accountId) => {
 
 // Fetch ALL 1st-degree connections using cursor pagination loop
 export const directGetNetworkingConnections = async () => {
+  if (getStoredDisconnectedFlag()) {
+    return { success: true, connections: [], total: 0 };
+  }
   const targetAccId = activeAccountId || DEFAULT_ACCOUNT_ID;
   let allItems = [];
   let cursor = null;
@@ -208,6 +232,9 @@ export const directGetNetworkingConnections = async () => {
 
 // Fetch all sent pending invitations via /users/invite/sent
 export const directGetNetworkingInvitations = async () => {
+  if (getStoredDisconnectedFlag()) {
+    return { success: true, invitations: [], total: 0 };
+  }
   const targetAccId = activeAccountId || DEFAULT_ACCOUNT_ID;
   let allItems = [];
   let cursor = null;
