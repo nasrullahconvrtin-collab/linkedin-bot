@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
 import StatusBadge from '../components/StatusBadge';
 import { bulkImportProspects, getNeedsPersonalization, updateProspect } from '../services/api';
+import CSVImportWizardModal from '../components/CSVImportWizardModal';
 
 const EDIT_FIELDS = [
   ['inmail_subject', 'InMail Subject'],
@@ -26,6 +27,7 @@ export default function NeedsPersonalization() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState({});
   const [drafts, setDrafts] = useState({});
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
   const fileRef = useRef(null);
 
   const load = async () => {
@@ -121,11 +123,10 @@ export default function NeedsPersonalization() {
           <p className="text-[#6b7280] text-sm mt-1">{rows.length} accepted prospect{rows.length === 1 ? '' : 's'} waiting for tailored messages</p>
         </div>
         <div className="flex gap-2">
-          <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={e => uploadCSV(e.target.files?.[0])} />
-          <button onClick={() => fileRef.current?.click()} className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[#2a2a2a] text-[#9ca3af] hover:text-white">
-            <Upload size={16} /> Bulk Upload Messages
+          <button onClick={() => setIsWizardOpen(true)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#6366f1] text-white hover:bg-[#4f46e5] font-semibold text-sm shadow-md">
+            <Upload size={16} /> Bulk Upload Messages (Wizard)
           </button>
-          <button onClick={exportCSV} className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#6366f1] text-white">
+          <button onClick={exportCSV} className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-sm font-semibold">
             <Download size={16} /> Export CSV
           </button>
         </div>
@@ -185,6 +186,17 @@ export default function NeedsPersonalization() {
           </div>
         )}
       </div>
+
+      <CSVImportWizardModal
+        isOpen={isWizardOpen}
+        onClose={() => setIsWizardOpen(false)}
+        onImportComplete={async (config) => {
+          const { file, columnMapping, importMode, targetListId, targetCampaignId } = config;
+          const res = await bulkImportProspects(file, columnMapping, importMode, targetListId || null, targetCampaignId || null);
+          toast.success(`Imported ${res.imported_count || res.created_count || 0} prospects`);
+          load();
+        }}
+      />
     </Layout>
   );
 }

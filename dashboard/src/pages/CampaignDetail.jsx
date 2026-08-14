@@ -12,6 +12,7 @@ import { pickSequenceTemplate } from '../data/sequenceTemplates';
 import { deduplicateVariables } from '../utils/messageTools';
 import StatusBadge from '../components/StatusBadge';
 import { useApp } from '../context/AppContext';
+import CSVImportWizardModal from '../components/CSVImportWizardModal';
 import {
   addProspectsToCampaign,
   createProspect,
@@ -137,6 +138,7 @@ export default function CampaignDetail() {
   const [importResult, setImportResult] = useState(null);
   const [dragging,   setDragging]   = useState(false);
   const [importMode, setImportMode] = useState('create_or_update');
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [sequence, setSequence] = useState(null);
   const [actioning, setActioning] = useState(false);
   const [editName, setEditName] = useState('');
@@ -513,6 +515,20 @@ export default function CampaignDetail() {
             onAdd={addCampaignVariable}
             onRemove={removeCampaignVariable}
           />
+
+          <div className="bg-[#6366f1]/10 border border-[#6366f1]/30 rounded-xl p-4 flex items-center justify-between">
+            <div>
+              <h4 className="text-white font-bold text-sm">Interactive CSV Import Wizard</h4>
+              <p className="text-[#9ca3af] text-xs mt-0.5">Visually map fields, skip unneeded columns & set up custom variables</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsWizardOpen(true)}
+              className="px-4 py-2 bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-lg font-semibold text-xs transition-colors flex items-center gap-2"
+            >
+              <Upload size={14} /> Launch Import Wizard
+            </button>
+          </div>
 
           {/* Drop zone */}
           <div
@@ -953,6 +969,18 @@ export default function CampaignDetail() {
           setMessageTemplates(t => [saved, ...t.filter(x => x.id !== saved.id)]);
           toast.success('Template saved');
         }}
+      />
+
+      <CSVImportWizardModal
+        isOpen={isWizardOpen}
+        onClose={() => setIsWizardOpen(false)}
+        onImportComplete={async (config) => {
+          const { file, columnMapping, importMode, targetListId } = config;
+          const res = await bulkImportProspects(file, columnMapping, importMode, targetListId || null, id);
+          toast.success(`Imported ${res.imported_count || res.created_count || 0} prospects into campaign`);
+          getProspects({ campaign_id: id }).then(d => setProspects(d.prospects || []));
+        }}
+        targetCampaignId={id}
       />
     </Layout>
   );
