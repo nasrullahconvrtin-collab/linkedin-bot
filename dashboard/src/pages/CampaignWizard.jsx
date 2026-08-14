@@ -234,13 +234,7 @@ export default function CampaignWizard({ onClose, onCreated }) {
     if (!file) return;
     if (!file.name.toLowerCase().endsWith('.csv')) return toast.error('Select a CSV file');
     setCsvFile(file);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const meta = parseCSV(String(e.target.result || ''));
-      setCsvMeta(meta);
-      setVariableMappings(autoVariableMappings(meta.headers));
-    };
-    reader.readAsText(file);
+    setIsWizardOpen(true);
   };
 
   const csvSampleRow = useMemo(() => {
@@ -665,7 +659,34 @@ export default function CampaignWizard({ onClose, onCreated }) {
             </div>
           )}
         </div>
-      </div>
+            <CSVImportWizardModal
+        isOpen={isWizardOpen}
+        onClose={() => setIsWizardOpen(false)}
+        onImportComplete={async (config) => {
+          const { file, columnMapping, importMode } = config;
+          setWizardColumnMapping(columnMapping);
+          setImportMode(importMode);
+          
+          // Read file locally to generate preview metadata for sequence preview
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const meta = parseCSV(String(e.target.result || ''));
+            setCsvMeta(meta);
+            
+            // Map headers to columnMapping
+            const resolvedMappings = {};
+            meta.headers.forEach(h => {
+              resolvedMappings[h] = columnMapping[h] || 'skip';
+            });
+            setVariableMappings(resolvedMappings);
+          };
+          reader.readAsText(file);
+          setIsWizardOpen(false);
+        }}
+        prospectLists={lists}
+        campaigns={templates}
+      />
+</div>
     </div>
   );
 }

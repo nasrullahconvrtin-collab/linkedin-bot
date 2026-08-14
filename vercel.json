@@ -3,6 +3,7 @@
   "outputDirectory": "dashboard/dist",
   "framework": "vite",
   "rewrites": [
+    { "source": "/api/unipile/(.*)", "destination": "https://api20.unipile.com:15032/api/v1/$1" },
     { "source": "/downloads/(.*)", "destination": "/downloads/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
