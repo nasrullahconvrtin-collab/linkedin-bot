@@ -179,7 +179,7 @@ export const directGetNetworkingConnections = async () => {
   let allItems = [];
   let cursor = null;
 
-  for (let page = 0; page < 20; page += 1) {
+  for (let page = 0; page < 50; page += 1) {
     let path = `/users/relations?account_id=${targetAccId}&limit=100`;
     if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
     
@@ -202,7 +202,7 @@ export const directGetNetworkingConnections = async () => {
   };
 };
 
-// Fetch all sent pending invitations via /users/invite/sent
+// Fetch ALL sent pending invitations via /users/invite/sent
 export const directGetNetworkingInvitations = async () => {
   if (getStoredDisconnectedFlag()) {
     return { success: true, invitations: [], total: 0 };
@@ -211,8 +211,8 @@ export const directGetNetworkingInvitations = async () => {
   let allItems = [];
   let cursor = null;
 
-  for (let page = 0; page < 10; page += 1) {
-    let path = `/users/invite/sent?account_id=${targetAccId}`;
+  for (let page = 0; page < 50; page += 1) {
+    let path = `/users/invite/sent?account_id=${targetAccId}&limit=100`;
     if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
     
     const { ok, data } = await unipileFetch(path);
