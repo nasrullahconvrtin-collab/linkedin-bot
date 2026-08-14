@@ -20,7 +20,7 @@ import {
   submitUnipile2FA,
   withdrawOldInvitations,
 } from '../services/api';
-import { supabaseDirect, directDisconnectProfile } from '../services/directServices';
+import { supabaseDirect, directDisconnectProfile, getStoredDisconnectedFlag } from '../services/directServices';
 
 const TIMELINE_PRESETS = [
   { key: 'today', label: 'Today' },
@@ -411,7 +411,7 @@ export default function Profiles() {
     }
   };
 
-  const isAccountConnected = !!(accountInfo?.id || profiles.length > 0);
+  const isAccountConnected = !getStoredDisconnectedFlag();
   const profileDisplayName = (accountInfo?.name && accountInfo.name !== 'Maryam Ansar' ? accountInfo.name : null) || (profiles[0] && profiles[0].display_name !== 'Maryam Ansar' ? profiles[0].display_name : null) || 'Fatima Maqsood';
 
   const tabs = [

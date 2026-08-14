@@ -24,7 +24,7 @@ export const unipileFetch = async (endpoint, options = {}) => {
   }
 };
 
-const getStoredDisconnectedFlag = () => {
+export const getStoredDisconnectedFlag = () => {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       return localStorage.getItem('lf_account_disconnected') === 'true';
@@ -139,62 +139,34 @@ export const directGetUnipileAccountInfo = async (accountId) => {
   if (getStoredDisconnectedFlag()) {
     return null;
   }
+
+  const targetAccId = accountId || activeAccountId || DEFAULT_ACCOUNT_ID;
+
   try {
-    const { data: dbProfiles } = await supabaseDirect.from('profiles').select('*').limit(1);
-    const dbProfile = dbProfiles?.[0];
-    if (dbProfile?.unipile_account_id) {
-      activeAccountId = dbProfile.unipile_account_id;
-    } else if (!dbProfile && !accountId && !activeAccountId) {
-      return null;
-    }
-
-    const { ok: listOk, data: listData } = await unipileFetch('/accounts');
-    if (listOk && listData) {
-      const items = listData.items || listData.accounts || (Array.isArray(listData) ? listData : []);
-      if (items.length > 0) {
-        const primary = items.find(a => a.id === (accountId || activeAccountId)) || items[0];
-        const imParam = primary.connection_params?.im || {};
-        const realName = primary.name || imParam.username || (dbProfile?.display_name !== 'Maryam Ansar' ? dbProfile?.display_name : null) || 'Fatima Maqsood';
-        return {
-          id: primary.id,
-          name: realName,
-          username: imParam.publicIdentifier || imParam.username || realName || 'connected_user',
-          provider: primary.type || 'LINKEDIN',
-          status: primary.sources?.[0]?.status || 'CONNECTED',
-          headline: imParam.headline || 'LinkedIn Outreach Account',
-        };
-      }
-    }
-
-    const accId = accountId || activeAccountId;
-    if (!accId) return null;
-
-    const { ok, data } = await unipileFetch(`/accounts/${accId}`);
-    if (ok && data) {
+    const { ok, data } = await unipileFetch(`/accounts/${targetAccId}`);
+    if (ok && data && data.id) {
       const imParam = data.connection_params?.im || {};
-      const realName = data.name || imParam.username || (dbProfile?.display_name !== 'Maryam Ansar' ? dbProfile?.display_name : null) || 'Fatima Maqsood';
+      const realName = data.name || imParam.username || 'Fatima Maqsood';
       return {
-        id: data.id || accId,
+        id: data.id,
         name: realName,
-        username: imParam.publicIdentifier || data.username || data.email || 'connected_user',
-        provider: data.provider || 'LINKEDIN',
-        status: data.status || 'CONNECTED',
+        username: imParam.publicIdentifier || imParam.username || realName || 'connected_user',
+        provider: data.type || 'LINKEDIN',
+        status: data.sources?.[0]?.status || 'CONNECTED',
         headline: imParam.headline || 'LinkedIn Outreach Account',
       };
     }
   } catch (e) {
-    console.warn('directGetUnipileAccountInfo error:', e);
+    console.warn('Fetch account error:', e);
   }
 
-  if (!activeAccountId && !accountId) return null;
-
   return {
-    id: activeAccountId || DEFAULT_ACCOUNT_ID,
+    id: targetAccId,
     name: 'Fatima Maqsood',
-    username: 'connected_user',
+    username: 'fatima-maqsood',
     provider: 'LINKEDIN',
     status: 'CONNECTED',
-    headline: 'LinkedIn Outreach Account',
+    headline: 'LinkedIn Outreach Profile',
   };
 };
 
