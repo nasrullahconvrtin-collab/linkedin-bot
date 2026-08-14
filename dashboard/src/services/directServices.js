@@ -593,10 +593,12 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
 
         const validColumns = new Set(sampleList && sampleList[0] ? Object.keys(sampleList[0]) : [
           'id', 'first_name', 'last_name', 'name', 'headline', 'company', 'job_title', 
-          'email', 'linkedin_url', 'location', 'notes', 'invite_note', 'initial_message', 
-          'followup_1', 'followup_2', 'followup_3', 'followup_4', 'inmail_subject', 
-          'inmail_message', 'status', 'campaign_id', 'assigned_account', 'custom_variables', 
-          'custom_fields', 'created_at', 'updated_at'
+          'email', 'linkedin_url', 'public_identifier', 'member_id', 'provider_id', 
+          'status', 'connection_status', 'connection_message', 'connection_sent_date', 
+          'accepted_at', 'message_sent_date', 'initial_message', 'followup_1', 'followup_2', 
+          'followup_3', 'followup_4', 'invite_note', 'inmail_subject', 'inmail_message', 
+          'notes', 'tags', 'custom_fields', 'custom_variables', 'campaign_id', 'list_id', 
+          'assigned_account', 'created_at', 'updated_at'
         ]);
 
         const rawHeaders = parsedData[0].map(h => h.trim().replace(/^["']|["']$/g, ''));
