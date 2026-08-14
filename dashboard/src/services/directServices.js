@@ -482,14 +482,51 @@ export const directAddProspectsToCampaign = async (campaignId, prospectIds) => {
   return { success: true, added: 0 };
 };
 
-export const directBulkImportProspects = async (file, campaignId, mode, listId) => {
+export const replaceTemplateVariables = (templateText, prospectData = {}) => {
+  if (!templateText) return '';
+  const custom = prospectData.custom_fields || prospectData.custom_variables || {};
+  const allData = {
+    first_name: prospectData.first_name || '',
+    last_name: prospectData.last_name || '',
+    name: prospectData.name || `${prospectData.first_name || ''} ${prospectData.last_name || ''}`.trim(),
+    company: prospectData.company || '',
+    job_title: prospectData.job_title || prospectData.headline || '',
+    headline: prospectData.headline || '',
+    location: prospectData.location || '',
+    email: prospectData.email || '',
+    linkedin_url: prospectData.linkedin_url || '',
+    notes: prospectData.notes || '',
+    invite_note: prospectData.invite_note || '',
+    initial_message: prospectData.initial_message || '',
+    followup_1: prospectData.followup_1 || '',
+    followup_2: prospectData.followup_2 || '',
+    followup_3: prospectData.followup_3 || '',
+    followup_4: prospectData.followup_4 || '',
+    followup_5: prospectData.followup_5 || '',
+    inmail_subject: prospectData.inmail_subject || '',
+    inmail_message: prospectData.inmail_message || '',
+    ...custom,
+  };
+
+  // Replace {{var_name | fallback_text}} or {{var_name}}
+  return templateText.replace(/\{\{\s*([a-zA-Z0-9_\-]+)(?:\s*\|\s*([^}]+))?\s*\}\}/g, (match, key, fallback) => {
+    const val = allData[key] || allData[key.toLowerCase()];
+    if (val !== undefined && val !== null && String(val).trim() !== '') {
+      return String(val).trim();
+    }
+    return fallback ? fallback.trim() : '';
+  });
+};
+
+export const directBulkImportProspects = async (file, columnMapping = null, importMode = 'create_or_update', listId = null, campaignId = null) => {
   return new Promise((resolve) => {
+    if (!file) return resolve({ success: false, error: 'No file provided', imported_count: 0 });
+
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
-        const text = e.target.result;
+        const text = e.target?.result || '';
         
-        // RFC-4180 compliant CSV parser to handle quotes, newlines, and commas inside fields
         const parseCSV = (csvText) => {
           const lines = [];
           let row = [""];
@@ -502,7 +539,7 @@ export const directBulkImportProspects = async (file, campaignId, mode, listId) 
             if (char === '"') {
               if (inQuotes && nextChar === '"') {
                 row[row.length - 1] += '"';
-                i++; // Skip double double-quote
+                i++;
               } else {
                 inQuotes = !inQuotes;
               }
@@ -510,9 +547,8 @@ export const directBulkImportProspects = async (file, campaignId, mode, listId) 
               row.push("");
             } else if ((char === '\r' || char === '\n') && !inQuotes) {
               if (char === '\r' && nextChar === '\n') {
-                i++; // Skip CR LF
+                i++;
               }
-              // End of row
               lines.push(row.map(c => c.trim()));
               row = [""];
             } else {
@@ -526,54 +562,70 @@ export const directBulkImportProspects = async (file, campaignId, mode, listId) 
         };
 
         const parsedData = parseCSV(text);
-        if (parsedData.length <= 1) return resolve({ imported_count: 0 });
+        if (parsedData.length <= 1) return resolve({ success: true, imported_count: 0 });
 
-        const rawHeaders = parsedData[0];
-        const headers = rawHeaders.map(h => h.trim().replace(/^["']|["']$/g, '').toLowerCase());
+        const rawHeaders = parsedData[0].map(h => h.trim().replace(/^["']|["']$/g, ''));
         const prospectsToInsert = [];
 
         for (let i = 1; i < parsedData.length; i += 1) {
           const cols = parsedData[i];
           if (cols.length === 0 || (cols.length === 1 && !cols[0])) continue;
 
-          const rowObj = {};
+          const rowData = {};
           const customVars = {};
 
           rawHeaders.forEach((rawH, idx) => {
-            const val = cols[idx] || '';
-            const cleanH = rawH.trim();
-            if (cleanH) {
-              rowObj[cleanH.toLowerCase()] = val;
-              customVars[cleanH] = val;
-              const normKey = cleanH.toLowerCase().replace(/[^a-z0-9]/g, '_');
-              customVars[normKey] = val;
+            const val = (cols[idx] || '').trim();
+            const mappedTarget = columnMapping?.[rawH] || autoGuessHeader(rawH);
+
+            if (mappedTarget === 'skip') {
+              // 🚫 Explicitly skipped column
+              return;
+            }
+
+            if (mappedTarget === 'custom_var') {
+              const keyName = rawH.toLowerCase().replace(/[^a-z0-9]/g, '_');
+              customVars[rawH] = val;
+              customVars[keyName] = val;
+            } else {
+              rowData[mappedTarget] = val;
+              customVars[rawH] = val;
             }
           });
 
-          // Check if it's a completely empty line
-          const values = Object.values(customVars).filter(Boolean);
-          if (values.length === 0) continue;
-
-          const firstName = rowObj.first_name || rowObj.firstname || rowObj.name?.split(' ')[0] || customVars.firstname || customVars.first_name || 'Lead';
-          const lastName = rowObj.last_name || rowObj.lastname || rowObj.name?.split(' ').slice(1).join(' ') || customVars.lastname || customVars.last_name || '';
-          const linkedinUrl = rowObj.linkedin_url || rowObj.linkedinurl || rowObj.profile_url || rowObj.url || customVars.linkedinurl || customVars.linkedin_url || '';
+          // Compute names & contacts
+          let firstName = rowData.first_name || rowData.name?.split(' ')[0] || 'Lead';
+          let lastName = rowData.last_name || rowData.name?.split(' ').slice(1).join(' ') || '';
+          let linkedinUrl = rowData.linkedin_url || '';
+          let emailVal = rowData.email || '';
 
           const isValidUrl = linkedinUrl && linkedinUrl.length < 250 && (!linkedinUrl.includes(' ') || linkedinUrl.includes('http') || linkedinUrl.includes('linkedin'));
-          const emailVal = rowObj.email || customVars.email || '';
           const isValidEmail = emailVal && emailVal.includes('@') && emailVal.includes('.') && !emailVal.includes(' ');
 
-          if (!isValidUrl && !isValidEmail) {
-            continue; // Skip invalid or split line fragment
+          if (!isValidUrl && !isValidEmail && !firstName) {
+            continue;
           }
 
           prospectsToInsert.push({
             first_name: firstName,
             last_name: lastName,
-            name: `${firstName} ${lastName}`.trim(),
-            headline: rowObj.headline || rowObj.title || '',
-            company: rowObj.company || rowObj.organization || '',
+            name: rowData.name || `${firstName} ${lastName}`.trim(),
+            headline: rowData.headline || rowData.job_title || '',
+            job_title: rowData.job_title || rowData.headline || '',
+            company: rowData.company || '',
             linkedin_url: isValidUrl ? linkedinUrl : '',
             email: isValidEmail ? emailVal : '',
+            location: rowData.location || '',
+            notes: rowData.notes || '',
+            invite_note: rowData.invite_note || '',
+            initial_message: rowData.initial_message || '',
+            followup_1: rowData.followup_1 || '',
+            followup_2: rowData.followup_2 || '',
+            followup_3: rowData.followup_3 || '',
+            followup_4: rowData.followup_4 || '',
+            followup_5: rowData.followup_5 || '',
+            inmail_subject: rowData.inmail_subject || '',
+            inmail_message: rowData.inmail_message || '',
             status: 'Not Contacted',
             campaign_id: campaignId || null,
             assigned_account: 'profile_1',
@@ -583,11 +635,37 @@ export const directBulkImportProspects = async (file, campaignId, mode, listId) 
           });
         }
 
+        let createdCount = 0;
+        let updatedCount = 0;
+
         if (prospectsToInsert.length > 0) {
-          await supabaseDirect.from('prospects').upsert(prospectsToInsert);
+          const { data: insertedData, error } = await supabaseDirect.from('prospects').upsert(prospectsToInsert).select();
+          if (error) console.error('Supabase prospect import error:', error);
+          createdCount = prospectsToInsert.length;
+
+          // If targetListId provided, associate prospects to list
+          if (listId && insertedData && insertedData.length > 0) {
+            const listMembers = insertedData.map(p => ({
+              list_id: listId,
+              prospect_id: p.id,
+              created_at: new Date().toISOString(),
+            }));
+            await supabaseDirect.from('prospect_list_members').upsert(listMembers);
+          }
+
+          // If targetCampaignId provided, enroll prospects to campaign
+          if (campaignId && insertedData && insertedData.length > 0) {
+            const enrollments = insertedData.map(p => ({
+              campaign_id: campaignId,
+              prospect_id: p.id,
+              status: 'enrolled',
+              created_at: new Date().toISOString(),
+            }));
+            await supabaseDirect.from('campaign_prospects').upsert(enrollments);
+          }
         }
 
-        resolve({ success: true, imported_count: prospectsToInsert.length });
+        resolve({ success: true, created_count: createdCount, updated_count: updatedCount, imported_count: createdCount });
       } catch (err) {
         console.error('directBulkImportProspects error:', err);
         resolve({ success: false, error: err.message, imported_count: 0 });
@@ -596,6 +674,28 @@ export const directBulkImportProspects = async (file, campaignId, mode, listId) 
     reader.readAsText(file);
   });
 };
+
+function autoGuessHeader(header) {
+  const clean = (header || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '_');
+  if (clean.includes('first_name') || clean.includes('firstname') || clean === 'first') return 'first_name';
+  if (clean.includes('last_name') || clean.includes('lastname') || clean === 'last') return 'last_name';
+  if (clean === 'name' || clean === 'full_name' || clean === 'fullname') return 'name';
+  if (clean.includes('linkedin') || clean.includes('profile_url') || clean === 'url') return 'linkedin_url';
+  if (clean.includes('email')) return 'email';
+  if (clean.includes('company') || clean.includes('organization')) return 'company';
+  if (clean.includes('job') || clean.includes('title')) return 'job_title';
+  if (clean.includes('headline')) return 'headline';
+  if (clean.includes('location') || clean.includes('city')) return 'location';
+  if (clean.includes('note')) return 'notes';
+  if (clean.includes('invite') && clean.includes('note')) return 'invite_note';
+  if (clean.includes('initial')) return 'initial_message';
+  if (clean.includes('followup_1')) return 'followup_1';
+  if (clean.includes('followup_2')) return 'followup_2';
+  if (clean.includes('followup_3')) return 'followup_3';
+  if (clean.includes('followup_4')) return 'followup_4';
+  if (clean.includes('followup_5')) return 'followup_5';
+  return 'custom_var';
+}
 
 export const downloadSampleCSVTemplate = () => {
   const headers = [

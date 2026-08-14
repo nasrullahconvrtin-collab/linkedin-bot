@@ -139,15 +139,8 @@ export const getInmailReady = (params) => api.get('/inmail-ready', { params }).c
 export const getMessageReady = (params) => api.get('/message-ready', { params }).catch(() => ({ prospects: [] }));
 export const getReadyForMessage = (params) => api.get('/ready-for-message', { params }).catch(() => ({ prospects: [] }));
 
-export const bulkImportProspects = (file, campaignId, mode = 'create_or_update', listId = null) => {
-  const fd = new FormData();
-  fd.append('file', file);
-  if (campaignId) fd.append('campaign_id', campaignId);
-  if (listId) fd.append('list_id', listId);
-  return api.post('/prospects/bulk', fd, {
-    params: { mode },
-    headers: { 'Content-Type': 'multipart/form-data' },
-  }).catch(() => directBulkImportProspects(file, campaignId, mode, listId));
+export const bulkImportProspects = (file, columnMapping = null, mode = 'create_or_update', listId = null, campaignId = null) => {
+  return directBulkImportProspects(file, columnMapping, mode, listId, campaignId);
 };
 
 export { downloadSampleCSVTemplate } from './directServices';

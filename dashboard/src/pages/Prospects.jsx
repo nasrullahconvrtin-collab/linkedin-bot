@@ -22,6 +22,9 @@ import {
   updateProspectList,
 } from '../services/api';
 
+import CSVImportWizardModal from '../components/CSVImportWizardModal';
+import { replaceTemplateVariables } from '../services/directServices';
+
 const STATUSES = [
   '', 'Connection Request Sent', 'Connection Accepted', 'waiting_connection_acceptance',
   'Needs Personalization', 'inmail_available', 'message_ready', 'Ready to Send', 'Ready To Send',
@@ -34,66 +37,117 @@ const blankProspect = {
   job_title: '', assigned_account: 'profile_1', status: '', notes: '',
   invite_note: '', inmail_subject: '', inmail_message: '',
   initial_message: '', followup_1: '', followup_2: '',
-  followup_3: '', followup_4: '', tags: [], custom_fields: {},
+  followup_3: '', followup_4: '', followup_5: '', tags: [], custom_fields: {},
 };
 
-const STD_VARIABLES = ['first_name', 'last_name', 'company', 'job_title', 'location', 'email', 'linkedin_url', 'invite_note', 'inmail_subject', 'notes'];
+const STD_VARIABLES = [
+  'first_name', 'last_name', 'company', 'job_title', 'location', 'email', 'linkedin_url',
+  'invite_note', 'initial_message', 'followup_1', 'followup_2', 'followup_3', 'followup_4', 'followup_5', 'notes'
+];
 
-function MessageField({ label, value, onChange, customFields }) {
+function MessageField({ label, value, onChange, customFields, draftProspect }) {
   const [open, setOpen] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
   const safeCustom = customFields && typeof customFields === 'object' && !Array.isArray(customFields) ? customFields : {};
   const customKeys = Object.keys(safeCustom).filter(Boolean);
-  const allVars = [...STD_VARIABLES, ...customKeys];
   const insert = (v) => onChange({ target: { value: value ? `${value} {{${v}}}` : `{{${v}}}` } });
+
+  const renderedPreview = useMemo(() => {
+    return replaceTemplateVariables(value, draftProspect || {});
+  }, [value, draftProspect]);
+
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <label className="text-xs text-[#9ca3af]">{label}</label>
-        <button
-          type="button"
-          onClick={() => setOpen(o => !o)}
-          className="flex items-center gap-1 text-[10px] text-[#6366f1] hover:text-white"
-        >
-          Insert {'{{variable}}'} <ChevronDown size={11} className={open ? 'rotate-180' : ''} />
-        </button>
+        <label className="text-xs text-[#9ca3af] font-semibold">{label}</label>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowPreview(p => !p)}
+            className="text-[10px] text-emerald-400 hover:text-emerald-300 font-semibold"
+          >
+            {showPreview ? 'Edit Template' : '👁️ Live Preview'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setOpen(o => !o)}
+            className="flex items-center gap-1 text-[10px] text-[#6366f1] hover:text-white font-semibold"
+          >
+            Insert {'{{variable}}'} <ChevronDown size={11} className={open ? 'rotate-180' : ''} />
+          </button>
+        </div>
       </div>
+
       {open && (
-        <div className="mb-1.5 p-2 rounded-lg bg-[#0a0a0a] border border-[#2a2a2a]">
-          {customKeys.length > 0 && (
-            <p className="text-[9px] text-[#4b5563] uppercase tracking-wide mb-1.5">Custom fields</p>
-          )}
-          <div className="flex flex-wrap gap-1">
-            {allVars.map((v, i) => (
-              <>
-                {i === STD_VARIABLES.length && customKeys.length > 0 && (
-                  <div key="sep" className="w-full border-t border-[#1f1f1f] my-1" />
-                )}
+        <div className="mb-2 p-2.5 rounded-xl bg-[#0a0a0a] border border-[#2a2a2a] space-y-2">
+          <div>
+            <p className="text-[9px] text-[#6b7280] uppercase tracking-wider mb-1 font-bold">Standard & Message Fields</p>
+            <div className="flex flex-wrap gap-1">
+              {STD_VARIABLES.map(v => (
                 <button
                   key={v}
                   type="button"
                   onClick={() => insert(v)}
-                  className={`text-[10px] px-1.5 py-0.5 rounded border hover:text-white hover:border-[#6366f1] ${
-                    i >= STD_VARIABLES.length
-                      ? 'border-[#6366f1]/40 text-[#818cf8]'
-                      : 'border-[#2a2a2a] text-[#9ca3af]'
-                  }`}
+                  className="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2a2a] text-[#9ca3af] hover:text-white hover:border-[#6366f1] transition-colors"
                 >
                   {`{{${v}}}`}
                 </button>
-              </>
-            ))}
+              ))}
+            </div>
           </div>
-          {customKeys.length === 0 && (
-            <p className="text-[10px] text-[#4b5563] mt-1">Add custom fields below to use them as variables here.</p>
+
+          <div>
+            <p className="text-[9px] text-[#6b7280] uppercase tracking-wider mb-1 font-bold">Smart Fallback Helpers</p>
+            <div className="flex flex-wrap gap-1">
+              <button
+                type="button"
+                onClick={() => onChange({ target: { value: value ? `${value} {{first_name | there}}` : `{{first_name | there}}` } })}
+                className="text-[10px] px-1.5 py-0.5 rounded border border-indigo-500/30 text-indigo-300 hover:bg-indigo-500/10"
+              >
+                {`{{first_name | there}}`}
+              </button>
+              <button
+                type="button"
+                onClick={() => onChange({ target: { value: value ? `${value} {{company | your team}}` : `{{company | your team}}` } })}
+                className="text-[10px] px-1.5 py-0.5 rounded border border-indigo-500/30 text-indigo-300 hover:bg-indigo-500/10"
+              >
+                {`{{company | your team}}`}
+              </button>
+            </div>
+          </div>
+
+          {customKeys.length > 0 && (
+            <div>
+              <p className="text-[9px] text-[#6b7280] uppercase tracking-wider mb-1 font-bold">Custom CSV Columns</p>
+              <div className="flex flex-wrap gap-1">
+                {customKeys.map(v => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => insert(v)}
+                    className="text-[10px] px-1.5 py-0.5 rounded border border-[#6366f1]/40 text-[#818cf8] hover:text-white"
+                  >
+                    {`{{${v}}}`}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       )}
-      <textarea
-        rows={3}
-        value={value || ''}
-        onChange={onChange}
-        className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm"
-      />
+
+      {showPreview ? (
+        <div className="p-3 rounded-lg bg-[#0d0d0d] border border-[#6366f1]/30 text-emerald-300 text-xs font-mono whitespace-pre-wrap min-h-[72px]">
+          {renderedPreview || <span className="text-[#4b5563] italic">No content to preview</span>}
+        </div>
+      ) : (
+        <textarea
+          rows={3}
+          value={value || ''}
+          onChange={onChange}
+          className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+        />
+      )}
     </div>
   );
 }
@@ -120,6 +174,7 @@ export default function Prospects() {
   const [panelEnrollments, setPanelEnrollments] = useState([]);
   const [newListName, setNewListName] = useState('');
   const [importMode, setImportMode] = useState('create_or_update');
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
   const fileRef = useRef(null);
 
   const selectedIds = useMemo(
@@ -356,22 +411,16 @@ export default function Prospects() {
           <p className="text-[#6b7280] text-sm mt-1">Manage prospects once, reuse them across lists and campaigns.</p>
         </div>
         <div className="flex gap-2">
-          <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={e => handleImport(e.target.files?.[0])} />
-          <select value={importMode} onChange={e => setImportMode(e.target.value)} className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white">
-            <option value="create_or_update">Create and update</option>
-            <option value="create">Create new only</option>
-            <option value="update">Update existing only</option>
-          </select>
           <button onClick={downloadSampleCSVTemplate} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#818cf8] hover:text-white text-sm" title="Download Standard CSV Template">
             <FileSpreadsheet size={15} /> Template
           </button>
-          <button onClick={() => fileRef.current?.click()} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-sm">
-            <FileUp size={15} /> Import
+          <button onClick={() => setIsWizardOpen(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#6366f1] text-white hover:bg-[#4f46e5] text-sm font-semibold shadow-md">
+            <FileUp size={15} /> Import CSV (Wizard)
           </button>
           <button onClick={exportCSV} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-sm">
             <Download size={15} /> Export
           </button>
-          <button onClick={() => openPanel()} className="flex items-center gap-2 px-4 py-2 bg-[#6366f1] rounded-lg text-white text-sm">
+          <button onClick={() => openPanel()} className="flex items-center gap-2 px-4 py-2 bg-[#2a2a2a] hover:bg-[#333] rounded-lg text-white text-sm font-semibold">
             <Plus size={15} /> Add Prospect
           </button>
         </div>
@@ -564,7 +613,7 @@ export default function Prospects() {
                 <input value={draft.inmail_subject || ''} onChange={e => setDraft(d => ({ ...d, inmail_subject: e.target.value }))} className="mt-1 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm" />
               </div>
 
-              {/* Message textareas with variable inserter */}
+              {/* Message textareas with variable inserter & live preview */}
               {[
                 ['inmail_message', 'InMail Message'],
                 ['initial_message', 'Initial Message'],
@@ -572,6 +621,7 @@ export default function Prospects() {
                 ['followup_2', 'Follow-up 2'],
                 ['followup_3', 'Follow-up 3'],
                 ['followup_4', 'Follow-up 4'],
+                ['followup_5', 'Follow-up 5'],
               ].map(([key, label]) => (
                 <MessageField
                   key={key}
@@ -580,6 +630,7 @@ export default function Prospects() {
                   value={draft[key]}
                   onChange={e => setDraft(d => ({ ...d, [key]: e.target.value }))}
                   customFields={draft.custom_fields}
+                  draftProspect={draft}
                 />
               ))}
 
@@ -674,6 +725,20 @@ export default function Prospects() {
           </div>
         </div>
       )}
+
+      <CSVImportWizardModal
+        isOpen={isWizardOpen}
+        onClose={() => setIsWizardOpen(false)}
+        onImportComplete={async (config) => {
+          const { file, columnMapping, importMode, targetListId, targetCampaignId } = config;
+          await bulkImportProspects(file, columnMapping, importMode, targetListId || activeList || null, targetCampaignId || null);
+          loadRows();
+          loadLists();
+        }}
+        prospectLists={lists}
+        campaigns={campaigns}
+        defaultListId={activeList}
+      />
     </Layout>
   );
 }
