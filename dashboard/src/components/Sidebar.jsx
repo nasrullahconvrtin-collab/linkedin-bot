@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   ChevronDown, ChevronLeft, ChevronRight, FileText, LayoutDashboard,
-  ListChecks, Megaphone, Users, MessageSquare, Settings, Zap, UserCheck, Briefcase,
+  ListChecks, Megaphone, Users, MessageSquare, Settings, Zap, UserCheck, Briefcase, MessageCircle
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -17,29 +17,33 @@ const CAMPAIGN_NAV = [
   { to: '/queue', label: 'Queue', icon: Briefcase },
 ];
 
-const NAV_AFTER_CAMPAIGNS = [
-  { to: '/profiles',  label: 'Profiles',  icon: UserCheck },
-  { to: '/inbox',     label: 'Inbox',     icon: MessageSquare },
-  { to: '/settings',  label: 'Settings',  icon: Settings },
+const INBOX_NAV = [
+  { to: '/replies', label: 'Replies', icon: MessageSquare },
+  { to: '/inbox',   label: 'Full Inbox', icon: MessageCircle },
 ];
 
 export default function Sidebar({ collapsed = false, onToggle }) {
   const { wsConnected, unreadReplies } = useApp();
   const location = useLocation();
   const width = collapsed ? 76 : 240;
+
   const campaignSectionActive = CAMPAIGN_NAV.some(item => (
     item.end ? location.pathname === item.to : location.pathname.startsWith(item.to)
   ));
+  const inboxSectionActive = location.pathname.startsWith('/inbox') || location.pathname.startsWith('/replies');
+
   const [campaignsOpen, setCampaignsOpen] = useState(campaignSectionActive);
+  const [inboxOpen, setInboxOpen] = useState(inboxSectionActive);
 
   useEffect(() => {
     if (campaignSectionActive) setCampaignsOpen(true);
-  }, [campaignSectionActive]);
+    if (inboxSectionActive) setInboxOpen(true);
+  }, [campaignSectionActive, inboxSectionActive]);
 
   const labelClass = collapsed ? 'sr-only' : '';
 
   return (
-    <aside className="app-sidebar fixed left-0 top-0 h-full flex flex-col z-20 transition-[width] duration-300" style={{ width }}>
+    <aside className="app-sidebar fixed left-0 top-0 h-full flex flex-col z-20 transition-[width] duration-300 bg-[#141414] border-r border-[#2a2a2a]" style={{ width }}>
 
       {/* Logo */}
       <div className={`flex items-center gap-2.5 ${collapsed ? 'px-4 justify-center' : 'px-5'} py-5 border-b border-[#2a2a2a]`}>
@@ -68,14 +72,10 @@ export default function Sidebar({ collapsed = false, onToggle }) {
           >
             <Icon size={17} />
             <span className={labelClass}>{label}</span>
-            {label === 'Inbox' && unreadReplies > 0 && (
-              <span className={`${collapsed ? 'absolute right-1.5 top-1.5' : 'ml-auto'} min-w-[20px] text-center bg-red-500 text-white text-xs font-bold rounded-full px-1.5 py-0.5`}>
-                {unreadReplies > 99 ? '99+' : unreadReplies}
-              </span>
-            )}
           </NavLink>
         ))}
 
+        {/* Campaigns Section */}
         <div>
           <button
             type="button"
@@ -102,7 +102,7 @@ export default function Sidebar({ collapsed = false, onToggle }) {
           </button>
 
           {!collapsed && campaignsOpen && (
-            <div className="mt-1 ml-4 pl-3 border-l border-[#2a2a2a] space-y-1 animate-fade-in">
+            <div className="mt-1 ml-4 pl-3 border-l border-[#2a2a2a] space-y-1">
               {CAMPAIGN_NAV.map(({ to, label, icon: Icon, end }) => (
                 <NavLink
                   key={to}
@@ -124,27 +124,90 @@ export default function Sidebar({ collapsed = false, onToggle }) {
           )}
         </div>
 
-        {NAV_AFTER_CAMPAIGNS.map(({ to, label, icon: Icon, end }) => (
-          <NavLink
-            key={to} to={to} end={end}
-            title={collapsed ? label : undefined}
-            className={({ isActive }) =>
-              `nav-item relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                isActive
-                  ? 'active bg-[#6366f1] text-white shadow-lg shadow-indigo-500/20'
-                  : 'text-[#9ca3af] hover:text-white hover:bg-[#1a1a1a]'
-              }`
-            }
+        {/* Profiles */}
+        <NavLink
+          to="/profiles"
+          title={collapsed ? 'Profiles' : undefined}
+          className={({ isActive }) =>
+            `nav-item relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+              isActive
+                ? 'active bg-[#6366f1] text-white shadow-lg shadow-indigo-500/20'
+                : 'text-[#9ca3af] hover:text-white hover:bg-[#1a1a1a]'
+            }`
+          }
+        >
+          <UserCheck size={17} />
+          <span className={labelClass}>Profiles</span>
+        </NavLink>
+
+        {/* Inbox Section (Replies + Full Inbox) */}
+        <div>
+          <button
+            type="button"
+            onClick={() => {
+              if (collapsed) {
+                onToggle?.();
+                setInboxOpen(true);
+                return;
+              }
+              setInboxOpen(open => !open);
+            }}
+            title={collapsed ? 'Inbox' : undefined}
+            className={`nav-item relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+              inboxSectionActive
+                ? 'active bg-[#6366f1] text-white shadow-lg shadow-indigo-500/20'
+                : 'text-[#9ca3af] hover:text-white hover:bg-[#1a1a1a]'
+            }`}
           >
-            <Icon size={17} />
-            <span className={labelClass}>{label}</span>
-            {label === 'Inbox' && unreadReplies > 0 && (
-              <span className={`${collapsed ? 'absolute right-1.5 top-1.5' : 'ml-auto'} min-w-[20px] text-center bg-red-500 text-white text-xs font-bold rounded-full px-1.5 py-0.5`}>
+            <MessageSquare size={17} />
+            <span className={labelClass}>Inbox & Replies</span>
+            {unreadReplies > 0 && (
+              <span className={`${collapsed ? 'absolute right-1.5 top-1.5' : 'ml-auto mr-2'} bg-red-500 text-white text-xs font-bold rounded-full px-1.5 py-0.5`}>
                 {unreadReplies > 99 ? '99+' : unreadReplies}
               </span>
             )}
-          </NavLink>
-        ))}
+            {!collapsed && (
+              <ChevronDown size={14} className={`ml-auto transition-transform ${inboxOpen ? 'rotate-180' : ''}`} />
+            )}
+          </button>
+
+          {!collapsed && inboxOpen && (
+            <div className="mt-1 ml-4 pl-3 border-l border-[#2a2a2a] space-y-1">
+              {INBOX_NAV.map(({ to, label, icon: Icon }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  className={({ isActive }) =>
+                    `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                      isActive
+                        ? 'text-white bg-[#1a1a1a]'
+                        : 'text-[#9ca3af] hover:text-white hover:bg-[#1a1a1a]'
+                    }`
+                  }
+                >
+                  <Icon size={14} />
+                  {label}
+                </NavLink>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Settings */}
+        <NavLink
+          to="/settings"
+          title={collapsed ? 'Settings' : undefined}
+          className={({ isActive }) =>
+            `nav-item relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+              isActive
+                ? 'active bg-[#6366f1] text-white shadow-lg shadow-indigo-500/20'
+                : 'text-[#9ca3af] hover:text-white hover:bg-[#1a1a1a]'
+            }`
+          }
+        >
+          <Settings size={17} />
+          <span className={labelClass}>Settings</span>
+        </NavLink>
       </nav>
 
       {/* Executor status */}

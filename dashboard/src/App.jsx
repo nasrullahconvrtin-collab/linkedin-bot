@@ -62,6 +62,7 @@ import Queue          from './pages/Queue';
 import Prospects      from './pages/Prospects';
 import NeedsPersonalization from './pages/NeedsPersonalization';
 import Inbox          from './pages/Inbox';
+import Replies        from './pages/Replies';
 import Profiles       from './pages/Profiles';
 import Settings       from './pages/Settings';
 
@@ -117,6 +118,8 @@ export default function App() {
                   <Route path="/prospects"      element={<Prospects />} />
                   <Route path="/needs-personalization" element={<NeedsPersonalization />} />
                   <Route path="/inbox"          element={<Inbox />} />
+                  <Route path="/replies font"   element={<Navigate to="/replies" replace />} />
+                  <Route path="/replies"        element={<Replies />} />
                   <Route path="/profiles"       element={<Profiles />} />
                   <Route path="/settings"       element={<Settings />} />
                   <Route path="*"               element={<Navigate to="/" replace />} />

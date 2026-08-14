@@ -780,6 +780,23 @@ export const directSendUnipileInMail = async (prospect, subject = '', text = '')
   return { success: ok, data };
 };
 
+export const directGetUnipileChats = async (limit = 50) => {
+  const { ok, data } = await unipileFetch(`/chats?account_id=${DEFAULT_ACCOUNT_ID}&limit=${limit}`);
+  if (ok && data) {
+    return { success: true, chats: data.items || data.chats || [] };
+  }
+  return { success: false, chats: [] };
+};
+
+export const directGetChatMessages = async (chatId, limit = 50) => {
+  if (!chatId) return { success: false, messages: [] };
+  const { ok, data } = await unipileFetch(`/chats/${encodeURIComponent(chatId)}/messages?account_id=${DEFAULT_ACCOUNT_ID}&limit=${limit}`);
+  if (ok && data) {
+    return { success: true, messages: data.items || data.messages || [] };
+  }
+  return { success: false, messages: [] };
+};
+
 export const directCheckProspectReplied = async (prospect) => {
   const recipientId = getLinkedinId(prospect);
   if (!recipientId) return { success: true, replied: false };
