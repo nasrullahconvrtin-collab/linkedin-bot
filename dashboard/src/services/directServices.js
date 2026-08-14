@@ -87,6 +87,27 @@ export const directCreateProfile = async (data) => {
     enabled: true,
   };
 };
+export const directDisconnectProfile = async () => {
+  try {
+    await supabaseDirect.from('profiles').delete().neq('profile_key', 'dummy_key_none');
+  } catch (err) {
+    console.warn('directDisconnectProfile error:', err);
+  }
+
+  activeAccountId = null;
+
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('lf_chat_sent_messages_')) {
+          localStorage.removeItem(key);
+        }
+      });
+    }
+  } catch (e) {}
+
+  return { success: true };
+};
 
 export const directGetUnipileAccountInfo = async (accountId) => {
   try {

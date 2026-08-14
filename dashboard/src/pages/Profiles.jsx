@@ -19,7 +19,7 @@ import {
   submitUnipile2FA,
   withdrawOldInvitations,
 } from '../services/api';
-import { supabaseDirect } from '../services/directServices';
+import { supabaseDirect, directDisconnectProfile } from '../services/directServices';
 
 const TIMELINE_PRESETS = [
   { key: 'today', label: 'Today' },
@@ -238,21 +238,21 @@ export default function Profiles() {
   // Disconnect / Remove Account Handler
   const handleRemoveConnectedAccount = async () => {
     const accName = accountInfo?.name || editName || 'Fatima Maqsood';
-    if (!confirm(`Are you sure you want to disconnect and remove ${accName}? This will reset the connected profile session.`)) {
+    if (!confirm(`Are you sure you want to disconnect and remove ${accName}? This will reset all active profile sessions and inbox access from the tool.`)) {
       return;
     }
     setRemoving(true);
     try {
-      await supabaseDirect.from('profiles').delete().eq('profile_key', 'profile_1');
-      await deleteProfile('profile_1').catch(() => {});
+      await directDisconnectProfile();
 
       setAccountInfo(null);
       setConnections([]);
       setInvitations([]);
+      setProspects([]);
       setEditName('');
       setEditAccId('');
 
-      toast.success('LinkedIn account disconnected successfully');
+      toast.success('LinkedIn account disconnected and access cleared');
       await fetchProfiles();
     } catch (err) {
       console.error('Error removing account:', err);
