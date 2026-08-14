@@ -53,13 +53,12 @@ function Section({ title, icon: Icon, description, children }) {
 }
 
 export default function Settings() {
-  const { profiles, fetchProfiles } = useApp();
+  const { theme, setTheme, profiles, fetchProfiles } = useApp();
 
   // Settings State
   const [settings, setSettings] = useState(DEFAULT_APP_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
 
   // LinkedIn Connection State
   const [connMethod, setConnMethod] = useState('direct'); // direct | cookie | account_id | hosted
@@ -91,14 +90,12 @@ export default function Settings() {
 
   const handleChange = (field, value) => {
     setSettings(prev => ({ ...prev, [field]: value }));
-    setSaved(false);
   };
 
   const handleSaveSettings = async () => {
     setSaving(true);
     try {
       await directSaveAppSettings(settings);
-      setSaved(true);
       toast.success('Settings saved and synced to database successfully!');
     } catch (err) {
       toast.error('Failed to save settings');
@@ -214,8 +211,8 @@ export default function Settings() {
     <Layout>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-white text-2xl font-bold">Settings & LinkedIn Account Connection</h1>
-          <p className="text-[#6b7280] text-sm mt-1">Connect your LinkedIn profile, set daily limits, and manage app preferences.</p>
+          <h1 className="text-white text-2xl font-bold">Settings & LinkedIn Connection</h1>
+          <p className="text-[#6b7280] text-sm mt-1">Manage LinkedIn connection credentials, daily limits, execution schedules, and themes.</p>
         </div>
         <button
           onClick={handleSaveSettings}
@@ -229,7 +226,7 @@ export default function Settings() {
 
       <div className="space-y-6">
 
-        {/* ── LINKEDIN ACCOUNT CONNECTION SECTION ───────────────────────────── */}
+        {/* ── 1. LINKEDIN ACCOUNT CONNECTION SECTION ───────────────────────────── */}
         <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-6 shadow-xl space-y-6">
           <div className="flex items-center justify-between border-b border-[#2a2a2a] pb-4">
             <div className="flex items-center gap-3">
@@ -256,7 +253,7 @@ export default function Settings() {
                 <CheckCircle className="text-emerald-400" size={24} />
                 <div>
                   <p className="text-white font-bold text-sm">{activeProfile?.display_name || 'Fatima Maqsood'}</p>
-                  <p className="text-emerald-400/80 text-xs mt-0.5">LinkedIn Profile Connected and Ready for Automation</p>
+                  <p className="text-emerald-400/80 text-xs mt-0.5">LinkedIn Profile Connected and Active</p>
                 </div>
               </div>
               <button
@@ -417,7 +414,7 @@ export default function Settings() {
           )}
         </div>
 
-        {/* ── DAILY ACTION LIMITS ───────────────────────────────────────────── */}
+        {/* ── 2. DAILY ACTION LIMITS ───────────────────────────────────────────── */}
         <Section title="Daily Action Limits" icon={Zap} description="Set daily safety limits for outbound automation tasks.">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -467,7 +464,26 @@ export default function Settings() {
           </div>
         </Section>
 
-        {/* ── WORKING HOURS & TIMEZONE ───────────────────────────────────────── */}
+        {/* ── 3. AUTOMATION FLOW RUNNER EXECUTION FREQUENCY ──────────────────── */}
+        <Section title="Automation Engine & Frequency" icon={Sliders} description="Configure background campaign execution frequency.">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-[#9ca3af] mb-1.5">Background Flow Runner Frequency</label>
+              <select
+                value={settings.runner_interval_ms || 60000}
+                onChange={e => handleChange('runner_interval_ms', Number(e.target.value))}
+                className="w-full bg-[#111111] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+              >
+                <option value={30000}>Every 30 seconds (Fast testing mode)</option>
+                <option value={60000}>Every 1 minute (Recommended for production)</option>
+                <option value={120000}>Every 2 minutes (Ultra-safe mode)</option>
+                <option value={300000}>Every 5 minutes (Conservative mode)</option>
+              </select>
+            </div>
+          </div>
+        </Section>
+
+        {/* ── 4. WORKING HOURS & TIMEZONE ───────────────────────────────────────── */}
         <Section title="Working Schedule & Timezone" icon={Clock} description="Restrict automated activity to your local timezone and business hours.">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -529,7 +545,41 @@ export default function Settings() {
           </div>
         </Section>
 
-        {/* ── SECURITY & PASSWORD ────────────────────────────────────────────── */}
+        {/* ── 5. APPEARANCE THEME SELECTOR ────────────────────────────────────── */}
+        <Section title="Appearance" icon={Palette} description="Customize workspace visual mode.">
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { key: 'dark', label: 'Dark Mode', description: 'Sleek dark mode interface for daily work', icon: Moon },
+              { key: 'light', label: 'Light Mode', description: 'Clean bright interface for daylight use', icon: Sun },
+            ].map(option => {
+              const Icon = option.icon;
+              const active = theme === option.key;
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => setTheme(option.key)}
+                  className={`text-left rounded-xl border p-4 transition-all ${
+                    active
+                      ? 'border-[#6366f1] bg-[#6366f1]/10 shadow-lg shadow-indigo-500/10'
+                      : 'border-[#2a2a2a] bg-[#111111] hover:border-[#6366f1]/50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="w-10 h-10 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] flex items-center justify-center text-[#6366f1]">
+                      <Icon size={18} />
+                    </div>
+                    {active && <Check size={16} className="text-[#6366f1]" />}
+                  </div>
+                  <p className="text-white font-semibold text-sm">{option.label}</p>
+                  <p className="text-[#6b7280] text-xs mt-1 leading-5">{option.description}</p>
+                </button>
+              );
+            })}
+          </div>
+        </Section>
+
+        {/* ── 6. SECURITY & PASSWORD ────────────────────────────────────────────── */}
         <Section title="Dashboard Security" icon={Shield} description="Update your dashboard password for administrative access.">
           <form onSubmit={changePw} className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
