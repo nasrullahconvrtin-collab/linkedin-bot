@@ -598,246 +598,172 @@ export default function Profiles() {
             </div>
           </div>
 
-          {/* ── 3. THIRD SECTION: NETWORK & CONNECTIONS / ACCOUNT SETTINGS TABS ──── */}
-          <div className="flex items-center gap-1 mb-6 rounded-xl border border-[#2a2a2a] bg-[#111111] p-1 w-fit">
-            {tabs.map(item => (
-              <button
-                key={item.id}
-                onClick={() => setTab(item.id)}
-                className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
-                  tab === item.id ? 'bg-[#6366f1] text-white' : 'text-[#9ca3af] hover:text-white hover:bg-[#1a1a1a]'
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-
-          {/* ── TAB 1: NETWORK & CONNECTIONS ────────────────────────────────────────── */}
-          {tab === 'network' ? (
-            <div className="space-y-6">
-              
-              {/* Pending Sent Invitations Section */}
-              <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-6 space-y-4 shadow-xl">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div>
-                    <h3 className="text-white font-bold text-lg flex items-center gap-2">
-                      <Clock size={20} className="text-[#6366f1]" />
-                      Pending Sent Invitations ({filteredInvitations.length})
-                    </h3>
-                    <p className="text-[#6b7280] text-xs mt-1">
-                      Outbound connection requests waiting for acceptance on LinkedIn. Select duration to filter and withdraw.
-                    </p>
-                  </div>
-
-                  {/* Age Selection Duration Dropdown & Bulk Withdraw Button */}
-                  <div className="flex items-center gap-3">
-                    <select
-                      value={withdrawAge}
-                      onChange={e => setWithdrawAge(Number(e.target.value))}
-                      className="bg-[#111111] border border-[#2a2a2a] rounded-xl px-3 py-2 text-white text-xs font-medium focus:outline-none focus:border-[#6366f1]"
-                    >
-                      <option value={7}>Older than 7 days</option>
-                      <option value={30}>Older than 30 days</option>
-                      <option value={60}>Older than 60 days</option>
-                      <option value={90}>Older than 90 days</option>
-                      <option value={0}>All Pending Invitations</option>
-                    </select>
-
-                    <button
-                      onClick={handleWithdrawByAge}
-                      disabled={withdrawing || filteredInvitations.length === 0}
-                      className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-xs font-semibold rounded-xl transition-all disabled:opacity-50"
-                    >
-                      {withdrawing ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                      Withdraw Selected ({filteredInvitations.length})
-                    </button>
-                  </div>
-                </div>
-
-                {filteredInvitations.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-[#2a2a2a] bg-[#111111] p-10 text-center">
-                    <p className="text-[#6b7280] text-sm">No pending invitations match the selected duration filter.</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[420px] overflow-y-auto pr-1">
-                    {filteredInvitations.map((inv, i) => {
-                      const invId = inv.id || inv.invitation_id || `inv_${i}`;
-                      const name = inv.invited_user || inv.recipient_name || 'LinkedIn Member';
-                      const title = inv.invited_user_description || inv.headline || 'Pending Invitation';
-                      const photo = inv.invited_user_profile_picture_url;
-                      const dateStr = inv.date || (inv.parsed_datetime ? new Date(inv.parsed_datetime).toLocaleDateString() : '');
-
-                      return (
-                        <div key={invId} className="p-4 rounded-xl border border-[#2a2a2a] bg-[#111111] flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-10 h-10 rounded-full bg-[#6366f1]/20 border border-[#6366f1]/30 flex items-center justify-center font-bold text-white text-xs shrink-0">
-                              {photo ? (
-                                <img src={photo} alt={name} className="w-full h-full rounded-full object-cover" />
-                              ) : (
-                                name.slice(0, 2).toUpperCase()
-                              )}
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-white font-bold text-sm truncate">{name}</p>
-                              <p className="text-[#9ca3af] text-xs truncate">{title}</p>
-                              {dateStr && <p className="text-[#6b7280] text-[10px] mt-0.5">Sent {dateStr}</p>}
-                            </div>
-                          </div>
-
-                          <button
-                            onClick={() => handleCancelSingleInvite(invId)}
-                            className="px-3 py-1.5 rounded-lg border border-red-500/20 bg-red-500/10 text-red-400 hover:bg-red-500/20 text-xs font-semibold shrink-0 transition-colors"
-                          >
-                            Withdraw
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* 1st-Degree Connections List Section (With CSV Export Button along header) */}
-              <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-6 space-y-4 shadow-xl">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <h3 className="text-white font-bold text-lg flex items-center gap-2">
-                      <UserCheck size={20} className="text-emerald-400" />
-                      1st-Degree Network Connections ({connections.length})
-                    </h3>
-                    <p className="text-[#6b7280] text-xs mt-1">
-                      Active 1st-degree connections synced from your connected LinkedIn profile.
-                    </p>
-                  </div>
-
-                  {/* CSV Export Button alongside connection section header */}
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={exportConnectionsCSV}
-                      disabled={connections.length === 0}
-                      className="flex items-center justify-center gap-2 px-4 py-2 bg-[#22c55e] hover:bg-[#16a34a] text-white font-bold text-xs rounded-xl transition-all shadow-md disabled:opacity-50"
-                    >
-                      <Download size={15} /> Export CSV ({connections.length})
-                    </button>
-
-                    <button
-                      onClick={loadNetworkData}
-                      disabled={netLoading}
-                      className="p-2 rounded-xl border border-[#2a2a2a] text-[#9ca3af] hover:text-white"
-                      title="Refresh Network Data"
-                    >
-                      <RefreshCw size={15} className={netLoading ? 'animate-spin' : ''} />
-                    </button>
-                  </div>
-                </div>
-
-                {netLoading ? (
-                  <div className="flex justify-center py-12">
-                    <Loader2 size={24} className="animate-spin text-[#6366f1]" />
-                  </div>
-                ) : connections.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-[#2a2a2a] bg-[#111111] p-10 text-center">
-                    <p className="text-[#6b7280] text-sm">No 1st-degree connections loaded yet.</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[500px] overflow-y-auto pr-1">
-                    {connections.map((c, i) => {
-                      const cName = c.name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || 'LinkedIn Member';
-                      const cTitle = c.headline || c.title || '1st-Degree Connection';
-                      const cLink = c.public_profile_url || `https://www.linkedin.com/in/${c.public_identifier || c.member_id || c.id}`;
-                      const photo = c.profile_picture_url || c.avatar_url;
-
-                      return (
-                        <div key={c.id || i} className="p-3.5 rounded-xl border border-[#2a2a2a] bg-[#111111] flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-9 h-9 rounded-full bg-[#6366f1]/20 border border-[#6366f1]/30 flex items-center justify-center font-bold text-white text-xs shrink-0">
-                              {photo ? (
-                                <img src={photo} alt={cName} className="w-full h-full rounded-full object-cover" />
-                              ) : (
-                                cName.slice(0, 2).toUpperCase()
-                              )}
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-white font-bold text-xs truncate">{cName}</p>
-                              <p className="text-[#9ca3af] text-[11px] truncate">{cTitle}</p>
-                            </div>
-                          </div>
-
-                          <a
-                            href={cLink}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="p-1.5 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white hover:border-[#6366f1] shrink-0"
-                            title="View LinkedIn Profile"
-                          >
-                            <ExternalLink size={13} />
-                          </a>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            /* ── TAB 2: ACCOUNT SETTINGS ────────────────────────────────────────── */
-            <div className="max-w-2xl space-y-6">
-              <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-6 space-y-5 shadow-xl">
+          {/* ── 3. THIRD SECTION: NETWORK & CONNECTIONS ────────────────────────────────────────── */}
+          <div className="space-y-6">
+            
+            {/* Pending Sent Invitations Section */}
+            <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-6 space-y-4 shadow-xl">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                  <h3 className="text-white font-bold text-lg">Active Account Credentials</h3>
+                  <h3 className="text-white font-bold text-lg flex items-center gap-2">
+                    <Clock size={20} className="text-[#6366f1]" />
+                    Pending Sent Invitations ({filteredInvitations.length})
+                  </h3>
                   <p className="text-[#6b7280] text-xs mt-1">
-                    View and edit your connected LinkedIn Profile display name and credentials.
+                    Outbound connection requests waiting for acceptance on LinkedIn. Select duration to filter and withdraw.
                   </p>
                 </div>
 
-                <form onSubmit={handleSaveAccountSettings} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-[#9ca3af] mb-1.5">Profile Display Name</label>
-                    <input
-                      type="text"
-                      value={editName}
-                      onChange={e => setEditName(e.target.value)}
-                      placeholder="Fatima Maqsood"
-                      className="w-full bg-[#111111] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-[#6366f1]"
-                    />
-                  </div>
+                {/* Age Selection Duration Dropdown & Bulk Withdraw Button */}
+                <div className="flex items-center gap-3">
+                  <select
+                    value={withdrawAge}
+                    onChange={e => setWithdrawAge(Number(e.target.value))}
+                    className="bg-[#111111] border border-[#2a2a2a] rounded-xl px-3 py-2 text-white text-xs font-medium focus:outline-none focus:border-[#6366f1]"
+                  >
+                    <option value={7}>Older than 7 days</option>
+                    <option value={30}>Older than 30 days</option>
+                    <option value={60}>Older than 60 days</option>
+                    <option value={90}>Older than 90 days</option>
+                    <option value={0}>All Pending Invitations</option>
+                  </select>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-[#9ca3af] mb-1.5">Connected Profile Session Key</label>
-                    <input
-                      type="text"
-                      value={editAccId}
-                      onChange={e => setEditAccId(e.target.value)}
-                      placeholder="zXneBg9WRZ-m7iFuKULo1Q"
-                      className="w-full bg-[#111111] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-[#6366f1]"
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-[#2a2a2a]">
-                    <button
-                      type="button"
-                      onClick={handleRemoveConnectedAccount}
-                      disabled={removing}
-                      className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-bold text-xs rounded-xl transition-all disabled:opacity-50"
-                    >
-                      {removing ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                      Disconnect Account
-                    </button>
-
-                    <button
-                      type="submit"
-                      disabled={savingSettings}
-                      className="flex items-center gap-2 px-6 py-2.5 bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold text-xs rounded-xl transition-all shadow-md disabled:opacity-50"
-                    >
-                      {savingSettings ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                      Save Settings
-                    </button>
-                  </div>
-                </form>
+                  <button
+                    onClick={handleWithdrawByAge}
+                    disabled={withdrawing || filteredInvitations.length === 0}
+                    className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-xs font-semibold rounded-xl transition-all disabled:opacity-50"
+                  >
+                    {withdrawing ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                    Withdraw Selected ({filteredInvitations.length})
+                  </button>
+                </div>
               </div>
+
+              {filteredInvitations.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-[#2a2a2a] bg-[#111111] p-10 text-center">
+                  <p className="text-[#6b7280] text-sm">No pending invitations match the selected duration filter.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[420px] overflow-y-auto pr-1">
+                  {filteredInvitations.map((inv, i) => {
+                    const invId = inv.id || inv.invitation_id || `inv_${i}`;
+                    const name = inv.invited_user || inv.recipient_name || 'LinkedIn Member';
+                    const title = inv.invited_user_description || inv.headline || 'Pending Invitation';
+                    const photo = inv.invited_user_profile_picture_url;
+                    const dateStr = inv.date || (inv.parsed_datetime ? new Date(inv.parsed_datetime).toLocaleDateString() : '');
+
+                    return (
+                      <div key={invId} className="p-4 rounded-xl border border-[#2a2a2a] bg-[#111111] flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 h-10 rounded-full bg-[#6366f1]/20 border border-[#6366f1]/30 flex items-center justify-center font-bold text-white text-xs shrink-0">
+                            {photo ? (
+                              <img src={photo} alt={name} className="w-full h-full rounded-full object-cover" />
+                            ) : (
+                              name.slice(0, 2).toUpperCase()
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-white font-bold text-sm truncate">{name}</p>
+                            <p className="text-[#9ca3af] text-xs truncate">{title}</p>
+                            {dateStr && <p className="text-[#6b7280] text-[10px] mt-0.5">Sent {dateStr}</p>}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => handleCancelSingleInvite(invId)}
+                          className="px-3 py-1.5 rounded-lg border border-red-500/20 bg-red-500/10 text-red-400 hover:bg-red-500/20 text-xs font-semibold shrink-0 transition-colors"
+                        >
+                          Withdraw
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
+
+            {/* 1st-Degree Connections List Section (With CSV Export Button along header) */}
+            <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-6 space-y-4 shadow-xl">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-white font-bold text-lg flex items-center gap-2">
+                    <UserCheck size={20} className="text-emerald-400" />
+                    1st-Degree Network Connections ({connections.length})
+                  </h3>
+                  <p className="text-[#6b7280] text-xs mt-1">
+                    Active 1st-degree connections synced from your connected LinkedIn profile.
+                  </p>
+                </div>
+
+                {/* CSV Export Button alongside connection section header */}
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={exportConnectionsCSV}
+                    disabled={connections.length === 0}
+                    className="flex items-center justify-center gap-2 px-4 py-2 bg-[#22c55e] hover:bg-[#16a34a] text-white font-bold text-xs rounded-xl transition-all shadow-md disabled:opacity-50"
+                  >
+                    <Download size={15} /> Export CSV ({connections.length})
+                  </button>
+
+                  <button
+                    onClick={loadNetworkData}
+                    disabled={netLoading}
+                    className="p-2 rounded-xl border border-[#2a2a2a] text-[#9ca3af] hover:text-white"
+                    title="Refresh Network Data"
+                  >
+                    <RefreshCw size={15} className={netLoading ? 'animate-spin' : ''} />
+                  </button>
+                </div>
+              </div>
+
+              {netLoading ? (
+                <div className="flex justify-center py-12">
+                  <Loader2 size={24} className="animate-spin text-[#6366f1]" />
+                </div>
+              ) : connections.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-[#2a2a2a] bg-[#111111] p-10 text-center">
+                  <p className="text-[#6b7280] text-sm">No 1st-degree connections loaded yet.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[500px] overflow-y-auto pr-1">
+                  {connections.map((c, i) => {
+                    const cName = c.name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || 'LinkedIn Member';
+                    const cTitle = c.headline || c.title || '1st-Degree Connection';
+                    const cLink = c.public_profile_url || `https://www.linkedin.com/in/${c.public_identifier || c.member_id || c.id}`;
+                    const photo = c.profile_picture_url || c.avatar_url;
+
+                    return (
+                      <div key={c.id || i} className="p-3.5 rounded-xl border border-[#2a2a2a] bg-[#111111] flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 rounded-full bg-[#6366f1]/20 border border-[#6366f1]/30 flex items-center justify-center font-bold text-white text-xs shrink-0">
+                            {photo ? (
+                              <img src={photo} alt={cName} className="w-full h-full rounded-full object-cover" />
+                            ) : (
+                              cName.slice(0, 2).toUpperCase()
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-white font-bold text-xs truncate">{cName}</p>
+                            <p className="text-[#9ca3af] text-[11px] truncate">{cTitle}</p>
+                          </div>
+                        </div>
+
+                        <a
+                          href={cLink}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="p-1.5 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white hover:border-[#6366f1] shrink-0"
+                          title="View LinkedIn Profile"
+                        >
+                          <ExternalLink size={13} />
+                        </a>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
         </>
       )}
     </Layout>

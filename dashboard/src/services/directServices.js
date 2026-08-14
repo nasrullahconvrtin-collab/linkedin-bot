@@ -179,14 +179,12 @@ export const directGetUnipileAccountInfo = async (accountId) => {
 
 // Fetch ALL 1st-degree connections using cursor pagination loop
 export const directGetNetworkingConnections = async () => {
-  if (!activeAccountId) {
-    return { success: true, connections: [], total: 0 };
-  }
+  const targetAccId = activeAccountId || DEFAULT_ACCOUNT_ID;
   let allItems = [];
   let cursor = null;
 
   for (let page = 0; page < 20; page += 1) {
-    let path = `/users/relations?account_id=${activeAccountId}&limit=100`;
+    let path = `/users/relations?account_id=${targetAccId}&limit=100`;
     if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
     
     const { ok, data } = await unipileFetch(path);
@@ -210,14 +208,12 @@ export const directGetNetworkingConnections = async () => {
 
 // Fetch all sent pending invitations via /users/invite/sent
 export const directGetNetworkingInvitations = async () => {
-  if (!activeAccountId) {
-    return { success: true, invitations: [], total: 0 };
-  }
+  const targetAccId = activeAccountId || DEFAULT_ACCOUNT_ID;
   let allItems = [];
   let cursor = null;
 
   for (let page = 0; page < 10; page += 1) {
-    let path = `/users/invite/sent?account_id=${activeAccountId}`;
+    let path = `/users/invite/sent?account_id=${targetAccId}`;
     if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
     
     const { ok, data } = await unipileFetch(path);
