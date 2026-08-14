@@ -585,6 +585,20 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
           });
         }
 
+        // 2. Fetch a single prospect to check which columns exist on the table
+        const { data: sampleList } = await supabaseDirect
+          .from('prospects')
+          .select('*')
+          .limit(1);
+
+        const validColumns = new Set(sampleList && sampleList[0] ? Object.keys(sampleList[0]) : [
+          'id', 'first_name', 'last_name', 'name', 'headline', 'company', 'job_title', 
+          'email', 'linkedin_url', 'location', 'notes', 'invite_note', 'initial_message', 
+          'followup_1', 'followup_2', 'followup_3', 'followup_4', 'inmail_subject', 
+          'inmail_message', 'status', 'campaign_id', 'assigned_account', 'custom_variables', 
+          'custom_fields', 'created_at', 'updated_at'
+        ]);
+
         const rawHeaders = parsedData[0].map(h => h.trim().replace(/^["']|["']$/g, ''));
         const prospectsToInsert = [];
 
@@ -676,10 +690,24 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             prospectObj.updated_at = new Date().toISOString();
           }
 
-          prospectsToInsert.push(prospectObj);
+          // Clean fields to only send columns that exist in the database schema
+          const cleanedObj = {};
+          Object.keys(prospectObj).forEach(key => {
+            if (validColumns.has(key)) {
+              cleanedObj[key] = prospectObj[key];
+            } else {
+              cleanedObj.custom_variables = cleanedObj.custom_variables || {};
+              cleanedObj.custom_variables[key] = prospectObj[key];
+              
+              cleanedObj.custom_fields = cleanedObj.custom_fields || {};
+              cleanedObj.custom_fields[key] = prospectObj[key];
+            }
+          });
+
+          prospectsToInsert.push(cleanedObj);
         }
 
-        let createdCount = 0;
+                let createdCount = 0;
         let updatedCount = 0;
 
         if (prospectsToInsert.length > 0) {

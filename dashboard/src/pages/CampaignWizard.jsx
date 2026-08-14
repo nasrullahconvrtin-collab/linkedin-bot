@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 import { ReactFlowProvider } from 'reactflow';
 import SequenceFlowBuilder from '../components/SequenceFlowBuilder';
 import { SEQUENCE_TEMPLATES, pickSequenceTemplate } from '../data/sequenceTemplates';
-import VariableMappingPanel, { autoVariableMappings } from '../components/VariableMappingPanel';
+
 import CSVImportWizardModal from '../components/CSVImportWizardModal';
 import {
   addProspectsToCampaign,
@@ -430,45 +430,61 @@ export default function CampaignWizard({ onClose, onCreated }) {
 
             {step === 1 && (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
+                                <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-white font-semibold">Import Prospects</h3>
-                    <button onClick={() => fileRef.current?.click()} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#6366f1] text-white text-sm">
-                      <FileUp size={15} /> CSV
+                    <button
+                      type="button"
+                      onClick={() => fileRef.current?.click()}
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#6366f1] hover:bg-[#4f46e5] text-white text-sm font-semibold transition-colors cursor-pointer"
+                    >
+                      <FileUp size={15} /> Select CSV
                     </button>
                   </div>
-                  <select
-                    value={importMode}
-                    onChange={e => setImportMode(e.target.value)}
-                    className="mb-3 w-full bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white"
-                  >
-                    <option value="create_or_update">Create and update</option>
-                    <option value="create">Create new only</option>
-                    <option value="update">Update existing only</option>
-                  </select>
-                  <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={e => handleCSV(e.target.files?.[0])} />
-                  <div onClick={() => csvFile ? setIsWizardOpen(true) : fileRef.current?.click()} className="rounded-xl border border-dashed border-[#6366f1]/40 bg-[#6366f1]/5 hover:bg-[#6366f1]/10 p-7 text-center cursor-pointer transition-all">
-                    <FileUp size={28} className="mx-auto mb-3 text-[#6366f1]" />
-                    <p className="text-white text-sm font-medium">{csvFile ? csvFile.name : 'Upload a prospect CSV'}</p>
-                    <p className="text-[#6b7280] text-xs mt-1">Extra columns become custom variables.</p>
-                  </div>
-                  {csvMeta && (
-                    <p className="text-[#9ca3af] text-sm mt-3">{csvMeta.count} row(s), {csvFields.length} custom field(s)</p>
+                  
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept=".csv"
+                    className="hidden"
+                    onChange={(e) => handleCSV(e.target.files?.[0])}
+                  />
+
+                  {csvFile ? (
+                    <div className="space-y-3">
+                      <div
+                        onClick={() => setIsWizardOpen(true)}
+                        className="rounded-xl border border-[#22c55e]/30 bg-[#22c55e]/5 p-5 text-center cursor-pointer hover:bg-[#22c55e]/10 transition-all"
+                      >
+                        <FileUp size={28} className="mx-auto mb-2 text-[#22c55e]" />
+                        <p className="text-white text-sm font-bold truncate">{csvFile.name}</p>
+                        <p className="text-emerald-400 text-xs font-semibold mt-1">
+                          ✓ {csvMeta?.count || 'All'} prospects mapped
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsWizardOpen(true)}
+                        className="w-full py-2.5 rounded-lg border border-[#2a2a2a] bg-[#111111] hover:bg-[#222222] text-[#6366f1] hover:text-[#4f46e5] font-semibold text-xs transition-colors cursor-pointer text-center"
+                      >
+                        ✏️ Re-open CSV Import Wizard
+                      </button>
+                    </div>
+                  ) : (
+                    <div
+                      onClick={() => fileRef.current?.click()}
+                      className="rounded-xl border border-dashed border-[#2a2a2a] hover:border-[#6366f1]/40 bg-[#111111] hover:bg-[#6366f1]/5 p-8 text-center cursor-pointer transition-all"
+                    >
+                      <FileUp size={28} className="mx-auto mb-3 text-[#6366f1]" />
+                      <p className="text-white text-sm font-medium">Upload a prospect CSV</p>
+                      <p className="text-[#6b7280] text-xs mt-1">Extra columns become custom variables.</p>
+                    </div>
                   )}
                 </div>
 
-                {csvMeta && (
-                  <div className="lg:col-span-3">
-                    <VariableMappingPanel
-                      headers={csvMeta.headers}
-                      mappings={variableMappings}
-                      onChange={setVariableMappings}
-                      sampleRow={csvSampleRow}
-                    />
-                  </div>
-                )}
-
-                <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
+                {/* VariableMappingPanel replaced by CSVImportWizardModal */}
+<div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
                   <h3 className="text-white font-semibold mb-4">Prospect Lists</h3>
                   <div className="max-h-[360px] overflow-y-auto space-y-2">
                     {lists.map(list => (
