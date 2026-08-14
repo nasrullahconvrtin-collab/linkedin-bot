@@ -46,12 +46,12 @@ export default function Profiles() {
   const [directEmail, setDirectEmail] = useState('');
   const [directPassword, setDirectPassword] = useState('');
   const [cookieVal, setCookieVal] = useState('');
-  const [existingAccId, setExistingAccId] = useState('zXneBg9WRZ-m7iFuKULo1Q');
-  const [displayName, setDisplayName] = useState('Fatima Maqsood');
+  const [existingAccId, setExistingAccId] = useState('');
+  const [displayName, setDisplayName] = useState('');
 
   // Editable Account Settings state
-  const [editName, setEditName] = useState('Fatima Maqsood');
-  const [editAccId, setEditAccId] = useState('zXneBg9WRZ-m7iFuKULo1Q');
+  const [editName, setEditName] = useState('');
+  const [editAccId, setEditAccId] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
   const [removing, setRemoving] = useState(false);
 
@@ -153,10 +153,9 @@ export default function Profiles() {
     });
   }, [prospects, dateBounds]);
 
-  // Compute 5 Compact Metric Cards matching Dashboard overall activity
+  // Compute 5 Compact Metric Cards strictly adhering to profile vs campaign data sources
   const metrics = useMemo(() => {
-    let invitesSent = 0;
-    let acceptedCount = 0;
+    let campaignInvitesSent = 0;
     let messagesSent = 0;
     let repliesCount = 0;
     let profileViews = 0;
@@ -164,10 +163,7 @@ export default function Profiles() {
     filteredProspects.forEach(p => {
       const s = p.status || '';
       if (['Connection Requested', 'Sent', 'Connection Accepted', 'CONNECTED', 'Replied', 'Initial Message Sent'].includes(s)) {
-        invitesSent += 1;
-      }
-      if (['Connection Accepted', 'CONNECTED', 'Replied'].includes(s)) {
-        acceptedCount += 1;
+        campaignInvitesSent += 1;
       }
       if (['Initial Message Sent', 'Message Sent', 'Replied'].includes(s) || p.message_sent_date) {
         messagesSent += 1;
@@ -180,11 +176,16 @@ export default function Profiles() {
       }
     });
 
-    const acceptanceRate = invitesSent > 0 ? Math.round((acceptedCount / invitesSent) * 100) : 0;
+    // Invites Sent = Overall total historical invitations (pending sent + accepted 1st degree connections + campaign invites)
+    const overallInvitesSent = Math.max((invitations?.length || 0) + (connections?.length || 0), campaignInvitesSent);
+    
+    // Accepted = Overall total 1st-degree connections count
+    const acceptedCount = connections?.length || 0;
+    const acceptanceRate = overallInvitesSent > 0 ? Math.round((acceptedCount / overallInvitesSent) * 100) : 0;
     const replyRate = messagesSent > 0 ? Math.round((repliesCount / messagesSent) * 100) : 0;
 
     return {
-      invitesSent,
+      invitesSent: overallInvitesSent,
       acceptedCount,
       acceptanceRate,
       messagesSent,
@@ -192,7 +193,7 @@ export default function Profiles() {
       replyRate,
       profileViews,
     };
-  }, [filteredProspects]);
+  }, [filteredProspects, invitations, connections]);
 
   // Duration Filter for Pending Invitations
   const filteredInvitations = useMemo(() => {

@@ -170,11 +170,14 @@ export const directGetUnipileAccountInfo = async (accountId) => {
 
 // Fetch ALL 1st-degree connections using cursor pagination loop
 export const directGetNetworkingConnections = async () => {
+  if (!activeAccountId) {
+    return { success: true, connections: [], total: 0 };
+  }
   let allItems = [];
   let cursor = null;
 
   for (let page = 0; page < 20; page += 1) {
-    let path = `/users/relations?account_id=${DEFAULT_ACCOUNT_ID}&limit=100`;
+    let path = `/users/relations?account_id=${activeAccountId}&limit=100`;
     if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
     
     const { ok, data } = await unipileFetch(path);
@@ -198,11 +201,14 @@ export const directGetNetworkingConnections = async () => {
 
 // Fetch all sent pending invitations via /users/invite/sent
 export const directGetNetworkingInvitations = async () => {
+  if (!activeAccountId) {
+    return { success: true, invitations: [], total: 0 };
+  }
   let allItems = [];
   let cursor = null;
 
   for (let page = 0; page < 10; page += 1) {
-    let path = `/users/invite/sent?account_id=${DEFAULT_ACCOUNT_ID}`;
+    let path = `/users/invite/sent?account_id=${activeAccountId}`;
     if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
     
     const { ok, data } = await unipileFetch(path);
@@ -809,7 +815,10 @@ export const directSendUnipileInMail = async (prospect, subject = '', text = '')
 };
 
 export const directGetUnipileChats = async (limit = 50) => {
-  const { ok, data } = await unipileFetch(`/chats?account_id=${DEFAULT_ACCOUNT_ID}&limit=${limit}`);
+  if (!activeAccountId) {
+    return { success: false, chats: [] };
+  }
+  const { ok, data } = await unipileFetch(`/chats?account_id=${activeAccountId}&limit=${limit}`);
   if (ok && data) {
     return { success: true, chats: data.items || data.chats || [] };
   }
@@ -817,8 +826,8 @@ export const directGetUnipileChats = async (limit = 50) => {
 };
 
 export const directGetChatMessages = async (chatId, limit = 50) => {
-  if (!chatId) return { success: false, messages: [] };
-  const { ok, data } = await unipileFetch(`/chats/${encodeURIComponent(chatId)}/messages?account_id=${DEFAULT_ACCOUNT_ID}&limit=${limit}`);
+  if (!chatId || !activeAccountId) return { success: false, messages: [] };
+  const { ok, data } = await unipileFetch(`/chats/${encodeURIComponent(chatId)}/messages?account_id=${activeAccountId}&limit=${limit}`);
   if (ok && data) {
     return { success: true, messages: data.items || data.messages || [] };
   }
