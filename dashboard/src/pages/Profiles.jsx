@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Clock, Download, ExternalLink, Key, Loader2, Plus, RefreshCw, Trash2, UserCheck, Users, X,
   ShieldCheck, AlertCircle, LogOut, Check, Building, Briefcase, Sparkles, Calendar,
@@ -31,6 +32,7 @@ const TIMELINE_PRESETS = [
 ];
 
 export default function Profiles() {
+  const navigate = useNavigate();
   const { profiles, fetchProfiles } = useApp();
   const [tab, setTab] = useState('network');
   const [modal, setModal] = useState(false);
@@ -464,159 +466,23 @@ export default function Profiles() {
         </div>
       )}
 
-      {/* ── IF NO ACCOUNT IS CONNECTED: DISPLAY CLEAN 4-OPTION LOGIN WORKSPACE ── */}
+      {/* ── IF NO ACCOUNT IS CONNECTED: DISPLAY CLEAN PROMPT TO GO TO SETTINGS ── */}
       {!isAccountConnected ? (
-        <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-8 space-y-6 shadow-2xl mb-8">
-          <div className="text-center max-w-xl mx-auto">
-            <h2 className="text-white text-xl font-bold">Connect Your LinkedIn Account</h2>
-            <p className="text-[#9ca3af] text-xs mt-1">
-              Select any of the 4 supported connection methods below to pair your LinkedIn profile with LinkedFlow.
-            </p>
+        <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-12 text-center max-w-xl mx-auto my-8 shadow-2xl space-y-4">
+          <div className="w-16 h-16 rounded-2xl bg-[#6366f1]/10 border border-[#6366f1]/20 text-[#6366f1] flex items-center justify-center mx-auto">
+            <Globe size={32} />
           </div>
-
-          {/* Connection Method Tabs */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 bg-[#111111] p-1.5 rounded-2xl border border-[#2a2a2a] max-w-2xl mx-auto">
-            <button
-              onClick={() => setConnMethod('direct')}
-              className={`py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                connMethod === 'direct' ? 'bg-[#6366f1] text-white shadow-md' : 'text-[#9ca3af] hover:text-white'
-              }`}
-            >
-              <Lock size={14} /> Direct Login
-            </button>
-
-            <button
-              onClick={() => setConnMethod('hosted')}
-              className={`py-2.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                connMethod === 'hosted' ? 'bg-[#6366f1] text-white shadow-md' : 'text-[#9ca3af] hover:text-white'
-              }`}
-            >
-              <Globe size={14} /> Hosted OAuth Page
-            </button>
-
-            <button
-              onClick={() => setConnMethod('cookie')}
-              className={`py-2.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                connMethod === 'cookie' ? 'bg-[#6366f1] text-white shadow-md' : 'text-[#9ca3af] hover:text-white'
-              }`}
-            >
-              <Code size={14} /> Session Cookie
-            </button>
-
-            <button
-              onClick={() => setConnMethod('account_id')}
-              className={`py-2.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                connMethod === 'account_id' ? 'bg-[#6366f1] text-white shadow-md' : 'text-[#9ca3af] hover:text-white'
-              }`}
-            >
-              <Key size={14} /> Account ID & Name
-            </button>
-          </div>
-
-          {/* Login Form Container */}
-          <div className="max-w-md mx-auto bg-[#111111] border border-[#2a2a2a] rounded-2xl p-6 shadow-xl">
-            {connMethod === 'direct' && (
-              <form onSubmit={handleConnectDirect} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-[#9ca3af] mb-1.5">LinkedIn Email / Username</label>
-                  <input
-                    type="text"
-                    value={directEmail}
-                    onChange={e => setDirectEmail(e.target.value)}
-                    placeholder="yourname@domain.com"
-                    className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-[#6366f1]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-[#9ca3af] mb-1.5">LinkedIn Password</label>
-                  <input
-                    type="password"
-                    value={directPassword}
-                    onChange={e => setDirectPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-[#6366f1]"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={loading || !directEmail || !directPassword}
-                  className="w-full py-3 bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold text-xs rounded-xl transition-all disabled:opacity-50 shadow-lg shadow-indigo-500/20"
-                >
-                  {loading ? 'Connecting...' : 'Connect LinkedIn Account'}
-                </button>
-              </form>
-            )}
-
-            {connMethod === 'hosted' && (
-              <div className="space-y-4 text-center">
-                <p className="text-[#9ca3af] text-xs leading-relaxed">
-                  Click below to open the official hosted OAuth login page. Authorize your LinkedIn profile securely.
-                </p>
-                <a
-                  href="https://api20.unipile.com:15032/api/v1/hosted/accounts/link"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center justify-center gap-2 w-full py-3 bg-[#0a66c2] hover:bg-[#084e96] text-white font-bold text-xs rounded-xl transition-all shadow-lg"
-                >
-                  <ExternalLink size={15} /> Open Hosted LinkedIn Login Page
-                </a>
-              </div>
-            )}
-
-            {connMethod === 'cookie' && (
-              <form onSubmit={handleConnectCookie} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-[#9ca3af] mb-1.5">LinkedIn Session Cookie (li_at)</label>
-                  <textarea
-                    rows={3}
-                    value={cookieVal}
-                    onChange={e => setCookieVal(e.target.value)}
-                    placeholder="AQEDAT..."
-                    className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-2 text-white text-xs font-mono focus:outline-none focus:border-[#6366f1]"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={loading || !cookieVal.trim()}
-                  className="w-full py-3 bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold text-xs rounded-xl transition-all disabled:opacity-50 shadow-lg shadow-indigo-500/20"
-                >
-                  {loading ? 'Connecting...' : 'Connect via Session Cookie'}
-                </button>
-              </form>
-            )}
-
-            {connMethod === 'account_id' && (
-              <form onSubmit={handleConnectAccountId} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-[#9ca3af] mb-1.5">Profile Display Name</label>
-                  <input
-                    type="text"
-                    value={displayName}
-                    onChange={e => setDisplayName(e.target.value)}
-                    placeholder="Fatima Maqsood"
-                    className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-[#6366f1]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-[#9ca3af] mb-1.5">LinkedIn Account ID</label>
-                  <input
-                    type="text"
-                    value={existingAccId}
-                    onChange={e => setExistingAccId(e.target.value)}
-                    placeholder="zXneBg9WRZ-m7iFuKULo1Q"
-                    className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-[#6366f1]"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={loading || !existingAccId.trim()}
-                  className="w-full py-3 bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold text-xs rounded-xl transition-all disabled:opacity-50 shadow-lg shadow-indigo-500/20"
-                >
-                  {loading ? 'Saving...' : 'Save & Connect Account'}
-                </button>
-              </form>
-            )}
-          </div>
+          <h2 className="text-white text-xl font-bold">No Active LinkedIn Profile Connected</h2>
+          <p className="text-[#9ca3af] text-sm leading-relaxed">
+            Your LinkedIn profile is currently disconnected. All profile performance stats, network connections, and inbox synchronization are paused.
+            Please go to Settings to connect your LinkedIn profile.
+          </p>
+          <button
+            onClick={() => navigate('/settings')}
+            className="px-6 py-3 bg-[#6366f1] hover:bg-[#4f46e5] text-white text-xs font-bold rounded-xl shadow-lg transition-all"
+          >
+            Go to Settings to Connect Account
+          </button>
         </div>
       ) : (
         <>
