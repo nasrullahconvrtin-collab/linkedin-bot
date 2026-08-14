@@ -204,44 +204,24 @@ export const deleteMessage     = (id)       => api.delete(`/messages/${id}`).cat
 // ── HubSpot ──────────────────────────────────────────────────
 export const syncHubSpot       = (id, data) => api.post(`/hubspot/sync/${id}`, data).catch(() => ({ success: true }));
 
-// ── Networking & Unipile Auth (Direct Fallbacks) ─────────────
+// ── Networking & Unipile Auth (Direct Calls) ────────────────
 export const getNetworkingConnections = async (params) => {
-  try {
-    const res = await api.get('/networking/connections', { params, timeout: 1500 });
-    if (res && res.connections && res.connections.length > 0) return res;
-  } catch (e) {}
-  return directGetNetworkingConnections(params?.cursor);
+  return directGetNetworkingConnections();
 };
 
 export const getNetworkingInvitations = async (params) => {
-  try {
-    const res = await api.get('/networking/invitations', { params, timeout: 1500 });
-    if (res && res.invitations && res.invitations.length > 0) return res;
-  } catch (e) {}
   return directGetNetworkingInvitations();
 };
 
 export const cancelNetworkingInvitation = async (invitation_id) => {
-  try {
-    const res = await api.post('/networking/cancel-invitation', { invitation_id }, { timeout: 1500 });
-    if (res && res.success) return res;
-  } catch (e) {}
   return directCancelNetworkingInvitation(invitation_id);
 };
 
 export const withdrawOldInvitations = async (max_age_days = 90) => {
-  try {
-    const res = await api.post('/networking/withdraw-old', { max_age_days }, { timeout: 1500 });
-    if (res && res.success) return res;
-  } catch (e) {}
   return directWithdrawOldInvitations(max_age_days);
 };
 
 export const getUnipileAccountInfo = async (account_id) => {
-  try {
-    const res = await api.get('/unipile/account-info', { params: { account_id }, timeout: 1500 });
-    if (res && res.id) return res;
-  } catch (e) {}
   return directGetUnipileAccountInfo(account_id);
 };
 

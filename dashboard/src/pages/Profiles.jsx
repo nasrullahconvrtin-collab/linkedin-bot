@@ -68,7 +68,7 @@ export default function Profiles() {
   const [accountInfo, setAccountInfo] = useState(null);
   const [connections, setConnections] = useState([]);
   const [invitations, setInvitations] = useState([]);
-  const [withdrawAge, setWithdrawAge] = useState(30); // Default 30 days
+  const [withdrawAge, setWithdrawAge] = useState(0); // Default 0 = All Pending Invitations
   const [netLoading, setNetLoading] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
 
@@ -193,13 +193,14 @@ export default function Profiles() {
   // Duration Filter for Pending Invitations
   const filteredInvitations = useMemo(() => {
     if (!invitations || invitations.length === 0) return [];
-    if (!withdrawAge || withdrawAge === 0) return invitations;
+    if (!withdrawAge || Number(withdrawAge) === 0) return invitations;
 
     const cutoffMs = Date.now() - Number(withdrawAge) * 24 * 60 * 60 * 1000;
     return invitations.filter(inv => {
-      const sentTs = inv.parsed_datetime || inv.sent_at || inv.created_at || inv.timestamp || inv.date;
+      const sentTs = inv.parsed_datetime || inv.sent_at || inv.created_at || inv.timestamp;
       if (!sentTs) return true;
       const invMs = new Date(sentTs).getTime();
+      if (isNaN(invMs)) return true;
       return invMs <= cutoffMs;
     });
   }, [invitations, withdrawAge]);
@@ -440,6 +441,10 @@ export default function Profiles() {
                   <Users size={14} />
                   {connections.length} 1st-Degree Connections
                 </span>
+                <span className="text-xs px-3.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-bold flex items-center gap-1.5 shadow-sm">
+                  <Clock size={14} />
+                  {invitations.length} Pending Invitations
+                </span>
               </div>
               <p className="text-[#9ca3af] text-sm mt-1">{accountInfo?.headline || 'LinkedIn Outreach Profile'}</p>
             </div>
@@ -502,11 +507,12 @@ export default function Profiles() {
                     onChange={e => setWithdrawAge(Number(e.target.value))}
                     className="bg-[#111111] border border-[#2a2a2a] rounded-xl px-3 py-2 text-white text-xs font-medium focus:outline-none focus:border-[#6366f1]"
                   >
+                    <option value={0}>All Pending Invitations ({invitations.length})</option>
                     <option value={7}>Older than 7 days</option>
+                    <option value={14}>Older than 14 days</option>
                     <option value={30}>Older than 30 days</option>
                     <option value={60}>Older than 60 days</option>
                     <option value={90}>Older than 90 days</option>
-                    <option value={0}>All Pending Invitations</option>
                   </select>
 
                   <button
