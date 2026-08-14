@@ -73,6 +73,18 @@ export default function Profiles() {
   const loadNetworkData = async () => {
     setNetLoading(true);
     try {
+      // 1. Check if an active profile exists in database
+      const { data: dbProfiles } = await supabaseDirect.from('profiles').select('*');
+      if (!dbProfiles || dbProfiles.length === 0) {
+        setAccountInfo(null);
+        setEditName('');
+        setEditAccId('');
+        setConnections([]);
+        setInvitations([]);
+        setNetLoading(false);
+        return;
+      }
+
       const [accRes, connRes, invRes, pRes] = await Promise.all([
         getUnipileAccountInfo().catch(() => null),
         getNetworkingConnections().catch(() => ({ connections: [] })),
@@ -82,20 +94,12 @@ export default function Profiles() {
 
       if (accRes) {
         setAccountInfo(accRes);
-        const resolvedName = accRes.name && accRes.name !== 'Maryam Ansar' ? accRes.name : 'Fatima Maqsood';
+        const resolvedName = accRes.name && accRes.name !== 'Maryam Ansar' ? accRes.name : (dbProfiles[0]?.display_name || 'Fatima Maqsood');
         setEditName(resolvedName);
-        setEditAccId(accRes.id || 'zXneBg9WRZ-m7iFuKULo1Q');
-        setExistingAccId(accRes.id || 'zXneBg9WRZ-m7iFuKULo1Q');
-        setDisplayName(resolvedName);
-
-        // Ensure database profile row is updated to Fatima Maqsood
-        await supabaseDirect.from('profiles').upsert([{
-          profile_key: 'profile_1',
-          display_name: resolvedName,
-          unipile_account_id: accRes.id || 'zXneBg9WRZ-m7iFuKULo1Q',
-          session_active: true,
-          updated_at: new Date().toISOString(),
-        }]);
+        setEditAccId(accRes.id || dbProfiles[0]?.unipile_account_id || '');
+      } else if (dbProfiles.length > 0) {
+        setEditName(dbProfiles[0].display_name || '');
+        setEditAccId(dbProfiles[0].unipile_account_id || '');
       }
 
       if (connRes?.connections) setConnections(connRes.connections);
@@ -427,26 +431,26 @@ export default function Profiles() {
   return (
     <Layout>
       
-      {/* ── 1. TOP SECTION: PROFILE NAME & STATUS BANNER ──────────────── */}
-      <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-6 mb-6 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-xl">
-        <div className="flex items-center gap-5">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#6366f1] via-indigo-600 to-purple-600 text-white font-bold text-2xl flex items-center justify-center shadow-lg">
-            {profileDisplayName[0]}
-          </div>
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-white text-2xl font-extrabold">{profileDisplayName}</h1>
-              <span className="text-xs px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                LinkedIn Connected
-              </span>
+      {/* ── 1. TOP SECTION: PROFILE NAME & STATUS BANNER (ONLY WHEN CONNECTED) ── */}
+      {isAccountConnected && (
+        <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-6 mb-6 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-xl">
+          <div className="flex items-center gap-5">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#6366f1] via-indigo-600 to-purple-600 text-white font-bold text-2xl flex items-center justify-center shadow-lg">
+              {profileDisplayName ? profileDisplayName[0] : 'L'}
             </div>
-            <p className="text-[#9ca3af] text-sm mt-1">{accountInfo?.headline || 'LinkedIn Outreach Profile'}</p>
+            <div>
+              <div className="flex items-center gap-3">
+                <h1 className="text-white text-2xl font-extrabold">{profileDisplayName}</h1>
+                <span className="text-xs px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  LinkedIn Connected
+                </span>
+              </div>
+              <p className="text-[#9ca3af] text-sm mt-1">{accountInfo?.headline || 'LinkedIn Outreach Profile'}</p>
+            </div>
           </div>
-        </div>
 
-        <div className="flex items-center gap-3 self-start md:self-auto">
-          {isAccountConnected && (
+          <div className="flex items-center gap-3 self-start md:self-auto">
             <button
               onClick={handleRemoveConnectedAccount}
               disabled={removing}
@@ -456,9 +460,9 @@ export default function Profiles() {
               {removing ? <Loader2 size={15} className="animate-spin" /> : <LogOut size={15} />}
               Disconnect Account
             </button>
-          )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* ── IF NO ACCOUNT IS CONNECTED: DISPLAY CLEAN 4-OPTION LOGIN WORKSPACE ── */}
       {!isAccountConnected ? (
