@@ -441,10 +441,6 @@ export default function Profiles() {
                   <Users size={14} />
                   {connections.length} 1st-Degree Connections
                 </span>
-                <span className="text-xs px-3.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-bold flex items-center gap-1.5 shadow-sm">
-                  <Clock size={14} />
-                  {invitations.length} Pending Invitations
-                </span>
               </div>
               <p className="text-[#9ca3af] text-sm mt-1">{accountInfo?.headline || 'LinkedIn Outreach Profile'}</p>
             </div>

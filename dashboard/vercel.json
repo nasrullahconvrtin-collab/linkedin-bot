@@ -3,6 +3,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
+    { "source": "/api/unipile/(.*)", "destination": "https://api20.unipile.com:15032/api/v1/$1" },
     { "source": "/downloads/(.*)", "destination": "/downloads/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]

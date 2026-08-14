@@ -8,6 +8,13 @@ const DEFAULT_ACCOUNT_ID = 'zXneBg9WRZ-m7iFuKULo1Q';
 
 export const supabaseDirect = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+const getUnipileBaseUrl = () => {
+  if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
+    return '/api/unipile';
+  }
+  return UNIPILE_BASE_URL;
+};
+
 export const unipileFetch = async (endpoint, options = {}) => {
   const headers = {
     'X-API-KEY': UNIPILE_API_KEY,
@@ -15,12 +22,26 @@ export const unipileFetch = async (endpoint, options = {}) => {
     ...(options.headers || {}),
   };
   try {
-    const res = await fetch(`${UNIPILE_BASE_URL}${endpoint}`, { ...options, headers });
+    const primaryUrl = `${getUnipileBaseUrl()}${endpoint}`;
+    let res = await fetch(primaryUrl, { ...options, headers });
+    
+    if (!res.ok && primaryUrl.startsWith('/api/unipile')) {
+      const fallbackUrl = `${UNIPILE_BASE_URL}${endpoint}`;
+      res = await fetch(fallbackUrl, { ...options, headers });
+    }
+
     const data = await res.json().catch(() => ({}));
     return { ok: res.ok, status: res.status, data };
   } catch (err) {
     console.error('Direct Unipile fetch error:', err);
-    return { ok: false, status: 500, data: null };
+    try {
+      const fallbackUrl = `${UNIPILE_BASE_URL}${endpoint}`;
+      const res = await fetch(fallbackUrl, { ...options, headers });
+      const data = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, data };
+    } catch (e) {
+      return { ok: false, status: 500, data: null };
+    }
   }
 };
 
