@@ -29,38 +29,34 @@ let activeAccountId = DEFAULT_ACCOUNT_ID;
 export const directGetProfiles = async () => {
   try {
     const { data, error } = await supabaseDirect.from('profiles').select('*');
-    if (!error && data && data.length > 0) {
-      if (data[0].unipile_account_id) {
-        activeAccountId = data[0].unipile_account_id;
+    if (!error && data) {
+      if (data.length > 0) {
+        if (data[0].unipile_account_id) {
+          activeAccountId = data[0].unipile_account_id;
+        }
+        return data.map(p => ({
+          profile_key: p.profile_key || p.id || 'profile_1',
+          display_name: p.display_name && p.display_name !== 'Maryam Ansar' ? p.display_name : 'Fatima Maqsood',
+          unipile_account_id: p.unipile_account_id || activeAccountId,
+          session_active: p.session_active ?? true,
+          enabled: p.enabled ?? true,
+          daily_sent: p.daily_sent || 0,
+        }));
+      } else {
+        // Database is empty (account disconnected)
+        return [];
       }
-      return data.map(p => ({
-        profile_key: p.profile_key || p.id || 'profile_1',
-        display_name: p.display_name && p.display_name !== 'Maryam Ansar' ? p.display_name : 'Fatima Maqsood',
-        unipile_account_id: p.unipile_account_id || activeAccountId,
-        session_active: p.session_active ?? true,
-        enabled: p.enabled ?? true,
-        daily_sent: p.daily_sent || 0,
-      }));
     }
   } catch (e) {
     console.warn('Supabase fetch error:', e);
   }
-  return [
-    {
-      profile_key: 'profile_1',
-      display_name: 'Fatima Maqsood',
-      unipile_account_id: DEFAULT_ACCOUNT_ID,
-      session_active: true,
-      enabled: true,
-      daily_sent: 0,
-    },
-  ];
+  return [];
 };
 
 export const directCreateProfile = async (data) => {
   const profile_key = data.profile_key || 'profile_1';
   const display_name = data.display_name || 'Fatima Maqsood';
-  const unipile_account_id = data.unipile_account_id || activeAccountId;
+  const unipile_account_id = data.unipile_account_id || activeAccountId || DEFAULT_ACCOUNT_ID;
   
   if (unipile_account_id) {
     activeAccountId = unipile_account_id;
@@ -87,8 +83,11 @@ export const directCreateProfile = async (data) => {
     enabled: true,
   };
 };
+
 export const directDisconnectProfile = async () => {
   try {
+    // Delete all profiles from Supabase database table
+    await supabaseDirect.from('profiles').delete().gt('created_at', '1970-01-01T00:00:00Z');
     await supabaseDirect.from('profiles').delete().neq('profile_key', 'dummy_key_none');
   } catch (err) {
     console.warn('directDisconnectProfile error:', err);
@@ -99,7 +98,7 @@ export const directDisconnectProfile = async () => {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       Object.keys(localStorage).forEach(key => {
-        if (key.startsWith('lf_chat_sent_messages_')) {
+        if (key.startsWith('lf_chat_sent_messages_') || key === 'lf_active_account_id') {
           localStorage.removeItem(key);
         }
       });
@@ -115,6 +114,8 @@ export const directGetUnipileAccountInfo = async (accountId) => {
     const dbProfile = dbProfiles?.[0];
     if (dbProfile?.unipile_account_id) {
       activeAccountId = dbProfile.unipile_account_id;
+    } else if (!dbProfile && !accountId && !activeAccountId) {
+      return null;
     }
 
     const { ok: listOk, data: listData } = await unipileFetch('/accounts');
@@ -136,6 +137,8 @@ export const directGetUnipileAccountInfo = async (accountId) => {
     }
 
     const accId = accountId || activeAccountId;
+    if (!accId) return null;
+
     const { ok, data } = await unipileFetch(`/accounts/${accId}`);
     if (ok && data) {
       const imParam = data.connection_params?.im || {};
@@ -153,8 +156,10 @@ export const directGetUnipileAccountInfo = async (accountId) => {
     console.warn('directGetUnipileAccountInfo error:', e);
   }
 
+  if (!activeAccountId && !accountId) return null;
+
   return {
-    id: activeAccountId,
+    id: activeAccountId || DEFAULT_ACCOUNT_ID,
     name: 'Fatima Maqsood',
     username: 'connected_user',
     provider: 'LINKEDIN',
