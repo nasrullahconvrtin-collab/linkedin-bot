@@ -12,14 +12,14 @@ import httpx
 
 logger = logging.getLogger("linkedin_bot.unipile")
 
-UNIPILE_API_KEY = os.getenv("UNIPILE_API_KEY", "qptpLmjx.T+kOGzVxBXwCbJLYd6RlSxMa+b3Gc7XacSXoWNejkA4=")
+UNIPILE_API_KEY = os.getenv("UNIPILE_API_KEY", "6SlhX8Ii.R7wP5y2dLTREmrXKCTpnoEg3clwHKT9wZtIc++MRAkg=")
 UNIPILE_DSN = os.getenv("UNIPILE_DSN", "api20.unipile.com:15032")
 UNIPILE_BASE_URL = os.getenv(
     "UNIPILE_API_URL",
     f"https://{UNIPILE_DSN}" if UNIPILE_DSN.startswith("http") else f"https://{UNIPILE_DSN}/api/v1"
 )
 
-DEFAULT_ACCOUNT_ID = "bBzuBoeOQAuBCQNFu7shyQ"
+DEFAULT_ACCOUNT_ID = "zXneBg9WRZ-m7iFuKULo1Q"
 
 
 def get_headers() -> Dict[str, str]:
