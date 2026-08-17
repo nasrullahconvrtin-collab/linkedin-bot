@@ -32,6 +32,7 @@ export default function Replies() {
       const { data: pData } = await supabaseDirect
         .from('prospects')
         .select('*')
+        .not('campaign_id', 'is', null)
         .or('status.eq.Replied,status.eq.replied,reply_date.not.is.null')
         .order('updated_at', { ascending: false });
 

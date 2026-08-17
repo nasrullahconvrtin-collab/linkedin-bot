@@ -284,7 +284,7 @@ export const directGetCampaigns = async () => {
   try {
     const { data: campaigns, error } = await supabaseDirect.from('campaigns').select('*').order('created_at', { ascending: false });
     if (!error && campaigns) {
-      const { data: prospects } = await supabaseDirect.from('prospects').select('id, campaign_id, status');
+      const { data: prospects } = await supabaseDirect.from('prospects').select('id, campaign_id, status, reply_date');
       const prospectMap = new Map();
       (prospects || []).forEach(p => {
         if (!p.campaign_id) return;
@@ -299,7 +299,7 @@ export const directGetCampaigns = async () => {
         if (['Connection Accepted', 'CONNECTED', 'Replied'].includes(p.status)) {
           stats.accepted += 1;
         }
-        if (p.status === 'Replied') {
+        if (p.status?.toLowerCase() === 'replied' || p.reply_date) {
           stats.replied += 1;
         }
       });
@@ -345,12 +345,37 @@ export const directCreateCampaign = async (data) => {
 
 export const directGetCampaign = async (id) => {
   try {
-    const { data, error } = await supabaseDirect.from('campaigns').select('*').eq('id', id).single();
-    if (!error && data) return { campaign: data, sent: 0, accepted: 0, replied: 0 };
+    const { data: campaign, error } = await supabaseDirect.from('campaigns').select('*').eq('id', id).single();
+    if (!error && campaign) {
+      const { data: prospects } = await supabaseDirect
+        .from('prospects')
+        .select('id, campaign_id, status, connection_status, connection_sent_date, message_sent_date, reply_date')
+        .eq('campaign_id', id);
+      
+      const rows = prospects || [];
+      const stats = {
+        total: rows.length,
+        sent: rows.filter(r => r.status === 'Connection Requested' || r.status === 'Sent' || r.connection_sent_date).length,
+        accepted: rows.filter(r => ['Connection Accepted', 'CONNECTED', 'Replied'].includes(r.status)).length,
+        already_connected: rows.filter(r => r.connection_status === 'connected').length,
+        ready_for_message: rows.filter(r => r.status === 'Ready to Send').length,
+        messaged: rows.filter(r => r.status === 'Initial Message Sent' || r.status === 'Message Sent' || r.message_sent_date).length,
+        following_up: rows.filter(r => r.status === 'Following Up').length,
+        followup_due: rows.filter(r => r.status === 'Following Up').length,
+        completed: rows.filter(r => ['Replied', 'replied', 'No Response', 'Completed'].includes(r.status) || r.reply_date).length,
+        failed: rows.filter(r => ['Needs Attention', 'failed', 'error', 'needs_attention'].includes(r.status?.toLowerCase())).length,
+        replied: rows.filter(r => r.status?.toLowerCase() === 'replied' || r.reply_date).length,
+        no_response: rows.filter(r => r.status === 'No Response').length,
+        sequence_complete: rows.filter(r => r.status === 'Completed').length,
+        needs_attention: rows.filter(r => r.status === 'Needs Attention').length,
+      };
+
+      return { campaign, ...stats };
+    }
   } catch (e) {
     console.warn('directGetCampaign warning:', e);
   }
-  return { campaign: { id, name: 'Campaign', status: 'draft', sequence: [] }, sent: 0, accepted: 0, replied: 0 };
+  return { campaign: { id, name: 'Campaign', status: 'draft', sequence: [] }, total: 0, sent: 0, accepted: 0, replied: 0 };
 };
 
 export const directUpdateCampaign = async (id, updates) => {
@@ -1055,13 +1080,60 @@ export const directGetUnipileUserProfile = async (identifier) => {
 };
 
 export const directCheckProspectReplied = async (prospect) => {
+  if (prospect.reply_date && prospect.status?.toLowerCase() === 'replied') {
+    return { success: true, replied: true };
+  }
+
   const recipientId = getLinkedinId(prospect);
   if (!recipientId) return { success: true, replied: false };
+
   const { ok, data } = await unipileFetch(`/chats?account_id=${DEFAULT_ACCOUNT_ID}&attendees_ids=${encodeURIComponent(recipientId)}`);
-  if (ok && data && Array.isArray(data.items)) {
+  if (ok && data && Array.isArray(data.items) && data.items.length > 0) {
     const chat = data.items[0];
-    if (chat && chat.last_message_sender_id && chat.last_message_sender_id !== DEFAULT_ACCOUNT_ID) {
-      return { success: true, replied: true };
+    if (chat && chat.id) {
+      // Fetch messages history
+      const { ok: msgOk, data: msgData } = await unipileFetch(`/chats/${encodeURIComponent(chat.id)}/messages?account_id=${DEFAULT_ACCOUNT_ID}&limit=100`);
+      if (msgOk && msgData && Array.isArray(msgData.items)) {
+        // Sort messages chronologically (oldest first)
+        const messages = [...msgData.items].sort((a, b) => {
+          const tA = new Date(a.timestamp || a.created_at || 0).getTime();
+          const tB = new Date(b.timestamp || b.created_at || 0).getTime();
+          return tA - tB;
+        });
+
+        // Find the index of our first message to establish the baseline
+        const firstSentMsgIdx = messages.findIndex(m => m.sender_id === DEFAULT_ACCOUNT_ID);
+
+        let firstReply = null;
+        if (firstSentMsgIdx !== -1) {
+          const firstSentTimestamp = new Date(messages[firstSentMsgIdx].timestamp || messages[firstSentMsgIdx].created_at || 0).getTime();
+          // Find first message from attendee sent AFTER our first message
+          firstReply = messages.find((m, idx) => {
+            if (idx <= firstSentMsgIdx) return false;
+            if (m.sender_id === DEFAULT_ACCOUNT_ID) return false;
+            const msgTime = new Date(m.timestamp || m.created_at || 0).getTime();
+            return msgTime > firstSentTimestamp;
+          });
+        } else {
+          // If we haven't sent any messages, the first message from them is the reply
+          firstReply = messages.find(m => m.sender_id !== DEFAULT_ACCOUNT_ID);
+        }
+
+        if (firstReply) {
+          const replyText = firstReply.text || firstReply.message || 'Incoming message';
+          const replyDateStr = firstReply.timestamp || firstReply.created_at || new Date().toISOString();
+
+          // Save the FIRST reply to the database
+          await supabaseDirect.from('prospects').update({
+            status: 'Replied',
+            reply_date: replyDateStr,
+            last_message: replyText,
+            updated_at: new Date().toISOString()
+          }).eq('id', prospect.id);
+
+          return { success: true, replied: true };
+        }
+      }
     }
   }
   return { success: true, replied: false };

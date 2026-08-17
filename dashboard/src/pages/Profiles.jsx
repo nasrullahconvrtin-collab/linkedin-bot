@@ -163,7 +163,7 @@ export default function Profiles() {
       if (['Initial Message Sent', 'Message Sent', 'Replied'].includes(s) || p.message_sent_date) {
         messagesSent += 1;
       }
-      if (s === 'Replied' || s === 'replied' || p.reply_date) {
+      if ((s === 'Replied' || s === 'replied' || p.reply_date) && p.campaign_id) {
         repliesCount += 1;
       }
       if (s === 'Visited' || p.visited_date) {

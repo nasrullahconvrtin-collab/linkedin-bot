@@ -133,7 +133,7 @@ export default function Dashboard() {
       if (['Initial Message Sent', 'Message Sent', 'Replied'].includes(s) || p.message_sent_date) {
         messagesSent += 1;
       }
-      if (s === 'Replied' || s === 'replied' || p.reply_date) {
+      if ((s === 'Replied' || s === 'replied' || p.reply_date) && p.campaign_id) {
         repliesCount += 1;
       }
       if (s === 'Visited' || p.visited_date) {
@@ -161,7 +161,7 @@ export default function Dashboard() {
 
   // Extract Replies & Activity for the selected timeline
   const timelineReplies = useMemo(() => {
-    return filteredProspects.filter(p => p.status === 'Replied' || p.status === 'replied' || p.reply_date);
+    return filteredProspects.filter(p => (p.status === 'Replied' || p.status === 'replied' || p.reply_date) && p.campaign_id);
   }, [filteredProspects]);
 
   const timelineActivities = useMemo(() => {
