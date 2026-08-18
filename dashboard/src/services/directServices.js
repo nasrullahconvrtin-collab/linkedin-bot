@@ -284,12 +284,12 @@ export const directGetCampaigns = async () => {
   try {
     const { data: campaigns, error } = await supabaseDirect.from('campaigns').select('*').order('created_at', { ascending: false });
     if (!error && campaigns) {
-      const { data: prospects } = await supabaseDirect.from('prospects').select('id, campaign_id, status, reply_date');
+      const { data: prospects } = await supabaseDirect.from('prospects').select('id, campaign_id, status, reply_date, custom_variables, current_step');
       const prospectMap = new Map();
       (prospects || []).forEach(p => {
         if (!p.campaign_id) return;
         if (!prospectMap.has(p.campaign_id)) {
-          prospectMap.set(p.campaign_id, { total: 0, sent: 0, accepted: 0, replied: 0, completed: 0 });
+          prospectMap.set(p.campaign_id, { total: 0, sent: 0, accepted: 0, replied: 0, completed: 0, actions_executed: 0 });
         }
         const stats = prospectMap.get(p.campaign_id);
         stats.total += 1;
@@ -305,17 +305,62 @@ export const directGetCampaigns = async () => {
         if (['Completed', 'Replied', 'replied', 'No Response'].includes(p.status) || p.reply_date) {
           stats.completed += 1;
         }
+
+        let actions = 0;
+        if (p.custom_variables && Array.isArray(p.custom_variables.history)) {
+          actions = p.custom_variables.history.filter(h => h.status === 'success' || h.status === 'replied').length;
+        } else if (p.status && p.status !== 'Not Contacted' && p.status !== '') {
+          actions = 1;
+        }
+        stats.actions_executed += actions;
       });
 
       return campaigns.map(c => {
-        const stats = prospectMap.get(c.id) || { total: 0, sent: 0, accepted: 0, replied: 0, completed: 0 };
+        const stats = prospectMap.get(c.id) || { total: 0, sent: 0, accepted: 0, replied: 0, completed: 0, actions_executed: 0 };
+        const flowNodes = c.sequence_config?.flow_sequence?.nodes || [];
+        const steps_count = flowNodes.filter(n => ['visit_profile', 'follow_profile', 'endorse_profile', 'send_invitation', 'send_message', 'wait'].includes(n.data?.nodeType)).length || c.sequence_config?.steps?.length || 0;
+        
+        let days_running = 0;
+        flowNodes.forEach(n => {
+          if (n.data?.nodeType === 'wait' && n.data?.config?.days) {
+            days_running += Number(n.data.config.days);
+          }
+        });
+        if (days_running === 0) {
+          const delays = c.sequence_config?.delays || {};
+          Object.values(delays).forEach(d => {
+            if (d?.days) days_running += Number(d.days);
+          });
+        }
+
+        let progress_sum = 0;
+        const cProspects = (prospects || []).filter(p => p.campaign_id === c.id);
+        cProspects.forEach(p => {
+          if (p.status === 'Completed' || p.status === 'Replied') {
+            progress_sum += 100;
+          } else if (p.status === 'Not Contacted' || p.status === 'queued') {
+            progress_sum += 0;
+          } else {
+            const currentStep = p.current_step || 1;
+            const totalSteps = steps_count || 4;
+            progress_sum += Math.min(100, Math.round((currentStep / totalSteps) * 100));
+          }
+        });
+        const progress_percentage = stats.total > 0 ? Math.round(progress_sum / stats.total) : 0;
+
         return {
           ...c,
           prospect_count: stats.total,
+          contacts: stats.total,
           sent: stats.sent,
           accepted: stats.accepted,
           replied: stats.replied,
           completed: stats.completed,
+          actions_executed: stats.actions_executed,
+          replies_count: stats.replied,
+          steps_count,
+          days_running,
+          progress_percentage,
         };
       });
     }
@@ -353,12 +398,39 @@ export const directGetCampaign = async (id) => {
     if (!error && campaign) {
       const { data: prospects } = await supabaseDirect
         .from('prospects')
-        .select('id, campaign_id, status, connection_status, connection_sent_date, message_sent_date, reply_date')
+        .select('id, campaign_id, status, connection_status, connection_sent_date, message_sent_date, reply_date, custom_variables, current_step')
         .eq('campaign_id', id);
       
       const rows = prospects || [];
+      
+      const flowNodes = campaign.sequence_config?.flow_sequence?.nodes || [];
+      const steps_count = flowNodes.filter(n => ['visit_profile', 'follow_profile', 'endorse_profile', 'send_invitation', 'send_message', 'wait'].includes(n.data?.nodeType)).length || campaign.sequence_config?.steps?.length || 0;
+      
+      let days_running = 0;
+      flowNodes.forEach(n => {
+        if (n.data?.nodeType === 'wait' && n.data?.config?.days) {
+          days_running += Number(n.data.config.days);
+        }
+      });
+      if (days_running === 0) {
+        const delays = campaign.sequence_config?.delays || {};
+        Object.values(delays).forEach(d => {
+          if (d?.days) days_running += Number(d.days);
+        });
+      }
+
+      let actions_executed = 0;
+      rows.forEach(p => {
+        if (p.custom_variables && Array.isArray(p.custom_variables.history)) {
+          actions_executed += p.custom_variables.history.filter(h => h.status === 'success' || h.status === 'replied').length;
+        } else if (p.status && p.status !== 'Not Contacted' && p.status !== '') {
+          actions_executed += 1;
+        }
+      });
+
       const stats = {
         total: rows.length,
+        contacts: rows.length,
         sent: rows.filter(r => r.status === 'Connection Requested' || r.status === 'Sent' || r.connection_sent_date).length,
         accepted: rows.filter(r => ['Connection Accepted', 'CONNECTED', 'Replied'].includes(r.status)).length,
         already_connected: rows.filter(r => r.connection_status === 'connected').length,
@@ -372,6 +444,10 @@ export const directGetCampaign = async (id) => {
         no_response: rows.filter(r => r.status === 'No Response').length,
         sequence_complete: rows.filter(r => r.status === 'Completed').length,
         needs_attention: rows.filter(r => r.status === 'Needs Attention').length,
+        actions_executed,
+        replies_count: rows.filter(r => r.status?.toLowerCase() === 'replied' || r.reply_date).length,
+        steps_count,
+        days_running,
       };
 
       return { campaign, ...stats };

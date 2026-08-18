@@ -512,12 +512,12 @@ export default function Dashboard() {
               </thead>
               <tbody className="divide-y divide-[#2a2a2a]/60 text-sm">
                 {paginatedCampaigns.map(c => {
-                  const contactsCount = c.contacts || c.prospect_count || 70;
-                  const daysCount = c.days_running || 21;
-                  const stepsCount = c.steps_count || (c.sequence_config?.flow_sequence?.nodes?.length) || 7;
-                  const actionsCount = c.actions_executed || (c.sent_count || 129);
-                  const repliesCount = c.replies_count || 5;
-                  const progressPct = c.progress_percentage || Math.min(100, Math.round((actionsCount / (contactsCount * 2 || 1)) * 100)) || 68;
+                  const contactsCount = c.prospect_count ?? c.contacts ?? 0;
+                  const daysCount = c.days_running ?? 0;
+                  const stepsCount = c.steps_count ?? (c.sequence_config?.flow_sequence?.nodes?.length) ?? 0;
+                  const actionsCount = c.actions_executed ?? 0;
+                  const repliesCount = c.replies_count ?? 0;
+                  const progressPct = c.progress_percentage ?? 0;
 
                   return (
                     <tr key={c.id} className="hover:bg-[#222222]/50 transition-colors">
