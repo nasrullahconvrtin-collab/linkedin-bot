@@ -2,6 +2,7 @@
   "name": "linkedin-bot",
   "private": true,
   "scripts": {
-    "build": "cd dashboard && npm run build"
+    "postinstall": "cd dashboard && npm install",
+    "build": "cd dashboard && npm install --include=dev && npm run build"
   }
 }

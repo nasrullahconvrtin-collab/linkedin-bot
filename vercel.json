@@ -1,5 +1,5 @@
 {
-  "buildCommand": "cd dashboard && npm run build",
+  "buildCommand": "cd dashboard && npm install --include=dev && npm run build",
   "outputDirectory": "dashboard/dist",
   "framework": "vite",
   "rewrites": [
