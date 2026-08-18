@@ -122,25 +122,61 @@ export default function Dashboard() {
     let profileViews = 0;
     let greetingsCount = 0;
 
-    filteredProspects.forEach(p => {
-      const s = p.status || '';
-      if (['Connection Requested', 'Sent', 'Connection Accepted', 'CONNECTED', 'Replied', 'Initial Message Sent'].includes(s)) {
-        invitesSent += 1;
+    const { start, end } = dateBounds;
+
+    prospects.forEach(p => {
+      // 1. Connection Invite Sent
+      if (p.connection_sent_date) {
+        const d = new Date(p.connection_sent_date);
+        if (d >= start && d <= end) {
+          invitesSent += 1;
+        }
       }
-      if (['Connection Accepted', 'CONNECTED', 'Replied'].includes(s)) {
-        acceptedCount += 1;
+      
+      // 2. Connection Invite Accepted
+      if (p.accepted_at) {
+        const d = new Date(p.accepted_at);
+        if (d >= start && d <= end) {
+          acceptedCount += 1;
+        }
       }
-      if (['Initial Message Sent', 'Message Sent', 'Replied'].includes(s) || p.message_sent_date) {
-        messagesSent += 1;
+
+      // 3. Message Sent
+      if (p.message_sent_date) {
+        const d = new Date(p.message_sent_date);
+        if (d >= start && d <= end) {
+          messagesSent += 1;
+        }
       }
-      if ((s === 'Replied' || s === 'replied' || p.reply_date) && p.campaign_id) {
-        repliesCount += 1;
+
+      // 4. Reply Received (must have campaign_id set!)
+      if (p.reply_date && p.campaign_id) {
+        const d = new Date(p.reply_date);
+        if (d >= start && d <= end) {
+          repliesCount += 1;
+        }
       }
-      if (s === 'Visited' || p.visited_date) {
-        profileViews += 1;
+
+      // 5. Profile Visited
+      if (p.visited_date) {
+        const d = new Date(p.visited_date);
+        if (d >= start && d <= end) {
+          profileViews += 1;
+        }
+      } else if (p.status === 'Visited' && p.updated_at) {
+        // fallback
+        const d = new Date(p.updated_at);
+        if (d >= start && d <= end) {
+          profileViews += 1;
+        }
       }
-      if (s === 'Followed' || p.followed_date) {
-        greetingsCount += 1;
+      
+      // greetings/followed
+      if (p.followed_date) {
+        const d = new Date(p.followed_date);
+        if (d >= start && d <= end) {
+          greetingsCount += 1;
+        }
       }
     });
 
@@ -157,36 +193,105 @@ export default function Dashboard() {
       profileViews,
       greetingsCount,
     };
-  }, [filteredProspects]);
+  }, [prospects, dateBounds]);
 
   // Extract Replies & Activity for the selected timeline
   const timelineReplies = useMemo(() => {
-    return filteredProspects.filter(p => (p.status === 'Replied' || p.status === 'replied' || p.reply_date) && p.campaign_id);
-  }, [filteredProspects]);
+    const { start, end } = dateBounds;
+    return prospects.filter(p => {
+      if (!p.campaign_id || !p.reply_date) return false;
+      const d = new Date(p.reply_date);
+      return d >= start && d <= end;
+    });
+  }, [prospects, dateBounds]);
 
   const timelineActivities = useMemo(() => {
-    return filteredProspects
-      .filter(p => p.status && p.status !== 'Not Contacted')
-      .slice(0, 10)
-      .map(p => {
-        let actionLabel = 'Action performed';
-        if (p.status === 'Replied' || p.status === 'replied') actionLabel = 'LinkedIn reply detected';
-        else if (p.status === 'Initial Message Sent' || p.status === 'Message Sent') actionLabel = 'Message sent';
-        else if (p.status === 'Connection Requested' || p.status === 'Sent') actionLabel = 'Connection request sent';
-        else if (p.status === 'Connection Accepted' || p.status === 'CONNECTED') actionLabel = 'Connection accepted';
-        else if (p.status === 'Visited') actionLabel = 'Profile visited';
+    const { start, end } = dateBounds;
+    const list = [];
+    prospects.forEach(p => {
+      const prospectName = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || p.name || 'LinkedIn Member';
+      const headlineStr = p.title || p.company || 'Prospect';
+      
+      if (p.connection_sent_date) {
+        const d = new Date(p.connection_sent_date);
+        if (d >= start && d <= end) {
+          list.push({
+            id: p.id + '_conn',
+            name: prospectName,
+            headline: headlineStr,
+            avatar_url: p.avatar_url,
+            action: 'Connection request sent',
+            campaign_id: p.campaign_id,
+            timestamp: d,
+          });
+        }
+      }
+      if (p.accepted_at) {
+        const d = new Date(p.accepted_at);
+        if (d >= start && d <= end) {
+          list.push({
+            id: p.id + '_acc',
+            name: prospectName,
+            headline: headlineStr,
+            avatar_url: p.avatar_url,
+            action: 'Connection accepted',
+            campaign_id: p.campaign_id,
+            timestamp: d,
+          });
+        }
+      }
+      if (p.message_sent_date) {
+        const d = new Date(p.message_sent_date);
+        if (d >= start && d <= end) {
+          list.push({
+            id: p.id + '_msg',
+            name: prospectName,
+            headline: headlineStr,
+            avatar_url: p.avatar_url,
+            action: 'Message sent',
+            campaign_id: p.campaign_id,
+            timestamp: d,
+          });
+        }
+      }
+      if (p.reply_date && p.campaign_id) {
+        const d = new Date(p.reply_date);
+        if (d >= start && d <= end) {
+          list.push({
+            id: p.id + '_rep',
+            name: prospectName,
+            headline: headlineStr,
+            avatar_url: p.avatar_url,
+            action: 'LinkedIn reply detected',
+            campaign_id: p.campaign_id,
+            timestamp: d,
+          });
+        }
+      }
+      if (p.visited_date) {
+        const d = new Date(p.visited_date);
+        if (d >= start && d <= end) {
+          list.push({
+            id: p.id + '_vis',
+            name: prospectName,
+            headline: headlineStr,
+            avatar_url: p.avatar_url,
+            action: 'Profile visited',
+            campaign_id: p.campaign_id,
+            timestamp: d,
+          });
+        }
+      }
+    });
 
-        return {
-          id: p.id,
-          name: p.name || 'LinkedIn Member',
-          headline: p.job_title || p.company || 'Prospect',
-          avatar_url: p.avatar_url,
-          action: actionLabel,
-          campaign_id: p.campaign_id,
-          updated_at: p.updated_at,
-        };
-      });
-  }, [filteredProspects]);
+    return list
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 10)
+      .map(act => ({
+        ...act,
+        time: act.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }));
+  }, [prospects, dateBounds]);
 
   // Campaign pagination calculations
   const totalCampaignPages = Math.ceil(campaigns.length / itemsPerPage) || 1;
@@ -199,9 +304,9 @@ export default function Dashboard() {
   const chartData = useMemo(() => {
     return campaigns.slice(0, 6).map(c => ({
       name: c.name ? (c.name.length > 18 ? c.name.slice(0, 18) + '...' : c.name) : 'Campaign',
-      Sent: c.sent_count || c.contacts || 35,
-      Accepted: c.accepted_count || Math.round((c.sent_count || 35) * 0.6),
-      Replied: c.replies_count || Math.round((c.sent_count || 35) * 0.1),
+      Sent: c.sent || 0,
+      Accepted: c.accepted || 0,
+      Replied: c.replied || 0,
     }));
   }, [campaigns]);
 

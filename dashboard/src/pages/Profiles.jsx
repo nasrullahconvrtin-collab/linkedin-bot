@@ -154,41 +154,63 @@ export default function Profiles() {
     let messagesSent = 0;
     let repliesCount = 0;
     let profileViews = 0;
+    let acceptedCount = 0;
 
-    filteredProspects.forEach(p => {
-      const s = p.status || '';
-      if (['Connection Requested', 'Sent', 'Connection Accepted', 'CONNECTED', 'Replied', 'Initial Message Sent'].includes(s)) {
-        campaignInvitesSent += 1;
+    const { start, end } = dateBounds;
+
+    prospects.forEach(p => {
+      if (p.connection_sent_date) {
+        const d = new Date(p.connection_sent_date);
+        if (d >= start && d <= end) {
+          campaignInvitesSent += 1;
+        }
       }
-      if (['Initial Message Sent', 'Message Sent', 'Replied'].includes(s) || p.message_sent_date) {
-        messagesSent += 1;
+      if (p.accepted_at) {
+        const d = new Date(p.accepted_at);
+        if (d >= start && d <= end) {
+          acceptedCount += 1;
+        }
       }
-      if ((s === 'Replied' || s === 'replied' || p.reply_date) && p.campaign_id) {
-        repliesCount += 1;
+      if (p.message_sent_date) {
+        const d = new Date(p.message_sent_date);
+        if (d >= start && d <= end) {
+          messagesSent += 1;
+        }
       }
-      if (s === 'Visited' || p.visited_date) {
-        profileViews += 1;
+      if (p.reply_date && p.campaign_id) {
+        const d = new Date(p.reply_date);
+        if (d >= start && d <= end) {
+          repliesCount += 1;
+        }
+      }
+      if (p.visited_date) {
+        const d = new Date(p.visited_date);
+        if (d >= start && d <= end) {
+          profileViews += 1;
+        }
+      } else if (p.status === 'Visited' && p.updated_at) {
+        const d = new Date(p.updated_at);
+        if (d >= start && d <= end) {
+          profileViews += 1;
+        }
       }
     });
 
-    // Invites Sent = Overall total historical invitations (pending sent + accepted 1st degree connections + campaign invites)
-    const overallInvitesSent = Math.max((invitations?.length || 0) + (connections?.length || 0), campaignInvitesSent);
-    
-    // Accepted = Overall total 1st-degree connections count
-    const acceptedCount = connections?.length || 0;
-    const acceptanceRate = overallInvitesSent > 0 ? Math.round((acceptedCount / overallInvitesSent) * 100) : 0;
+    const invitesSent = campaignInvitesSent;
+    const finalAcceptedCount = acceptedCount;
+    const acceptanceRate = invitesSent > 0 ? Math.round((finalAcceptedCount / invitesSent) * 100) : 0;
     const replyRate = messagesSent > 0 ? Math.round((repliesCount / messagesSent) * 100) : 0;
 
     return {
-      invitesSent: overallInvitesSent,
-      acceptedCount,
+      invitesSent,
+      acceptedCount: finalAcceptedCount,
       acceptanceRate,
       messagesSent,
       repliesCount,
       replyRate,
       profileViews,
     };
-  }, [filteredProspects, invitations, connections]);
+  }, [prospects, dateBounds]);
 
   // Duration Filter for Pending Invitations
   const filteredInvitations = useMemo(() => {

@@ -14,7 +14,8 @@ export default function CampaignCard({ campaign, onDelete, onDuplicate, onStatus
   const sent     = campaign.sent     || 0;
   const accepted = campaign.accepted || 0;
   const replied  = campaign.replied  || 0;
-  const pct      = total ? Math.round((replied / total) * 100) : 0;
+  const completed = campaign.completed || 0;
+  const pct      = total ? Math.round((completed / total) * 100) : 0;
   const status = campaign.status || 'draft';
   const statusClass = {
     running: 'bg-green-500/10 text-green-400 border border-green-500/20',

@@ -13,6 +13,7 @@ import {
   directDeleteProspectList,
   directGetCampaign,
   directGetCampaigns,
+  directGetCampaignSequence,
   directGetNetworkingConnections,
   directGetNetworkingInvitations,
   directGetProfiles,
@@ -116,7 +117,7 @@ export const launchCampaign    = (id, data) => api.post(`/campaigns/${id}/launch
 export const addProspectsToCampaign = (id, prospect_ids) => api.post(`/campaigns/${id}/prospects`, { prospect_ids }).catch(() => directAddProspectsToCampaign(id, prospect_ids));
 export const removeProspectsFromCampaign = (id, prospect_ids) => api.delete(`/campaigns/${id}/prospects`, { data: { prospect_ids } }).catch(() => ({ success: true }));
 export const updateCampaignStatus = (id, data) => api.put(`/campaigns/${id}/status`, data).catch(() => directUpdateCampaign(id, data));
-export const getCampaignSequence = (id) => api.get(`/campaigns/${id}/sequence`).catch(() => []);
+export const getCampaignSequence = (id) => api.get(`/campaigns/${id}/sequence`).catch(() => directGetCampaignSequence(id));
 export const getCampaignVariables = () => api.get('/campaign-variables').catch(() => ({ standard: ['first_name', 'last_name', 'company', 'title', 'industry', 'location'] }));
 
 // ── Prospect Lists ───────────────────────────────────────────

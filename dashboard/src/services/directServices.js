@@ -289,7 +289,7 @@ export const directGetCampaigns = async () => {
       (prospects || []).forEach(p => {
         if (!p.campaign_id) return;
         if (!prospectMap.has(p.campaign_id)) {
-          prospectMap.set(p.campaign_id, { total: 0, sent: 0, accepted: 0, replied: 0 });
+          prospectMap.set(p.campaign_id, { total: 0, sent: 0, accepted: 0, replied: 0, completed: 0 });
         }
         const stats = prospectMap.get(p.campaign_id);
         stats.total += 1;
@@ -302,16 +302,20 @@ export const directGetCampaigns = async () => {
         if (p.status?.toLowerCase() === 'replied' || p.reply_date) {
           stats.replied += 1;
         }
+        if (['Completed', 'Replied', 'replied', 'No Response'].includes(p.status) || p.reply_date) {
+          stats.completed += 1;
+        }
       });
 
       return campaigns.map(c => {
-        const stats = prospectMap.get(c.id) || { total: 0, sent: 0, accepted: 0, replied: 0 };
+        const stats = prospectMap.get(c.id) || { total: 0, sent: 0, accepted: 0, replied: 0, completed: 0 };
         return {
           ...c,
           prospect_count: stats.total,
           sent: stats.sent,
           accepted: stats.accepted,
           replied: stats.replied,
+          completed: stats.completed,
         };
       });
     }
@@ -375,7 +379,7 @@ export const directGetCampaign = async (id) => {
   } catch (e) {
     console.warn('directGetCampaign warning:', e);
   }
-  return { campaign: { id, name: 'Campaign', status: 'draft', sequence: [] }, total: 0, sent: 0, accepted: 0, replied: 0 };
+  return { campaign: { id, name: 'Campaign', status: 'draft', sequence: [] }, total: 0, sent: 0, accepted: 0, replied: 0, completed: 0 };
 };
 
 export const directUpdateCampaign = async (id, updates) => {
@@ -1698,6 +1702,106 @@ export const directCheckAcceptances = async () => directRunFlow();
 export const directRunConnections = async () => directRunFlow();
 export const directRunMessages = async () => directRunFlow();
 
+const FALLBACK_TEMPLATES = [
+  {
+    id: 'tpl_classic',
+    name: 'Connect + 2 Follow-ups',
+    status: 'active',
+    supported_actions: ['visit_profile', 'send_invitation', 'send_message'],
+    steps: [
+      { id: 'step_1', label: 'Visit Profile', action_type: 'visit_profile', step_order: 1 },
+      { id: 'step_2', label: 'Send Connection Request', action_type: 'invitation', step_order: 2 },
+      { id: 'step_3', label: 'Wait for Acceptance', action_type: 'wait', step_order: 3, config: { until: 'connected' } },
+      { id: 'step_4', label: 'Send Initial Message', action_type: 'message', step_order: 4 },
+      { id: 'step_5', label: 'Wait 3 days', action_type: 'wait', step_order: 5, config: { days: 3 } },
+      { id: 'step_6', label: 'Follow-up 1', action_type: 'follow-up message', step_order: 6 },
+    ],
+  },
+  {
+    id: 'tpl_inmail',
+    name: 'InMail-first with fallbacks',
+    status: 'active',
+    supported_actions: ['check_messageability', 'send_inmail', 'send_invitation', 'send_message'],
+    steps: [
+      { id: 'step_1', label: 'Visit Profile', action_type: 'visit_profile', step_order: 1 },
+      { id: 'step_2', label: 'Check Messageability', action_type: 'check_messageability', step_order: 2 },
+      { id: 'step_3', label: 'Send Connection Request', action_type: 'invitation', step_order: 3 },
+      { id: 'step_4', label: 'Send Initial Message', action_type: 'message', step_order: 4 },
+    ],
+  },
+  {
+    id: 'tpl_warmup',
+    name: 'Warm-up, then connect',
+    status: 'active',
+    supported_actions: ['visit_profile', 'follow_profile', 'endorse_profile', 'send_invitation', 'send_message'],
+    steps: [
+      { id: 'step_1', label: 'Visit & Follow Profile', action_type: 'visit_profile', step_order: 1 },
+      { id: 'step_2', label: 'Endorse a Skill', action_type: 'endorse_profile', step_order: 2 },
+      { id: 'step_3', label: 'Send Connection Request', action_type: 'invitation', step_order: 3 },
+      { id: 'step_4', label: 'Send Initial Message', action_type: 'message', step_order: 4 },
+    ],
+  },
+  {
+    id: 'tpl_simple',
+    name: 'Simple: Connect + Message',
+    status: 'active',
+    supported_actions: ['send_invitation', 'send_message'],
+    steps: [
+      { id: 'step_1', label: 'Send Connection Request', action_type: 'invitation', step_order: 1 },
+      { id: 'step_2', label: 'Wait for Acceptance', action_type: 'wait', step_order: 2, config: { until: 'connected' } },
+      { id: 'step_3', label: 'Send Message', action_type: 'message', step_order: 3 },
+    ],
+  },
+];
 
+export const directGetCampaignSequence = async (campaignId) => {
+  try {
+    const { data: campaign, error } = await supabaseDirect.from('campaigns').select('*').eq('id', campaignId).single();
+    if (error || !campaign) return { template: null, enrollments: [] };
 
+    let template = null;
+    const templateId = campaign.template_id || 'tpl_classic';
+    const { data: tData } = await supabaseDirect.from('campaign_templates').select('*').eq('id', templateId).single();
+    if (tData) {
+      template = tData;
+      const { data: steps } = await supabaseDirect
+        .from('campaign_template_steps')
+        .select('*')
+        .eq('template_id', templateId)
+        .eq('is_enabled', true)
+        .order('step_order');
+      template.steps = steps || [];
+    } else {
+      const fallback = FALLBACK_TEMPLATES.find(t => t.id === templateId) || FALLBACK_TEMPLATES[0];
+      template = { ...fallback };
+    }
 
+    const { data: enrollments } = await supabaseDirect
+      .from('campaign_enrollments')
+      .select('*, prospects(*)')
+      .eq('campaign_id', campaignId)
+      .order('created_at');
+
+    const formattedEnrollments = (enrollments || []).map(e => {
+      const p = e.prospects || {};
+      const customVars = p.custom_variables || {};
+      return {
+        id: e.id,
+        campaign_id: e.campaign_id,
+        prospect_id: e.prospect_id,
+        status: e.status || p.status || 'active',
+        created_at: e.created_at,
+        updated_at: e.updated_at,
+        current_step_order: p.current_step || (customVars.current_node_id ? 2 : 1),
+        next_step_at: customVars.next_scheduled_at || e.next_action_at || null,
+        profile_key: p.assigned_account || 'profile_1',
+        prospect: p
+      };
+    });
+
+    return { campaign, template, enrollments: formattedEnrollments };
+  } catch (e) {
+    console.warn('directGetCampaignSequence error:', e);
+  }
+  return { template: null, enrollments: [] };
+};
