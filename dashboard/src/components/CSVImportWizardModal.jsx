@@ -57,7 +57,7 @@ function autoGuessMapping(header) {
   return 'custom_var';
 }
 
-export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete, prospectLists = [], campaigns = [], defaultListId = '' }) {
+export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete, prospectLists = [], campaigns = [], defaultListId = '', initialFile = null }) {
   const [step, setStep] = useState(1); // 1: Upload, 2: Map Columns, 3: Import Settings
   const [file, setFile] = useState(null);
   const [csvHeaders, setCsvHeaders] = useState([]);
@@ -104,10 +104,8 @@ export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete
     return lines;
   };
 
-  const handleFileSelect = (e) => {
-    const selectedFile = e.target.files?.[0];
+  const processFile = React.useCallback((selectedFile) => {
     if (!selectedFile) return;
-
     setFile(selectedFile);
     const reader = new FileReader();
     reader.onload = (evt) => {
@@ -139,6 +137,19 @@ export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete
       }
     };
     reader.readAsText(selectedFile);
+  }, []);
+
+  React.useEffect(() => {
+    if (isOpen && initialFile) {
+      processFile(initialFile);
+    } else if (isOpen && !file) {
+      setStep(1);
+    }
+  }, [isOpen, initialFile, processFile]);
+
+  const handleFileSelect = (e) => {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) processFile(selectedFile);
   };
 
   const handleMappingChange = (header, targetField) => {

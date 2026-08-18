@@ -36,6 +36,44 @@ const TIMELINE_PRESETS = [
   { key: 'custom', label: 'Custom' },
 ];
 
+
+function getEventDate(prospect, eventType) {
+  if (eventType === 'invitation') {
+    if (prospect.connection_sent_date) return new Date(prospect.connection_sent_date);
+    const hist = prospect.custom_variables?.history || [];
+    const item = hist.find(h => h.node_type === 'send_invitation' && h.status === 'success');
+    if (item?.executed_at) return new Date(item.executed_at);
+    if (['Connection Requested', 'Sent'].includes(prospect.status)) return prospect.updated_at ? new Date(prospect.updated_at) : null;
+  }
+  if (eventType === 'acceptance') {
+    if (prospect.accepted_at) return new Date(prospect.accepted_at);
+    const hist = prospect.custom_variables?.history || [];
+    const item = hist.find(h => (h.node_type === 'check_acceptance' || h.node_type === 'connection_accepted') && h.status === 'success');
+    if (item?.executed_at) return new Date(item.executed_at);
+    if (['Connection Accepted', 'CONNECTED'].includes(prospect.status)) return prospect.updated_at ? new Date(prospect.updated_at) : null;
+  }
+  if (eventType === 'message') {
+    if (prospect.message_sent_date) return new Date(prospect.message_sent_date);
+    const hist = prospect.custom_variables?.history || [];
+    const item = hist.find(h => h.node_type === 'send_message' && h.status === 'success');
+    if (item?.executed_at) return new Date(item.executed_at);
+    if (['Initial Message Sent', 'Message Sent'].includes(prospect.status)) return prospect.updated_at ? new Date(prospect.updated_at) : null;
+  }
+  if (eventType === 'reply') {
+    const hist = prospect.custom_variables?.history || [];
+    const item = hist.find(h => (h.node_type === 'check_reply' || h.node_type === 'replied') && (h.status === 'replied' || h.status === 'success'));
+    if (item?.executed_at) return new Date(item.executed_at);
+    if (['Replied', 'replied'].includes(prospect.status)) return prospect.updated_at ? new Date(prospect.updated_at) : null;
+  }
+  if (eventType === 'visit') {
+    const hist = prospect.custom_variables?.history || [];
+    const item = hist.find(h => h.node_type === 'visit_profile' && h.status === 'success');
+    if (item?.executed_at) return new Date(item.executed_at);
+    if (['Visited', 'visited'].includes(prospect.status)) return prospect.updated_at ? new Date(prospect.updated_at) : null;
+  }
+  return null;
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
 
@@ -126,57 +164,33 @@ export default function Dashboard() {
 
     prospects.forEach(p => {
       // 1. Connection Invite Sent
-      if (p.connection_sent_date) {
-        const d = new Date(p.connection_sent_date);
-        if (d >= start && d <= end) {
-          invitesSent += 1;
-        }
+      const invDate = getEventDate(p, 'invitation');
+      if (invDate && invDate >= start && invDate <= end) {
+        invitesSent += 1;
       }
       
       // 2. Connection Invite Accepted
-      if (p.accepted_at) {
-        const d = new Date(p.accepted_at);
-        if (d >= start && d <= end) {
-          acceptedCount += 1;
-        }
+      const accDate = getEventDate(p, 'acceptance');
+      if (accDate && accDate >= start && accDate <= end) {
+        acceptedCount += 1;
       }
 
       // 3. Message Sent
-      if (p.message_sent_date) {
-        const d = new Date(p.message_sent_date);
-        if (d >= start && d <= end) {
-          messagesSent += 1;
-        }
+      const msgDate = getEventDate(p, 'message');
+      if (msgDate && msgDate >= start && msgDate <= end) {
+        messagesSent += 1;
       }
 
       // 4. Reply Received (must have campaign_id set!)
-      if (p.reply_date && p.campaign_id) {
-        const d = new Date(p.reply_date);
-        if (d >= start && d <= end) {
-          repliesCount += 1;
-        }
+      const repDate = getEventDate(p, 'reply');
+      if (repDate && p.campaign_id && repDate >= start && repDate <= end) {
+        repliesCount += 1;
       }
 
       // 5. Profile Visited
-      if (p.visited_date) {
-        const d = new Date(p.visited_date);
-        if (d >= start && d <= end) {
-          profileViews += 1;
-        }
-      } else if (p.status === 'Visited' && p.updated_at) {
-        // fallback
-        const d = new Date(p.updated_at);
-        if (d >= start && d <= end) {
-          profileViews += 1;
-        }
-      }
-      
-      // greetings/followed
-      if (p.followed_date) {
-        const d = new Date(p.followed_date);
-        if (d >= start && d <= end) {
-          greetingsCount += 1;
-        }
+      const visDate = getEventDate(p, 'visit');
+      if (visDate && visDate >= start && visDate <= end) {
+        profileViews += 1;
       }
     });
 

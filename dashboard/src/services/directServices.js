@@ -232,23 +232,54 @@ export const directGetNetworkingInvitations = async () => {
   let allItems = [];
   let cursor = null;
 
-  for (let page = 0; page < 50; page += 1) {
-    let path = `/users/invite/sent?account_id=${targetAccId}&limit=100`;
-    if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
-    
-    const { ok, data } = await unipileFetch(path);
-    if (!ok || !data) break;
-    
-    const items = data.items || data.invitations || (Array.isArray(data) ? data : []);
-    if (items.length > 0) {
-      allItems = allItems.concat(items);
+  try {
+    for (let page = 0; page < 50; page += 1) {
+      let path = `/users/invite/sent?account_id=${targetAccId}&limit=100`;
+      if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
+      
+      const { ok, data } = await unipileFetch(path);
+      if (!ok || !data) break;
+      
+      const items = data.items || data.invitations || (Array.isArray(data) ? data : []);
+      if (items.length > 0) {
+        allItems = allItems.concat(items);
+      }
+      
+      cursor = data.cursor;
+      if (!cursor || items.length === 0) break;
     }
-    
-    cursor = data.cursor;
-    if (!cursor || items.length === 0) break;
+  } catch (e) {
+    console.warn('Unipile fetch invitations error:', e);
   }
 
-  return { success: true, invitations: allItems };
+  if (allItems.length === 0) {
+    try {
+      const { data: pData } = await supabaseDirect
+        .from('prospects')
+        .select('*')
+        .or('status.eq.Connection Requested,status.eq.Sent,connection_sent_date.not.is.null')
+        .is('accepted_at', null);
+
+      if (pData && pData.length > 0) {
+        allItems = pData.map(p => ({
+          id: p.id,
+          invited_user: `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.name || 'LinkedIn Member',
+          invited_user_description: p.headline || p.job_title || p.company || 'Pending Invitation',
+          invited_user_profile_picture_url: p.avatar_url,
+          parsed_datetime: p.connection_sent_date || p.updated_at,
+          date: p.connection_sent_date ? new Date(p.connection_sent_date).toLocaleDateString() : 'Sent recently',
+        }));
+      }
+    } catch (e) {
+      console.warn('Supabase fallback invitations error:', e);
+    }
+  }
+
+  return {
+    success: true,
+    invitations: allItems,
+    total: allItems.length,
+  };
 };
 
 export const directCancelNetworkingInvitation = async (invitationId) => {
@@ -512,17 +543,22 @@ export const directGetProspects = async (params = {}) => {
 };
 
 export const directCreateProspect = async (data) => {
+  const firstName = (data.first_name || data.name?.split(' ')[0] || '').trim()
+    || (data.linkedin_url ? (data.linkedin_url.split('/in/')[1] || '').split('/')[0].replace(/[-_]/g, ' ') : '')
+    || 'Prospect';
+
   const payload = {
-    first_name: data.first_name || data.name?.split(' ')[0] || '',
-    last_name: data.last_name || data.name?.split(' ').slice(1).join(' ') || '',
-    name: data.name || `${data.first_name || ''} ${data.last_name || ''}`.trim(),
+    first_name: firstName,
+    last_name: (data.last_name || data.name?.split(' ').slice(1).join(' ') || '').trim(),
+    name: data.name || `${firstName} ${data.last_name || ''}`.trim(),
     headline: data.headline || '',
     company: data.company || '',
-    job_title: data.job_title || '',
+    job_title: data.job_title || data.title || '',
     email: data.email || '',
     linkedin_url: data.linkedin_url || '',
     status: data.status || 'Not Contacted',
     campaign_id: data.campaign_id || null,
+    list_id: data.list_id || null,
     assigned_account: data.assigned_account || 'profile_1',
     custom_variables: data.custom_variables || {},
     created_at: new Date().toISOString(),
