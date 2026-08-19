@@ -40,8 +40,13 @@ export default function SuperAdmin() {
         const accs = await dbGetUserAccounts();
         setUserAccounts(accs);
 
+        const distinctOrgs = new Set([
+          ...((accs || []).map(a => a.organization_id || a.organizations?.id || a.email).filter(Boolean)),
+          'org_superadmin_master'
+        ]);
+
         setStats({
-          totalOrgs: orgCount || 1,
+          totalOrgs: Math.max(orgCount || 0, distinctOrgs.size),
           totalProfiles: profCount || 1,
           totalProspects: prospectCount || 0,
           totalCampaigns: campaignCount || 0,

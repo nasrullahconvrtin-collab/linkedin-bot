@@ -115,9 +115,19 @@ export default function Settings() {
     setConnLoading(true);
     try {
       const res = await connectUnipileDirect({ username: directEmail, password: directPassword });
-      if (res.success) {
+      if (res.checkpoint_required) {
+        toast.error('2FA verification code required. Please connect via Profiles page to enter 2FA code.');
+      } else if (res.success) {
+        if (res.account_id) {
+          await directCreateProfile({
+            profile_key: `profile_${Date.now()}`,
+            display_name: directEmail.split('@')[0] || 'LinkedIn Profile',
+            unipile_account_id: res.account_id,
+            session_active: true,
+          });
+        }
         toast.success(`LinkedIn account connected successfully!`);
-        fetchProfiles();
+        await fetchProfiles();
       } else {
         toast.error(res.error || 'Direct connection failed');
       }
@@ -134,8 +144,16 @@ export default function Settings() {
     try {
       const res = await connectUnipileCookie(cookieVal);
       if (res.success) {
+        if (res.account_id) {
+          await directCreateProfile({
+            profile_key: `profile_${Date.now()}`,
+            display_name: 'LinkedIn Profile (Cookie)',
+            unipile_account_id: res.account_id,
+            session_active: true,
+          });
+        }
         toast.success('LinkedIn profile connected via session cookie!');
-        fetchProfiles();
+        await fetchProfiles();
       } else {
         toast.error(res.error || 'Cookie connection failed');
       }
