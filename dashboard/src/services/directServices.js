@@ -63,7 +63,24 @@ export const getActiveUserAccount = () => {
 };
 
 export const isSuperAdminUser = () => {
-  return localStorage.getItem('lf_is_superadmin') === '1';
+  if (typeof window === 'undefined' || !window.localStorage) return false;
+  
+  const isSuperFlag = localStorage.getItem('lf_is_superadmin') === '1';
+  if (!isSuperFlag) return false;
+
+  const userAcc = getActiveUserAccount();
+  if (userAcc) {
+    const email = (userAcc.email || '').toLowerCase();
+    const role = (userAcc.role || '').toLowerCase();
+    if (email === 'nasrullah.freelancer@gmail.com' || email === 'nasrullah.freelancer@gmail.con' || role === 'superadmin') {
+      return true;
+    }
+    // Purge stale super admin flag if current account is a normal member/user
+    localStorage.removeItem('lf_is_superadmin');
+    return false;
+  }
+
+  return true;
 };
 
 export const getActiveOrganizationId = () => {

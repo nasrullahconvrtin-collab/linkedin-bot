@@ -18,32 +18,51 @@ export default function Login() {
     setLoading(true);
     setError('');
 
-    // 1. Super-Admin credentials check
+    // Clear all previous session flags first to prevent session leakage
+    localStorage.removeItem('lf_auth');
+    localStorage.removeItem('lf_is_superadmin');
+    localStorage.removeItem('lf_user_account');
+    localStorage.removeItem('lf_account_disconnected');
+
     const cleanEmail = email.trim().toLowerCase();
     const isSuperAdminEmail = cleanEmail === 'nasrullah.freelancer@gmail.com' || cleanEmail === 'nasrullah.freelancer@gmail.con';
+
+    // 1. Super-Admin credentials check
     if (isSuperAdminEmail && pw === '786Nasr**') {
       localStorage.setItem('lf_auth', '1');
       localStorage.setItem('lf_is_superadmin', '1');
+      const superAcc = {
+        id: 'super_admin_master',
+        email: cleanEmail,
+        display_name: 'Super Admin',
+        organization_id: 'org_superadmin_master',
+        role: 'superadmin'
+      };
+      localStorage.setItem('lf_user_account', JSON.stringify(superAcc));
       toast.success('Signed in as Super-Admin!');
       nav('/super-admin');
       return;
     }
 
     // 2. Authenticate against Super-Admin created User Accounts
-    if (email.trim()) {
+    if (cleanEmail) {
       try {
         const { dbAuthenticateUser } = await import('../services/userAccountServices');
-        const authRes = await dbAuthenticateUser(email, pw);
+        const authRes = await dbAuthenticateUser(cleanEmail, pw);
         if (authRes.success && authRes.userAccount) {
           localStorage.setItem('lf_auth', '1');
-          localStorage.setItem('lf_user_account', JSON.stringify(authRes.userAccount));
-          if (authRes.userAccount.role === 'superadmin' || authRes.userAccount.role === 'owner') {
+          const uAcc = authRes.userAccount;
+          uAcc.organization_id = uAcc.organization_id || `org_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`;
+          localStorage.setItem('lf_user_account', JSON.stringify(uAcc));
+          if (uAcc.role === 'superadmin') {
             localStorage.setItem('lf_is_superadmin', '1');
+            toast.success(`Welcome back Super-Admin!`);
+            nav('/super-admin');
           } else {
             localStorage.removeItem('lf_is_superadmin');
+            toast.success(`Welcome back, ${uAcc.display_name || uAcc.email}!`);
+            nav('/');
           }
-          toast.success(`Welcome back, ${authRes.userAccount.display_name || authRes.userAccount.email}!`);
-          nav(authRes.userAccount.role === 'superadmin' ? '/super-admin' : '/');
           return;
         }
       } catch (err) {
@@ -52,7 +71,15 @@ export default function Login() {
 
       // 3. Fallback to Supabase Auth if email is entered
       try {
-        await loginWithEmail(email, pw);
+        await loginWithEmail(cleanEmail, pw);
+        localStorage.removeItem('lf_is_superadmin');
+        const userAcc = {
+          id: `usr_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`,
+          email: cleanEmail,
+          organization_id: `org_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`,
+          role: 'member'
+        };
+        localStorage.setItem('lf_user_account', JSON.stringify(userAcc));
         toast.success('Signed in successfully!');
         nav('/');
         return;
@@ -61,15 +88,29 @@ export default function Login() {
       }
     }
 
-    // 3. Fallback to password override check
+    // 4. Fallback to password override check
     const envPw = (import.meta.env.VITE_APP_PASSWORD || '').replace(/^﻿/, '').trim();
     const correct = localStorage.getItem('lf_pw_override') || envPw || 'admin123';
-    if (pw === '786Nasr**' || pw === correct || !pw) {
+    if (pw === '786Nasr**' || pw === correct) {
       localStorage.setItem('lf_auth', '1');
+      if (pw === '786Nasr**' && isSuperAdminEmail) {
+        localStorage.setItem('lf_is_superadmin', '1');
+        nav('/super-admin');
+      } else {
+        localStorage.removeItem('lf_is_superadmin');
+        const userEmail = cleanEmail || 'user@linkedflow.com';
+        const demoUser = {
+          id: `usr_${Date.now()}`,
+          email: userEmail,
+          organization_id: `org_${userEmail.replace(/[^a-z0-9]/g, '_')}`,
+          role: 'member'
+        };
+        localStorage.setItem('lf_user_account', JSON.stringify(demoUser));
+        nav('/');
+      }
       toast.success('Logged in!');
-      nav('/');
     } else {
-      setError('Incorrect password or credentials.');
+      setError('Incorrect password or email. Please check your credentials.');
     }
     setLoading(false);
   };

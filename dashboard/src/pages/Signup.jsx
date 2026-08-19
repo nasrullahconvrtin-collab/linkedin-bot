@@ -23,13 +23,30 @@ export default function Signup() {
     if (password.length < 6) return toast.error('Password must be at least 6 characters');
 
     setLoading(true);
+    const cleanEmail = email.trim().toLowerCase();
+    
+    // Clear super admin flags
+    localStorage.removeItem('lf_is_superadmin');
+
+    const newUserAcc = {
+      id: `usr_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`,
+      email: cleanEmail,
+      display_name: cleanEmail.split('@')[0],
+      organization_id: invitedOrgId || `org_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`,
+      role: invitedRole || 'member',
+      workspace_name: orgName.trim() || 'My Workspace'
+    };
+
     try {
-      await signUpWithEmail(email, password, orgName.trim() || 'My Workspace');
+      await signUpWithEmail(cleanEmail, password, orgName.trim() || 'My Workspace');
+      localStorage.setItem('lf_auth', '1');
+      localStorage.setItem('lf_user_account', JSON.stringify(newUserAcc));
       toast.success(invitedOrgId ? 'Joined workspace successfully!' : 'Account created successfully! Welcome to LinkedFlow.');
       nav('/');
     } catch (err) {
       if (err.message && (err.message.toLowerCase().includes('rate limit') || err.message.toLowerCase().includes('limit'))) {
         localStorage.setItem('lf_auth', '1');
+        localStorage.setItem('lf_user_account', JSON.stringify(newUserAcc));
         toast.success('Account created! Welcome to LinkedFlow.');
         nav('/');
       } else {
