@@ -224,15 +224,14 @@ export default function SuperAdmin() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-[#9ca3af] mb-1">Role & Permissions</label>
+              <label className="block text-xs font-semibold text-[#9ca3af] mb-1">Role & Access Level</label>
               <select
                 value={role}
                 onChange={e => setRole(e.target.value)}
                 className="w-full bg-[#111111] border border-[#2a2a2a] rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-[#6366f1]"
               >
-                <option value="owner">Workspace Owner (Full Access)</option>
-                <option value="admin">Admin (Manage Profiles)</option>
-                <option value="member">Member (Run Campaigns)</option>
+                <option value="superadmin">Super-Admin (Full Platform & Team Access)</option>
+                <option value="member">Member (Campaigns & Outreach Rep)</option>
               </select>
             </div>
 

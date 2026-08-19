@@ -98,6 +98,14 @@ function ThemedToaster() {
   );
 }
 
+function RequireSuperAdmin({ children }) {
+  const isSuperAdmin = localStorage.getItem('lf_is_superadmin') === '1';
+  if (!isSuperAdmin) {
+    return <Navigate to="/" replace />;
+  }
+  return children;
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
@@ -127,8 +135,8 @@ export default function App() {
                       <Route path="/replies font"   element={<Navigate to="/replies" replace />} />
                       <Route path="/replies"        element={<Replies />} />
                       <Route path="/profiles"       element={<Profiles />} />
-                      <Route path="/team"           element={<TeamSettings />} />
-                      <Route path="/super-admin"    element={<SuperAdmin />} />
+                      <Route path="/team"           element={<RequireSuperAdmin><TeamSettings /></RequireSuperAdmin>} />
+                      <Route path="/super-admin"    element={<RequireSuperAdmin><SuperAdmin /></RequireSuperAdmin>} />
                       <Route path="/settings"       element={<Settings />} />
                       <Route path="*"               element={<Navigate to="/" replace />} />
                     </Routes>

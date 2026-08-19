@@ -36,8 +36,13 @@ export default function Login() {
         if (authRes.success && authRes.userAccount) {
           localStorage.setItem('lf_auth', '1');
           localStorage.setItem('lf_user_account', JSON.stringify(authRes.userAccount));
+          if (authRes.userAccount.role === 'superadmin' || authRes.userAccount.role === 'owner') {
+            localStorage.setItem('lf_is_superadmin', '1');
+          } else {
+            localStorage.removeItem('lf_is_superadmin');
+          }
           toast.success(`Welcome back, ${authRes.userAccount.display_name || authRes.userAccount.email}!`);
-          nav('/');
+          nav(authRes.userAccount.role === 'superadmin' ? '/super-admin' : '/');
           return;
         }
       } catch (err) {
