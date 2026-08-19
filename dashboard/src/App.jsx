@@ -66,6 +66,8 @@ import Inbox          from './pages/Inbox';
 import Replies        from './pages/Replies';
 import Profiles       from './pages/Profiles';
 import Settings       from './pages/Settings';
+import TeamSettings   from './pages/TeamSettings';
+import SuperAdmin     from './pages/SuperAdmin';
 import { AuthProvider } from './context/AuthContext';
 
 function RequireAuth({ children }) {
@@ -125,6 +127,8 @@ export default function App() {
                       <Route path="/replies font"   element={<Navigate to="/replies" replace />} />
                       <Route path="/replies"        element={<Replies />} />
                       <Route path="/profiles"       element={<Profiles />} />
+                      <Route path="/team"           element={<TeamSettings />} />
+                      <Route path="/super-admin"    element={<SuperAdmin />} />
                       <Route path="/settings"       element={<Settings />} />
                       <Route path="*"               element={<Navigate to="/" replace />} />
                     </Routes>

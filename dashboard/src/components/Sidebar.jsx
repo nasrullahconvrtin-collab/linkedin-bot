@@ -193,6 +193,38 @@ export default function Sidebar({ collapsed = false, onToggle }) {
           )}
         </div>
 
+        {/* Team Settings */}
+        <NavLink
+          to="/team"
+          title={collapsed ? 'Team & Workspace' : undefined}
+          className={({ isActive }) =>
+            `nav-item relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+              isActive
+                ? 'active bg-[#6366f1] text-white shadow-lg shadow-indigo-500/20'
+                : 'text-[#9ca3af] hover:text-white hover:bg-[#1a1a1a]'
+            }`
+          }
+        >
+          <UserCheck size={17} />
+          <span className={labelClass}>Team & Roles</span>
+        </NavLink>
+
+        {/* Super-Admin */}
+        <NavLink
+          to="/super-admin"
+          title={collapsed ? 'Super-Admin' : undefined}
+          className={({ isActive }) =>
+            `nav-item relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+              isActive
+                ? 'active bg-[#6366f1] text-white shadow-lg shadow-indigo-500/20'
+                : 'text-[#9ca3af] hover:text-white hover:bg-[#1a1a1a]'
+            }`
+          }
+        >
+          <Settings size={17} />
+          <span className={labelClass}>Super-Admin</span>
+        </NavLink>
+
         {/* Settings */}
         <NavLink
           to="/settings"
