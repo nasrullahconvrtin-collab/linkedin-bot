@@ -486,8 +486,9 @@ export default function Profiles() {
     }
   };
 
-  const isAccountConnected = !getStoredDisconnectedFlag();
-  const profileDisplayName = (accountInfo?.name && accountInfo.name !== 'Maryam Ansar' ? accountInfo.name : null) || (profiles[0] && profiles[0].display_name !== 'Maryam Ansar' ? profiles[0].display_name : null) || 'Fatima Maqsood';
+  const isAccountConnected = Boolean(profiles && profiles.length > 0 && !getStoredDisconnectedFlag());
+  const profileDisplayName = accountInfo?.name || profiles[0]?.display_name || 'LinkedIn Profile';
+  const connectionStatus = accountInfo?.status || (isAccountConnected ? 'CONNECTED' : 'DISCONNECTED');
 
   const tabs = [
     { id: 'network', label: 'Network & Connections' },
@@ -502,15 +503,27 @@ export default function Profiles() {
         <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-6 mb-6 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-xl">
           <div className="flex items-center gap-5">
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#6366f1] via-indigo-600 to-purple-600 text-white font-bold text-2xl flex items-center justify-center shadow-lg">
-              {profileDisplayName ? profileDisplayName[0] : 'F'}
+              {profileDisplayName ? profileDisplayName[0].toUpperCase() : 'L'}
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-3">
                 <h1 className="text-white text-2xl font-extrabold">{profileDisplayName}</h1>
-                <span className="text-xs px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  LinkedIn Connected
-                </span>
+                {connectionStatus === 'CONNECTED' || connectionStatus === 'OK' ? (
+                  <span className="text-xs px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    LinkedIn Connected
+                  </span>
+                ) : connectionStatus === 'RECONNECT_REQUIRED' || connectionStatus === 'EXPIRED' ? (
+                  <span className="text-xs px-3 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                    Reconnection Required
+                  </span>
+                ) : (
+                  <span className="text-xs px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    LinkedIn Connected
+                  </span>
+                )}
                 <span className="text-xs px-3.5 py-1 rounded-full bg-[#6366f1]/10 text-[#6366f1] border border-[#6366f1]/20 font-bold flex items-center gap-1.5 shadow-sm">
                   <Users size={14} />
                   {connections.length} 1st-Degree Connections

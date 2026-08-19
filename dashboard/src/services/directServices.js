@@ -4,10 +4,8 @@ const SUPABASE_URL = 'https://mjwganpjawthnowemabt.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1qd2dhbnBqYXd0aG5vd2VtYWJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzMDczMTUsImV4cCI6MjEwMTg4MzMxNX0.OwKeHoH2DH-jS7-_XRf6Vkx4bNZPKgbL9WOr5oSd27c';
 const UNIPILE_API_KEY = '6SlhX8Ii.R7wP5y2dLTREmrXKCTpnoEg3clwHKT9wZtIc++MRAkg=';
 const UNIPILE_BASE_URL = 'https://api20.unipile.com:15032/api/v1';
-const DEFAULT_ACCOUNT_ID = 'zXneBg9WRZ-m7iFuKULo1Q';
 
 export const supabaseDirect = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
 const getUnipileBaseUrl = () => {
   if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
     return '/api/unipile';
@@ -115,7 +113,6 @@ export const directGetProfiles = async () => {
 
     if (!isSuper) {
       if (orgId && userAcc?.email) {
-        // OR filter: match rows with this org_id OR this user_email (catches old rows saved without org_id)
         query = query.or(`organization_id.eq.${orgId},user_email.eq.${userAcc.email.toLowerCase()}`);
       } else if (orgId) {
         query = query.eq('organization_id', orgId);
@@ -128,23 +125,10 @@ export const directGetProfiles = async () => {
 
     const { data, error } = await query;
     if (!error && data && data.length > 0) {
-      activeAccountId = data[0].unipile_account_id || activeAccountId;
-
-      // Auto-backfill: if any row is missing organization_id, stamp it now so future queries find it
-      if (orgId && userAcc?.email) {
-        const rowsMissingOrg = data.filter(p => !p.organization_id);
-        if (rowsMissingOrg.length > 0) {
-          await supabaseDirect.from('profiles')
-            .update({ organization_id: orgId, user_email: userAcc.email.toLowerCase() })
-            .in('profile_key', rowsMissingOrg.map(p => p.profile_key))
-            .catch(() => {});
-        }
-      }
-
       return data.map(p => ({
-        profile_key: p.profile_key || p.id || 'profile_1',
+        profile_key: p.profile_key || p.id || `prof_${p.id}`,
         display_name: p.display_name || 'LinkedIn Profile',
-        unipile_account_id: p.unipile_account_id || activeAccountId,
+        unipile_account_id: p.unipile_account_id || null,
         session_active: p.session_active ?? true,
         enabled: p.enabled ?? true,
         daily_sent: p.daily_sent || 0,
@@ -154,21 +138,7 @@ export const directGetProfiles = async () => {
     console.warn('Supabase fetch error:', e);
   }
 
-  // Super-admin master demo fallback ONLY for super admin
-  if (isSuper) {
-    return [
-      {
-        profile_key: 'profile_1',
-        display_name: 'Fatima Maqsood',
-        unipile_account_id: DEFAULT_ACCOUNT_ID,
-        session_active: true,
-        enabled: true,
-        daily_sent: 0,
-      },
-    ];
-  }
-
-  // Normal user accounts start 100% EMPTY until they connect their own LinkedIn account
+  // Return empty array if no profiles exist — NO demo data fallbacks
   return [];
 };
 
@@ -245,19 +215,13 @@ export const directDisconnectProfile = async () => {
   return { success: true };
 };
 
-export const directGetUnipileAccountInfo = async (accountId) => {
+export const directGetUnipileAccountInfo = async (accountId = null) => {
   if (getStoredDisconnectedFlag()) {
     return null;
   }
 
-  const isSuper = isSuperAdminUser();
   const userProfiles = await directGetProfiles();
-
-  if (!isSuper && (!userProfiles || userProfiles.length === 0)) {
-    return null;
-  }
-
-  const targetAccId = accountId || userProfiles[0]?.unipile_account_id || (isSuper ? DEFAULT_ACCOUNT_ID : null);
+  const targetAccId = accountId || userProfiles[0]?.unipile_account_id;
   if (!targetAccId) return null;
 
   try {
@@ -271,40 +235,23 @@ export const directGetUnipileAccountInfo = async (accountId) => {
         username: imParam.publicIdentifier || imParam.username || realName || 'connected_user',
         provider: data.type || 'LINKEDIN',
         status: data.sources?.[0]?.status || 'CONNECTED',
-        headline: imParam.headline || 'LinkedIn Outreach Account',
+        headline: imParam.headline || 'LinkedIn Outreach Profile',
       };
     }
   } catch (e) {
     console.warn('Fetch account error:', e);
   }
 
-  if (isSuper) {
-    return {
-      id: DEFAULT_ACCOUNT_ID,
-      name: 'Fatima Maqsood',
-      username: 'fatima-maqsood',
-      provider: 'LINKEDIN',
-      status: 'CONNECTED',
-      headline: 'LinkedIn Outreach Profile',
-    };
-  }
-
   return null;
 };
 
-// Fetch ALL 1st-degree connections using cursor pagination loop
 export const directGetNetworkingConnections = async () => {
   if (getStoredDisconnectedFlag()) {
     return { success: true, connections: [], total: 0 };
   }
 
-  const isSuper = isSuperAdminUser();
   const userProfiles = await directGetProfiles();
-  if (!isSuper && (!userProfiles || userProfiles.length === 0)) {
-    return { success: true, connections: [], total: 0 };
-  }
-
-  const targetAccId = userProfiles[0]?.unipile_account_id || (isSuper ? DEFAULT_ACCOUNT_ID : null);
+  const targetAccId = userProfiles[0]?.unipile_account_id;
   if (!targetAccId) {
     return { success: true, connections: [], total: 0 };
   }
@@ -335,19 +282,13 @@ export const directGetNetworkingConnections = async () => {
   };
 };
 
-// Fetch ALL sent pending invitations via /users/invite/sent
 export const directGetNetworkingInvitations = async () => {
   if (getStoredDisconnectedFlag()) {
     return { success: true, invitations: [], total: 0 };
   }
 
-  const isSuper = isSuperAdminUser();
   const userProfiles = await directGetProfiles();
-  if (!isSuper && (!userProfiles || userProfiles.length === 0)) {
-    return { success: true, invitations: [], total: 0 };
-  }
-
-  const targetAccId = userProfiles[0]?.unipile_account_id || (isSuper ? DEFAULT_ACCOUNT_ID : null);
+  const targetAccId = userProfiles[0]?.unipile_account_id;
   if (!targetAccId) {
     return { success: true, invitations: [], total: 0 };
   }
@@ -383,7 +324,11 @@ export const directGetNetworkingInvitations = async () => {
 };
 
 export const directCancelNetworkingInvitation = async (invitationId) => {
-  const { ok } = await unipileFetch(`/users/invite/sent/${invitationId}?account_id=${DEFAULT_ACCOUNT_ID}`, {
+  const userProfiles = await directGetProfiles();
+  const targetAccId = userProfiles[0]?.unipile_account_id;
+  if (!targetAccId) return { success: false };
+
+  const { ok } = await unipileFetch(`/users/invite/sent/${invitationId}?account_id=${targetAccId}`, {
     method: 'DELETE',
   });
   return { success: ok };
@@ -1202,7 +1147,10 @@ const getLinkedinId = (prospect) => {
 export const directResolveLinkedinProfile = async (prospect) => {
   const targetId = getLinkedinId(prospect);
   if (!targetId) return null;
-  const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(targetId)}?account_id=${DEFAULT_ACCOUNT_ID}`);
+  const userProfiles = await directGetProfiles();
+  const accountId = userProfiles?.[0]?.unipile_account_id;
+  if (!accountId) return null;
+  const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(targetId)}?account_id=${accountId}`);
   if (ok && data) {
     try {
       await supabaseDirect.from('prospects').update({
@@ -1229,21 +1177,31 @@ export const directVisitProfile = async (prospect) => {
 export const directFollowProfile = async (prospect) => {
   const targetId = getLinkedinId(prospect);
   if (!targetId) return { success: true };
-  await unipileFetch(`/users/${targetId}?account_id=${DEFAULT_ACCOUNT_ID}`);
+  const userProfiles = await directGetProfiles();
+  const accountId = userProfiles?.[0]?.unipile_account_id;
+  if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
+  await unipileFetch(`/users/${targetId}?account_id=${accountId}`);
   return { success: true };
 };
 
 export const directEndorseProfile = async (prospect) => {
   const targetId = getLinkedinId(prospect);
   if (!targetId) return { success: true };
-  await unipileFetch(`/users/${targetId}?account_id=${DEFAULT_ACCOUNT_ID}`);
+  const userProfiles = await directGetProfiles();
+  const accountId = userProfiles?.[0]?.unipile_account_id;
+  if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
+  await unipileFetch(`/users/${targetId}?account_id=${accountId}`);
   return { success: true };
 };
 
 export const directSendUnipileConnectionInvite = async (prospect, message = '') => {
   const provider_id = getLinkedinId(prospect);
+  const userProfiles = await directGetProfiles();
+  const accountId = userProfiles?.[0]?.unipile_account_id;
+  if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
+
   const payload = {
-    account_id: DEFAULT_ACCOUNT_ID,
+    account_id: accountId,
     provider_id,
     message: message || '',
   };
@@ -1270,8 +1228,12 @@ export const directSendUnipileConnectionInvite = async (prospect, message = '') 
 
 export const directSendUnipileChatMessage = async (prospect, text = '') => {
   const recipientId = getLinkedinId(prospect);
+  const userProfiles = await directGetProfiles();
+  const accountId = userProfiles?.[0]?.unipile_account_id;
+  if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
+
   const payload = {
-    account_id: DEFAULT_ACCOUNT_ID,
+    account_id: accountId,
     attendees_ids: [recipientId],
     text: text || prospect.initial_message || 'Hello!',
   };
@@ -1297,8 +1259,12 @@ export const directSendUnipileChatMessage = async (prospect, text = '') => {
 
 export const directSendUnipileInMail = async (prospect, subject = '', text = '') => {
   const recipientId = getLinkedinId(prospect);
+  const userProfiles = await directGetProfiles();
+  const accountId = userProfiles?.[0]?.unipile_account_id;
+  if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
+
   const payload = {
-    account_id: DEFAULT_ACCOUNT_ID,
+    account_id: accountId,
     attendees_ids: [recipientId],
     text: text || 'Hello!',
     subject: subject || 'Introduction',
@@ -1312,11 +1278,10 @@ export const directSendUnipileInMail = async (prospect, subject = '', text = '')
 };
 
 export const directGetUnipileChats = async (limit = 50) => {
-  // Always look up the current user's connected account ID fresh — never rely on stale module var
   const userProfiles = await directGetProfiles();
-  const accountId = userProfiles?.[0]?.unipile_account_id || (isSuperAdminUser() ? DEFAULT_ACCOUNT_ID : null);
+  const accountId = userProfiles?.[0]?.unipile_account_id;
   if (!accountId) {
-    return { success: false, chats: [] };
+    return { success: false, chats: [], error: 'NO_CONNECTED_ACCOUNT' };
   }
   const { ok, data } = await unipileFetch(`/chats?account_id=${accountId}&limit=${limit}`);
   if (ok && data) {
@@ -1328,8 +1293,8 @@ export const directGetUnipileChats = async (limit = 50) => {
 export const directGetChatMessages = async (chatId, limit = 50) => {
   if (!chatId) return { success: false, messages: [] };
   const userProfiles = await directGetProfiles();
-  const accountId = userProfiles?.[0]?.unipile_account_id || (isSuperAdminUser() ? DEFAULT_ACCOUNT_ID : null);
-  if (!accountId) return { success: false, messages: [] };
+  const accountId = userProfiles?.[0]?.unipile_account_id;
+  if (!accountId) return { success: false, messages: [], error: 'NO_CONNECTED_ACCOUNT' };
   const { ok, data } = await unipileFetch(`/chats/${encodeURIComponent(chatId)}/messages?account_id=${accountId}&limit=${limit}`);
   if (ok && data) {
     return { success: true, messages: data.items || data.messages || [] };
@@ -1341,7 +1306,8 @@ export const directGetUnipileUserProfile = async (identifier) => {
   if (!identifier) return { success: false, profile: null };
   const cleanId = String(identifier).trim().replace(/^https?:\/\/(www\.)?linkedin\.com\/in\//i, '').replace(/\/$/, '');
   const userProfiles = await directGetProfiles();
-  const accountId = userProfiles?.[0]?.unipile_account_id || DEFAULT_ACCOUNT_ID;
+  const accountId = userProfiles?.[0]?.unipile_account_id;
+  if (!accountId) return { success: false, profile: null };
   const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(cleanId)}?account_id=${accountId}`);
   if (ok && data) {
     return { success: true, profile: data };
@@ -1357,12 +1323,16 @@ export const directCheckProspectReplied = async (prospect) => {
   const recipientId = getLinkedinId(prospect);
   if (!recipientId) return { success: true, replied: false };
 
-  const { ok, data } = await unipileFetch(`/chats?account_id=${DEFAULT_ACCOUNT_ID}&attendees_ids=${encodeURIComponent(recipientId)}`);
+  const userProfiles = await directGetProfiles();
+  const accountId = userProfiles?.[0]?.unipile_account_id;
+  if (!accountId) return { success: true, replied: false };
+
+  const { ok, data } = await unipileFetch(`/chats?account_id=${accountId}&attendees_ids=${encodeURIComponent(recipientId)}`);
   if (ok && data && Array.isArray(data.items) && data.items.length > 0) {
     const chat = data.items[0];
     if (chat && chat.id) {
       // Fetch messages history
-      const { ok: msgOk, data: msgData } = await unipileFetch(`/chats/${encodeURIComponent(chat.id)}/messages?account_id=${DEFAULT_ACCOUNT_ID}&limit=100`);
+      const { ok: msgOk, data: msgData } = await unipileFetch(`/chats/${encodeURIComponent(chat.id)}/messages?account_id=${accountId}&limit=100`);
       if (msgOk && msgData && Array.isArray(msgData.items)) {
         // Sort messages chronologically (oldest first)
         const messages = [...msgData.items].sort((a, b) => {
@@ -1372,28 +1342,25 @@ export const directCheckProspectReplied = async (prospect) => {
         });
 
         // Find the index of our first message to establish the baseline
-        const firstSentMsgIdx = messages.findIndex(m => m.sender_id === DEFAULT_ACCOUNT_ID);
+        const firstSentMsgIdx = messages.findIndex(m => m.sender_id === accountId);
 
         let firstReply = null;
         if (firstSentMsgIdx !== -1) {
           const firstSentTimestamp = new Date(messages[firstSentMsgIdx].timestamp || messages[firstSentMsgIdx].created_at || 0).getTime();
-          // Find first message from attendee sent AFTER our first message
           firstReply = messages.find((m, idx) => {
             if (idx <= firstSentMsgIdx) return false;
-            if (m.sender_id === DEFAULT_ACCOUNT_ID) return false;
+            if (m.sender_id === accountId) return false;
             const msgTime = new Date(m.timestamp || m.created_at || 0).getTime();
             return msgTime > firstSentTimestamp;
           });
         } else {
-          // If we haven't sent any messages, the first message from them is the reply
-          firstReply = messages.find(m => m.sender_id !== DEFAULT_ACCOUNT_ID);
+          firstReply = messages.find(m => m.sender_id !== accountId);
         }
 
         if (firstReply) {
           const replyText = firstReply.text || firstReply.message || 'Incoming message';
           const replyDateStr = firstReply.timestamp || firstReply.created_at || new Date().toISOString();
 
-          // Save the FIRST reply to the database
           await supabaseDirect.from('prospects').update({
             status: 'Replied',
             reply_date: replyDateStr,

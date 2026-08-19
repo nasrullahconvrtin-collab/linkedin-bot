@@ -87,20 +87,36 @@ export default function Inbox() {
   const loadConversations = useCallback(async () => {
     setLoadingList(true);
     try {
-      // Fetch user's profiles first
-      const { directGetProfiles, directGetProspects } = await import('../services/directServices');
+      const {
+        directGetProfiles,
+        directGetProspects,
+        directGetUnipileChats,
+        isSuperAdminUser,
+        getActiveOrganizationId,
+        getActiveUserAccount,
+      } = await import('../services/directServices');
+
       const userProfiles = await directGetProfiles();
+      const userAcc = getActiveUserAccount();
+      const orgId = getActiveOrganizationId();
+
       if (!userProfiles || userProfiles.length === 0) {
+        console.log('[Tenant Diagnostic]', {
+          userEmail: userAcc?.email || 'none',
+          orgId: orgId || 'none',
+          unipileAccountId: 'none',
+          unipileStatus: 'NO_CONNECTED_PROFILE',
+          loadedChats: 0,
+        });
         setChats([]);
         setLoadingList(false);
         return;
       }
 
+      const unipileAccId = userProfiles[0]?.unipile_account_id || 'none';
+
       // Fetch Supabase campaigns map - FILTERED by current user's org
-      const { isSuperAdminUser, getActiveOrganizationId, getActiveUserAccount } = await import('../services/directServices');
       const isSuper = isSuperAdminUser();
-      const orgId = getActiveOrganizationId();
-      const userAcc = getActiveUserAccount();
       let cQuery = supabaseDirect.from('campaigns').select('id, name');
       if (!isSuper) {
         if (orgId) cQuery = cQuery.eq('organization_id', orgId);
@@ -129,9 +145,16 @@ export default function Inbox() {
       const chatRes = await directGetUnipileChats(50);
       let liveChats = chatRes.chats || [];
 
+      console.log('[Tenant Diagnostic]', {
+        userEmail: userAcc?.email || 'none',
+        orgId: orgId || 'none',
+        unipileAccountId: unipileAccId,
+        unipileStatus: chatRes.error || (chatRes.success ? 'CONNECTED' : 'FAILED'),
+        loadedChats: liveChats.length,
+      });
+
       // Combine Unipile chats with Supabase prospects
       if (liveChats.length === 0 && (pData || []).length > 0) {
-        // Fallback: convert prospects to chat list items if Unipile chats array is empty
         liveChats = (pData || []).map(p => ({
           id: p.id,
           name: p.name || 'LinkedIn Member',

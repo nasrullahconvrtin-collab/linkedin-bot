@@ -150,20 +150,13 @@ export default function Settings() {
     if (!existingAccId.trim()) return toast.error('Account ID is required');
     setConnLoading(true);
     try {
-      await supabaseDirect.from('profiles').upsert([{
-        profile_key: 'profile_1',
-        display_name: displayName || 'Fatima Maqsood',
-        unipile_account_id: existingAccId,
-        session_active: true,
-        updated_at: new Date().toISOString(),
-      }]);
-      await createProfile({
-        profile_key: 'profile_1',
-        display_name: displayName || 'Fatima Maqsood',
+      await directCreateProfile({
+        profile_key: `prof_${Date.now()}`,
+        display_name: displayName || 'LinkedIn Profile',
         unipile_account_id: existingAccId,
         session_active: true,
       });
-      toast.success(`LinkedIn Account (${displayName || 'Fatima Maqsood'}) connected & saved!`);
+      toast.success(`LinkedIn Account (${displayName || 'LinkedIn Profile'}) connected & saved!`);
       await fetchProfiles();
     } catch (err) {
       toast.error(err.message);
@@ -246,7 +239,7 @@ export default function Settings() {
             {isConnected && (
               <span className="text-xs px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                Profile Connected ({activeProfile?.display_name || 'Fatima Maqsood'})
+                Profile Connected ({activeProfile?.display_name || 'LinkedIn Profile'})
               </span>
             )}
           </div>
@@ -256,7 +249,7 @@ export default function Settings() {
               <div className="flex items-center gap-3">
                 <CheckCircle className="text-emerald-400" size={24} />
                 <div>
-                  <p className="text-white font-bold text-sm">{activeProfile?.display_name || 'Fatima Maqsood'}</p>
+                  <p className="text-white font-bold text-sm">{activeProfile?.display_name || 'LinkedIn Profile'}</p>
                   <p className="text-emerald-400/80 text-xs mt-0.5">LinkedIn Profile Connected and Active</p>
                 </div>
               </div>
@@ -390,7 +383,7 @@ export default function Settings() {
                         type="text"
                         value={displayName}
                         onChange={e => setDisplayName(e.target.value)}
-                        placeholder="Fatima Maqsood"
+                        placeholder="LinkedIn Profile"
                         className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-[#6366f1]"
                       />
                     </div>
