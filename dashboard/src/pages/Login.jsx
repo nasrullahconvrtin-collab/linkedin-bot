@@ -19,7 +19,8 @@ export default function Login() {
     setError('');
 
     // 1. Super-Admin credentials check
-    const isSuperAdminEmail = email.trim().toLowerCase() === 'nasrullah.freelancer@gmail.com';
+    const cleanEmail = email.trim().toLowerCase();
+    const isSuperAdminEmail = cleanEmail === 'nasrullah.freelancer@gmail.com' || cleanEmail === 'nasrullah.freelancer@gmail.con';
     if (isSuperAdminEmail && pw === '786Nasr**') {
       localStorage.setItem('lf_auth', '1');
       localStorage.setItem('lf_is_superadmin', '1');
