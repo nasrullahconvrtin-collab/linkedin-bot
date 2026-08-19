@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Users, Mail, UserPlus, Shield, Trash2, CheckCircle, Clock, Loader2 } from 'lucide-react';
+import { Users, Mail, UserPlus, Shield, Trash2, CheckCircle, Clock, Loader2, Copy } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
