@@ -1293,6 +1293,17 @@ export const directSaveAppSettings = async (newSettings) => {
   } catch {}
   try {
     await supabaseDirect.from('profiles').update({ settings: merged }).eq('profile_key', 'profile_1');
+    await supabaseDirect.from('account_safety_settings').upsert([{
+      max_daily_invites: Number(merged.daily_connection_limit || 25),
+      max_daily_messages: Number(merged.daily_message_limit || 50),
+      max_daily_profile_visits: Number(merged.daily_visit_limit || 80),
+      jitter_delay_min_minutes: 4,
+      jitter_delay_max_minutes: 12,
+      working_hours_start: merged.start_time || '09:00',
+      working_hours_end: merged.end_time || '18:00',
+      timezone: merged.timezone || 'UTC',
+      updated_at: new Date().toISOString()
+    }]);
   } catch (e) {
     console.warn('Failed to save settings to Supabase:', e);
   }

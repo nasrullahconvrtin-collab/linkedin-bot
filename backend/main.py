@@ -104,11 +104,18 @@ async def _background_scheduler_loop():
 
             # ── Flow engine (every 10 min) ──────────────────────────────────
             last_flow = last_run.get("flow")
-            if not last_flow or (now - last_flow).total_seconds() >= FLOW_INTERVAL_SECS:
+            safety = db.db_get_safety_settings()
+            
+            start_h = int(safety.get("working_hours_start", "09:00").split(":")[0])
+            end_h = int(safety.get("working_hours_end", "18:00").split(":")[0])
+            is_in_working_hours = start_h <= now.hour < end_h
+
+            if is_in_working_hours and (not last_flow or (now - last_flow).total_seconds() >= FLOW_INTERVAL_SECS):
                 try:
                     result = await run_flow()
                     if result.queued:
-                        logger.info("[scheduler] run_flow → queued=%d", result.queued)
+                        logger.info("[scheduler] run_flow → queued=%d (safety limits: max_invites=%s, max_messages=%s)",
+                                    result.queued, safety.get("max_daily_invites"), safety.get("max_daily_messages"))
                 except Exception as exc:
                     logger.error("[scheduler] run_flow error: %s", exc)
                 last_run["flow"] = now

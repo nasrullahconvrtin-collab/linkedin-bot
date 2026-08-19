@@ -24,6 +24,57 @@ SUPABASE_KEY: str = os.environ.get("SUPABASE_KEY", "sb_publishable_tkC_z_PpNUMHx
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
+# ── Account Safety & Rate Limits Settings ──────────────────────────────────────
+
+DEFAULT_SAFETY_SETTINGS = {
+    "max_daily_invites": 25,
+    "max_daily_messages": 50,
+    "max_daily_profile_visits": 80,
+    "jitter_delay_min_minutes": 4,
+    "jitter_delay_max_minutes": 12,
+    "working_hours_start": "09:00",
+    "working_hours_end": "18:00",
+    "timezone": "UTC",
+}
+
+def db_get_safety_settings(org_id: str | None = None) -> dict:
+    """Fetch safety settings for an organization (or global fallback)."""
+    try:
+        query = supabase.table("account_safety_settings").select("*")
+        if org_id:
+            query = query.eq("organization_id", org_id)
+        result = query.limit(1).execute()
+        if result.data and len(result.data) > 0:
+            return {**DEFAULT_SAFETY_SETTINGS, **result.data[0]}
+    except Exception as exc:
+        logger.warning("db_get_safety_settings exception, using default limits: %s", exc)
+    return dict(DEFAULT_SAFETY_SETTINGS)
+
+def db_update_safety_settings(settings: dict, org_id: str | None = None) -> dict:
+    """Upsert user safety settings into account_safety_settings table."""
+    try:
+        payload = {
+            "max_daily_invites": int(settings.get("max_daily_invites", 25)),
+            "max_daily_messages": int(settings.get("max_daily_messages", 50)),
+            "max_daily_profile_visits": int(settings.get("max_daily_profile_visits", 80)),
+            "jitter_delay_min_minutes": int(settings.get("jitter_delay_min_minutes", 4)),
+            "jitter_delay_max_minutes": int(settings.get("jitter_delay_max_minutes", 12)),
+            "working_hours_start": str(settings.get("working_hours_start", "09:00")),
+            "working_hours_end": str(settings.get("working_hours_end", "18:00")),
+            "timezone": str(settings.get("timezone", "UTC")),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if org_id:
+            payload["organization_id"] = org_id
+        
+        result = supabase.table("account_safety_settings").upsert(payload).execute()
+        if result.data and len(result.data) > 0:
+            return result.data[0]
+    except Exception as exc:
+        logger.error("db_update_safety_settings exception: %s", exc)
+    return {**DEFAULT_SAFETY_SETTINGS, **settings}
+
+
 # ── Date helpers ──────────────────────────────────────────────────────────────
 
 def add_working_days(start: date, days: int) -> date:
