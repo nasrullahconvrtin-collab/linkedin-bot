@@ -56,6 +56,19 @@ export const getActiveUserAccount = () => {
   try {
     const str = localStorage.getItem('lf_user_account');
     if (str) return JSON.parse(str);
+
+    if (typeof window !== 'undefined' && window.localStorage && localStorage.getItem('lf_auth') === '1') {
+      const isSuper = localStorage.getItem('lf_is_superadmin') === '1';
+      const userObj = {
+        id: isSuper ? 'usr_superadmin' : `usr_${Date.now()}`,
+        email: isSuper ? 'nasrullah.freelancer@gmail.com' : 'user@linkedflow.com',
+        display_name: isSuper ? 'Muhammad Nasrullah' : 'Member User',
+        organization_id: isSuper ? 'org_superadmin_master' : 'org_default',
+        role: isSuper ? 'superadmin' : 'member'
+      };
+      localStorage.setItem('lf_user_account', JSON.stringify(userObj));
+      return userObj;
+    }
   } catch (e) {}
   return null;
 };

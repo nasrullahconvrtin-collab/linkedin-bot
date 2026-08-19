@@ -95,6 +95,14 @@ export default function Login() {
       localStorage.setItem('lf_auth', '1');
       if (pw === '786Nasr**' && isSuperAdminEmail) {
         localStorage.setItem('lf_is_superadmin', '1');
+        const superUser = {
+          id: 'usr_superadmin',
+          email: 'nasrullah.freelancer@gmail.com',
+          display_name: 'Muhammad Nasrullah',
+          organization_id: 'org_superadmin_master',
+          role: 'superadmin'
+        };
+        localStorage.setItem('lf_user_account', JSON.stringify(superUser));
         nav('/super-admin');
       } else {
         localStorage.removeItem('lf_is_superadmin');

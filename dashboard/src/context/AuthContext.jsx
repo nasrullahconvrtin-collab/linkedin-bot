@@ -27,8 +27,17 @@ export function AuthProvider({ children }) {
         } else if (localStorage.getItem('lf_auth') === '1') {
           const isSuper = localStorage.getItem('lf_is_superadmin') === '1';
           const orgId = isSuper ? 'org_superadmin_master' : `org_user_${Date.now()}`;
-          setUser({ id: 'local_user', email: isSuper ? 'nasrullah.freelancer@gmail.com' : 'user@linkedflow.com' });
-          setOrganization({ id: orgId, name: 'My Workspace' });
+          const email = isSuper ? 'nasrullah.freelancer@gmail.com' : 'user@linkedflow.com';
+          const userObj = {
+            id: isSuper ? 'usr_superadmin' : `usr_${Date.now()}`,
+            email,
+            display_name: isSuper ? 'Muhammad Nasrullah' : 'Member User',
+            organization_id: orgId,
+            role: isSuper ? 'superadmin' : 'member'
+          };
+          localStorage.setItem('lf_user_account', JSON.stringify(userObj));
+          setUser({ id: userObj.id, email: userObj.email });
+          setOrganization({ id: orgId, name: isSuper ? 'Super Admin Master Workspace' : 'My Workspace' });
           setRole(isSuper ? 'owner' : 'member');
         }
       } catch (err) {

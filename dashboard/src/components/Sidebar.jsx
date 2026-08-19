@@ -259,10 +259,10 @@ export default function Sidebar({ collapsed = false, onToggle }) {
           {collapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
           {!collapsed && <span>Collapse</span>}
         </button>
-        <div className={`status-pill flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-[#1a1a1a] ${collapsed ? 'justify-center' : ''}`}>
-          <span className={`w-2 h-2 rounded-full shrink-0 ${wsConnected ? 'bg-[#22c55e] animate-pulse' : 'bg-[#ef4444]'}`} />
-          <span className={`text-xs font-medium ${wsConnected ? 'text-[#22c55e]' : 'text-[#ef4444]'} ${collapsed ? 'sr-only' : ''}`}>
-            {wsConnected ? 'Extension Online' : 'Extension Offline'}
+        <div className={`status-pill flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-[#1a1a1a] ${collapsed ? 'justify-center' : ''}`} title={wsConnected ? 'Chrome Extension active' : 'Running via Unipile Cloud API'}>
+          <span className="w-2 h-2 rounded-full shrink-0 bg-[#22c55e] animate-pulse" />
+          <span className={`text-xs font-medium text-[#22c55e] ${collapsed ? 'sr-only' : ''}`}>
+            {wsConnected ? 'Extension Online' : 'Cloud Engine Active'}
           </span>
         </div>
       </div>
