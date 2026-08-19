@@ -765,11 +765,14 @@ def db_enrich_profile(profile: dict) -> dict:
     return enriched
 
 
-def db_get_all_profiles() -> list[dict]:
+def db_get_all_profiles(org_id: str | None = None) -> list[dict]:
     db_mark_stale_profiles_offline()
+    if not org_id:
+        return []
     profiles = (
         supabase.table("profiles")
         .select("*")
+        .eq("organization_id", org_id)
         .neq("profile_key", "dashboard")
         .order("profile_key")
         .execute()

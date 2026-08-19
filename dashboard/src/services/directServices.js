@@ -205,13 +205,21 @@ export const directGetUnipileAccountInfo = async (accountId) => {
     return null;
   }
 
-  const targetAccId = accountId || activeAccountId || DEFAULT_ACCOUNT_ID;
+  const isSuper = isSuperAdminUser();
+  const userProfiles = await directGetProfiles();
+
+  if (!isSuper && (!userProfiles || userProfiles.length === 0)) {
+    return null;
+  }
+
+  const targetAccId = accountId || userProfiles[0]?.unipile_account_id || (isSuper ? DEFAULT_ACCOUNT_ID : null);
+  if (!targetAccId) return null;
 
   try {
     const { ok, data } = await unipileFetch(`/accounts/${targetAccId}`);
     if (ok && data && data.id) {
       const imParam = data.connection_params?.im || {};
-      const realName = data.name || imParam.username || 'Fatima Maqsood';
+      const realName = data.name || imParam.username || userProfiles[0]?.display_name || 'LinkedIn Profile';
       return {
         id: data.id,
         name: realName,
@@ -225,14 +233,18 @@ export const directGetUnipileAccountInfo = async (accountId) => {
     console.warn('Fetch account error:', e);
   }
 
-  return {
-    id: targetAccId,
-    name: 'Fatima Maqsood',
-    username: 'fatima-maqsood',
-    provider: 'LINKEDIN',
-    status: 'CONNECTED',
-    headline: 'LinkedIn Outreach Profile',
-  };
+  if (isSuper) {
+    return {
+      id: DEFAULT_ACCOUNT_ID,
+      name: 'Fatima Maqsood',
+      username: 'fatima-maqsood',
+      provider: 'LINKEDIN',
+      status: 'CONNECTED',
+      headline: 'LinkedIn Outreach Profile',
+    };
+  }
+
+  return null;
 };
 
 // Fetch ALL 1st-degree connections using cursor pagination loop
@@ -240,7 +252,18 @@ export const directGetNetworkingConnections = async () => {
   if (getStoredDisconnectedFlag()) {
     return { success: true, connections: [], total: 0 };
   }
-  const targetAccId = activeAccountId || DEFAULT_ACCOUNT_ID;
+
+  const isSuper = isSuperAdminUser();
+  const userProfiles = await directGetProfiles();
+  if (!isSuper && (!userProfiles || userProfiles.length === 0)) {
+    return { success: true, connections: [], total: 0 };
+  }
+
+  const targetAccId = userProfiles[0]?.unipile_account_id || (isSuper ? DEFAULT_ACCOUNT_ID : null);
+  if (!targetAccId) {
+    return { success: true, connections: [], total: 0 };
+  }
+
   let allItems = [];
   let cursor = null;
 
@@ -272,7 +295,18 @@ export const directGetNetworkingInvitations = async () => {
   if (getStoredDisconnectedFlag()) {
     return { success: true, invitations: [], total: 0 };
   }
-  const targetAccId = activeAccountId || DEFAULT_ACCOUNT_ID;
+
+  const isSuper = isSuperAdminUser();
+  const userProfiles = await directGetProfiles();
+  if (!isSuper && (!userProfiles || userProfiles.length === 0)) {
+    return { success: true, invitations: [], total: 0 };
+  }
+
+  const targetAccId = userProfiles[0]?.unipile_account_id || (isSuper ? DEFAULT_ACCOUNT_ID : null);
+  if (!targetAccId) {
+    return { success: true, invitations: [], total: 0 };
+  }
+
   let allItems = [];
   let cursor = null;
 
@@ -294,29 +328,6 @@ export const directGetNetworkingInvitations = async () => {
     }
   } catch (e) {
     console.warn('Unipile fetch invitations error:', e);
-  }
-
-  if (allItems.length === 0) {
-    try {
-      const { data: pData } = await supabaseDirect
-        .from('prospects')
-        .select('*')
-        .or('status.eq.Connection Requested,status.eq.Sent,connection_sent_date.not.is.null')
-        .is('accepted_at', null);
-
-      if (pData && pData.length > 0) {
-        allItems = pData.map(p => ({
-          id: p.id,
-          invited_user: `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.name || 'LinkedIn Member',
-          invited_user_description: p.headline || p.job_title || p.company || 'Pending Invitation',
-          invited_user_profile_picture_url: p.avatar_url,
-          parsed_datetime: p.connection_sent_date || p.updated_at,
-          date: p.connection_sent_date ? new Date(p.connection_sent_date).toLocaleDateString() : 'Sent recently',
-        }));
-      }
-    } catch (e) {
-      console.warn('Supabase fallback invitations error:', e);
-    }
   }
 
   return {
