@@ -75,7 +75,11 @@ export default function TeamSettings() {
       ]);
       setInviteEmail('');
     } catch (err) {
-      toast.error(err.message || 'Failed to send invite email');
+      if (err.message && (err.message.toLowerCase().includes('rate limit') || err.message.toLowerCase().includes('limit'))) {
+        toast.error('Supabase hourly email limit reached. Click "Copy Link" to share the invite link directly!');
+      } else {
+        toast.error(err.message || 'Failed to send invite email');
+      }
     } finally {
       setInviting(false);
     }
