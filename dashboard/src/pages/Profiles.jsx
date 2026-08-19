@@ -517,15 +517,22 @@ export default function Profiles() {
           </div>
           <h2 className="text-white text-xl font-bold">No Active LinkedIn Profile Connected</h2>
           <p className="text-[#9ca3af] text-sm leading-relaxed">
-            Your LinkedIn profile is currently disconnected. All profile performance stats, network connections, and inbox synchronization are paused.
-            Please go to Settings to connect your LinkedIn profile.
+            Your LinkedIn profile is currently disconnected. Connect your LinkedIn profile to sync contacts, manage pending invitations, and run automated campaigns.
           </p>
-          <button
-            onClick={() => navigate('/settings')}
-            className="px-6 py-3 bg-[#6366f1] hover:bg-[#4f46e5] text-white text-xs font-bold rounded-xl shadow-lg transition-all"
-          >
-            Go to Settings to Connect Account
-          </button>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+            <button
+              onClick={() => setModal(true)}
+              className="px-6 py-3 bg-[#6366f1] hover:bg-[#4f46e5] text-white text-xs font-bold rounded-xl shadow-lg transition-all flex items-center gap-2"
+            >
+              <Plus size={16} /> Connect LinkedIn Account
+            </button>
+            <button
+              onClick={() => navigate('/settings')}
+              className="px-6 py-3 border border-[#2a2a2a] bg-[#111111] hover:bg-[#222222] text-[#9ca3af] hover:text-white text-xs font-bold rounded-xl transition-all"
+            >
+              Go to Settings
+            </button>
+          </div>
         </div>
       ) : (
         <>
@@ -697,6 +704,108 @@ export default function Profiles() {
             </div>
           </div>
         </>
+      )}
+
+      {modal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-[#111111] border border-[#2a2a2a] rounded-2xl p-6 max-w-md w-full shadow-2xl relative space-y-4">
+            <div className="flex items-center justify-between border-b border-[#2a2a2a] pb-3">
+              <h3 className="text-white font-bold text-base flex items-center gap-2">
+                <Globe className="text-[#6366f1]" size={18} /> Connect LinkedIn Account
+              </h3>
+              <button onClick={() => setModal(false)} className="text-[#9ca3af] hover:text-white">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-xs text-[#9ca3af]">
+                Select how you want to connect your LinkedIn account to your workspace.
+              </p>
+
+              <div className="flex rounded-xl bg-[#1a1a1a] p-1 border border-[#2a2a2a]">
+                <button
+                  onClick={() => setConnMethod('account_id')}
+                  className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
+                    connMethod === 'account_id' ? 'bg-[#6366f1] text-white shadow-md' : 'text-[#9ca3af] hover:text-white'
+                  }`}
+                >
+                  Account ID
+                </button>
+                <button
+                  onClick={() => setConnMethod('direct')}
+                  className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
+                    connMethod === 'direct' ? 'bg-[#6366f1] text-white shadow-md' : 'text-[#9ca3af] hover:text-white'
+                  }`}
+                >
+                  Credentials / 2FA
+                </button>
+              </div>
+
+              {connMethod === 'account_id' ? (
+                <form onSubmit={handleConnectAccountId} className="space-y-3 pt-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#9ca3af] mb-1">Display Name</label>
+                    <input
+                      type="text"
+                      value={displayName}
+                      onChange={e => setDisplayName(e.target.value)}
+                      placeholder="Fatima Maqsood"
+                      className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-[#9ca3af] mb-1">LinkedIn Account ID</label>
+                    <input
+                      type="text"
+                      value={existingAccId}
+                      onChange={e => setExistingAccId(e.target.value)}
+                      placeholder="zXneBg9WRZ-m7iFuKULo1Q"
+                      className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2 text-white text-sm font-mono focus:outline-none focus:border-[#6366f1]"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={loading || !existingAccId.trim()}
+                    className="w-full py-2.5 bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold text-xs rounded-xl shadow-lg transition-all disabled:opacity-50"
+                  >
+                    {loading ? 'Connecting...' : 'Connect LinkedIn Profile'}
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handleConnectDirect} className="space-y-3 pt-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#9ca3af] mb-1">LinkedIn Email</label>
+                    <input
+                      type="email"
+                      value={directEmail}
+                      onChange={e => setDirectEmail(e.target.value)}
+                      placeholder="user@example.com"
+                      className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-[#9ca3af] mb-1">LinkedIn Password</label>
+                    <input
+                      type="password"
+                      value={directPassword}
+                      onChange={e => setDirectPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={loading || !directEmail.trim()}
+                    className="w-full py-2.5 bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold text-xs rounded-xl shadow-lg transition-all disabled:opacity-50"
+                  >
+                    {loading ? 'Connecting via Unipile...' : 'Authenticate LinkedIn Profile'}
+                  </button>
+                </form>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </Layout>
   );
