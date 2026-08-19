@@ -28,8 +28,23 @@ export default function Login() {
       return;
     }
 
-    // 2. Try Supabase Auth if email is entered
+    // 2. Authenticate against Super-Admin created User Accounts
     if (email.trim()) {
+      try {
+        const { dbAuthenticateUser } = await import('../services/userAccountServices');
+        const authRes = await dbAuthenticateUser(email, pw);
+        if (authRes.success && authRes.userAccount) {
+          localStorage.setItem('lf_auth', '1');
+          localStorage.setItem('lf_user_account', JSON.stringify(authRes.userAccount));
+          toast.success(`Welcome back, ${authRes.userAccount.display_name || authRes.userAccount.email}!`);
+          nav('/');
+          return;
+        }
+      } catch (err) {
+        console.warn('User account db auth notice:', err);
+      }
+
+      // 3. Fallback to Supabase Auth if email is entered
       try {
         await loginWithEmail(email, pw);
         toast.success('Signed in successfully!');
