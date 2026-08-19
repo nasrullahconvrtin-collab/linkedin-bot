@@ -96,8 +96,17 @@ export default function Inbox() {
         return;
       }
 
-      // Fetch Supabase campaigns map
-      const { data: cData } = await supabaseDirect.from('campaigns').select('id, name');
+      // Fetch Supabase campaigns map - FILTERED by current user's org
+      const { isSuperAdminUser, getActiveOrganizationId, getActiveUserAccount } = await import('../services/directServices');
+      const isSuper = isSuperAdminUser();
+      const orgId = getActiveOrganizationId();
+      const userAcc = getActiveUserAccount();
+      let cQuery = supabaseDirect.from('campaigns').select('id, name');
+      if (!isSuper) {
+        if (orgId) cQuery = cQuery.eq('organization_id', orgId);
+        else if (userAcc?.email) cQuery = cQuery.eq('user_email', userAcc.email.toLowerCase());
+      }
+      const { data: cData } = await cQuery;
       const cMap = {};
       (cData || []).forEach(c => { cMap[c.id] = c.name; });
       setCampaignsMap(cMap);

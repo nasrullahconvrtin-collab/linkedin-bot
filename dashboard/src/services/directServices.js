@@ -195,9 +195,15 @@ export const directDisconnectProfile = async () => {
     }
   } catch (e) {}
 
+  // Only delete THIS user's profiles, not everyone's
+  const orgId = getActiveOrganizationId();
+  const userAcc = getActiveUserAccount();
   try {
-    await supabaseDirect.from('profiles').delete().gt('created_at', '1970-01-01T00:00:00Z');
-    await supabaseDirect.from('profiles').delete().neq('profile_key', 'dummy_key_none');
+    if (orgId) {
+      await supabaseDirect.from('profiles').delete().eq('organization_id', orgId);
+    } else if (userAcc?.email) {
+      await supabaseDirect.from('profiles').delete().eq('user_email', userAcc.email.toLowerCase());
+    }
   } catch (err) {
     console.warn('directDisconnectProfile error:', err);
   }
@@ -386,20 +392,29 @@ export const directWithdrawOldInvitations = async (maxAgeDays = 90) => {
 export const directGetCampaigns = async () => {
   const userAcc = getActiveUserAccount();
   const isSuper = isSuperAdminUser();
+  const orgId = getActiveOrganizationId();
 
   try {
     let query = supabaseDirect.from('campaigns').select('*').order('created_at', { ascending: false });
-    if (!isSuper && userAcc) {
-      if (userAcc.organization_id) {
-        query = query.eq('organization_id', userAcc.organization_id);
-      } else if (userAcc.email) {
+    if (!isSuper) {
+      if (orgId) {
+        query = query.eq('organization_id', orgId);
+      } else if (userAcc?.email) {
         query = query.eq('user_email', userAcc.email.toLowerCase());
+      } else {
+        return [];
       }
     }
 
     const { data: campaigns, error } = await query;
     if (!error && campaigns) {
-      const { data: prospects } = await supabaseDirect.from('prospects').select('id, campaign_id, status, reply_date, custom_variables, current_step');
+      // Also filter the prospects stats query by org
+      let prospectsQuery = supabaseDirect.from('prospects').select('id, campaign_id, status, reply_date, custom_variables, current_step');
+      if (!isSuper) {
+        if (orgId) prospectsQuery = prospectsQuery.eq('organization_id', orgId);
+        else if (userAcc?.email) prospectsQuery = prospectsQuery.eq('user_email', userAcc.email.toLowerCase());
+      }
+      const { data: prospects } = await prospectsQuery;
       const prospectMap = new Map();
       (prospects || []).forEach(p => {
         if (!p.campaign_id) return;
@@ -609,7 +624,24 @@ export const directLaunchCampaign = async (id, data = {}) => {
 
 export const directGetProspects = async (params = {}) => {
   try {
+    const isSuper = isSuperAdminUser();
+    const orgId = getActiveOrganizationId();
+    const userAcc = getActiveUserAccount();
+
     let query = supabaseDirect.from('prospects').select('*', { count: 'exact' });
+
+    // Strict tenant isolation: always filter by org unless super admin
+    if (!isSuper) {
+      if (orgId) {
+        query = query.eq('organization_id', orgId);
+      } else if (userAcc?.email) {
+        query = query.eq('user_email', userAcc.email.toLowerCase());
+      } else {
+        // No identity = return empty for safety
+        return { prospects: [], total: 0 };
+      }
+    }
+
     if (params.campaign_id) query = query.eq('campaign_id', params.campaign_id);
     if (params.status) query = query.eq('status', params.status);
     query = query.order('created_at', { ascending: false });
@@ -634,6 +666,9 @@ export const directCreateProspect = async (data) => {
     || (data.linkedin_url ? (data.linkedin_url.split('/in/')[1] || '').split('/')[0].replace(/[-_]/g, ' ') : '')
     || 'Prospect';
 
+  const userAcc = getActiveUserAccount();
+  const orgId = getActiveOrganizationId();
+
   const payload = {
     first_name: firstName,
     last_name: (data.last_name || data.name?.split(' ').slice(1).join(' ') || '').trim(),
@@ -648,6 +683,8 @@ export const directCreateProspect = async (data) => {
     list_id: data.list_id || null,
     assigned_account: data.assigned_account || 'profile_1',
     custom_variables: data.custom_variables || {},
+    organization_id: orgId || userAcc?.organization_id || null,
+    user_email: userAcc?.email ? userAcc.email.toLowerCase() : null,
     created_at: new Date().toISOString(),
   };
   try {
