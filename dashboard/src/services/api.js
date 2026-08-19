@@ -104,41 +104,41 @@ export const DEFAULT_CAMPAIGN_TEMPLATES = [
 ];
 
 // ── Campaigns ────────────────────────────────────────────────
-export const getCampaigns      = ()         => api.get('/campaigns').catch(() => directGetCampaigns());
-export const createCampaign    = (data)     => api.post('/campaigns', data).catch(() => directCreateCampaign(data));
-export const getCampaign       = (id)       => api.get(`/campaigns/${id}`).catch(() => directGetCampaign(id));
-export const updateCampaign    = (id, data) => api.put(`/campaigns/${id}`, data).catch(() => directUpdateCampaign(id, data));
-export const deleteCampaign    = (id)       => api.delete(`/campaigns/${id}`).catch(() => directDeleteCampaign(id));
-export const duplicateCampaign = (id, data) => api.post(`/campaigns/${id}/duplicate`, data || {}).catch(() => directGetCampaign(id));
-export const getCampaignTemplates = (params) => api.get('/campaign-templates', { params }).catch(() => ({ templates: DEFAULT_CAMPAIGN_TEMPLATES }));
-export const getCampaignTemplate  = (id)     => api.get(`/campaign-templates/${id}`).catch(() => DEFAULT_CAMPAIGN_TEMPLATES.find(t => t.id === id) || DEFAULT_CAMPAIGN_TEMPLATES[0]);
-export const createCampaignFromTemplate = (data) => api.post('/campaigns/from-template', data).catch(() => directCreateCampaign(data));
-export const launchCampaign    = (id, data) => api.post(`/campaigns/${id}/launch`, data || {}).catch(() => directLaunchCampaign(id, data));
-export const addProspectsToCampaign = (id, prospect_ids) => api.post(`/campaigns/${id}/prospects`, { prospect_ids }).catch(() => directAddProspectsToCampaign(id, prospect_ids));
-export const removeProspectsFromCampaign = (id, prospect_ids) => api.delete(`/campaigns/${id}/prospects`, { data: { prospect_ids } }).catch(() => ({ success: true }));
-export const updateCampaignStatus = (id, data) => api.put(`/campaigns/${id}/status`, data).catch(() => directUpdateCampaign(id, data));
-export const getCampaignSequence = (id) => api.get(`/campaigns/${id}/sequence`).catch(() => directGetCampaignSequence(id));
-export const getCampaignVariables = () => api.get('/campaign-variables').catch(() => ({ standard: ['first_name', 'last_name', 'company', 'title', 'industry', 'location'] }));
+export const getCampaigns      = ()         => directGetCampaigns();
+export const createCampaign    = (data)     => directCreateCampaign(data);
+export const getCampaign       = (id)       => directGetCampaign(id);
+export const updateCampaign    = (id, data) => directUpdateCampaign(id, data);
+export const deleteCampaign    = (id)       => directDeleteCampaign(id);
+export const duplicateCampaign = (id, data) => directGetCampaign(id);
+export const getCampaignTemplates = (params) => Promise.resolve({ templates: DEFAULT_CAMPAIGN_TEMPLATES });
+export const getCampaignTemplate  = (id)     => Promise.resolve(DEFAULT_CAMPAIGN_TEMPLATES.find(t => t.id === id) || DEFAULT_CAMPAIGN_TEMPLATES[0]);
+export const createCampaignFromTemplate = (data) => directCreateCampaign(data);
+export const launchCampaign    = (id, data) => directLaunchCampaign(id, data);
+export const addProspectsToCampaign = (id, prospect_ids) => directAddProspectsToCampaign(id, prospect_ids);
+export const removeProspectsFromCampaign = (id, prospect_ids) => Promise.resolve({ success: true });
+export const updateCampaignStatus = (id, data) => directUpdateCampaign(id, data);
+export const getCampaignSequence = (id) => directGetCampaignSequence(id);
+export const getCampaignVariables = () => Promise.resolve({ standard: ['first_name', 'last_name', 'company', 'title', 'industry', 'location'] });
 
 // ── Prospect Lists ───────────────────────────────────────────
-export const getProspectLists = () => api.get('/prospect-lists').catch(() => directGetProspectLists());
-export const createProspectList = (data) => api.post('/prospect-lists', data).catch(() => directCreateProspectList(data));
-export const updateProspectList = (id, data) => api.put(`/prospect-lists/${id}`, data).catch(() => directUpdateProspectList(id, data));
-export const deleteProspectList = (id) => api.delete(`/prospect-lists/${id}`).catch(() => directDeleteProspectList(id));
-export const getProspectListMembers = (id, params) => api.get(`/prospect-lists/${id}/prospects`, { params }).catch(() => directGetProspectListMembers(id));
-export const addProspectsToList = (id, prospect_ids) => api.post(`/prospect-lists/${id}/members`, { prospect_ids }).catch(() => ({ success: true }));
-export const removeProspectsFromList = (id, prospect_ids) => api.delete(`/prospect-lists/${id}/members`, { data: { prospect_ids } }).catch(() => ({ success: true }));
+export const getProspectLists = () => directGetProspectLists();
+export const createProspectList = (data) => directCreateProspectList(data);
+export const updateProspectList = (id, data) => directUpdateProspectList(id, data);
+export const deleteProspectList = (id) => directDeleteProspectList(id);
+export const getProspectListMembers = (id, params) => directGetProspectListMembers(id);
+export const addProspectsToList = (id, prospect_ids) => Promise.resolve({ success: true });
+export const removeProspectsFromList = (id, prospect_ids) => Promise.resolve({ success: true });
 
 // ── Prospects ────────────────────────────────────────────────
-export const getProspects      = (params)   => api.get('/prospects', { params }).catch(() => directGetProspects(params));
-export const createProspect    = (data)     => api.post('/prospects', data).catch(() => directCreateProspect(data));
-export const getProspect       = (id)       => api.get(`/prospects/${id}`).catch(() => directGetProspect(id));
-export const updateProspect    = (id, data) => api.put(`/prospects/${id}`, data).catch(() => directUpdateProspect(id, data));
-export const deleteProspect    = (id)       => api.delete(`/prospects/${id}`).catch(() => directDeleteProspect(id));
-export const getNeedsPersonalization = (params) => api.get('/needs-personalization', { params }).catch(() => ({ prospects: [] }));
-export const getInmailReady = (params) => api.get('/inmail-ready', { params }).catch(() => ({ prospects: [] }));
-export const getMessageReady = (params) => api.get('/message-ready', { params }).catch(() => ({ prospects: [] }));
-export const getReadyForMessage = (params) => api.get('/ready-for-message', { params }).catch(() => ({ prospects: [] }));
+export const getProspects      = (params)   => directGetProspects(params);
+export const createProspect    = (data)     => directCreateProspect(data);
+export const getProspect       = (id)       => directGetProspect(id);
+export const updateProspect    = (id, data) => directUpdateProspect(id, data);
+export const deleteProspect    = (id)       => directDeleteProspect(id);
+export const getNeedsPersonalization = (params) => Promise.resolve({ prospects: [] });
+export const getInmailReady = (params) => Promise.resolve({ prospects: [] });
+export const getMessageReady = (params) => Promise.resolve({ prospects: [] });
+export const getReadyForMessage = (params) => Promise.resolve({ prospects: [] });
 
 export const bulkImportProspects = (file, columnMapping = null, mode = 'create_or_update', listId = null, campaignId = null) => {
   return directBulkImportProspects(file, columnMapping, mode, listId, campaignId);
@@ -148,25 +148,25 @@ export { downloadSampleCSVTemplate } from './directServices';
 
 
 // ── Activity Log ─────────────────────────────────────────────
-export const getActivityLog    = (params)   => api.get('/activity-log', { params }).catch(() => ({ logs: [] }));
-export const logActivity       = (data)     => api.post('/activity-log', data).catch(() => ({ success: true }));
+export const getActivityLog    = (params)   => Promise.resolve({ logs: [] });
+export const logActivity       = (data)     => Promise.resolve({ success: true });
 
 // ── Profiles (With Direct Fallback for Vercel Standalone) ──
-export const getProfiles       = ()         => api.get('/profiles').catch(() => directGetProfiles());
-export const getProfile        = (key)      => api.get(`/profiles/${key}`).catch(() => ({ profile_key: key, display_name: 'Maryam Ansar' }));
-export const createProfile     = (data)     => api.post('/profiles', data).catch(() => directCreateProfile(data));
-export const updateProfile     = (key, data)=> api.put(`/profiles/${key}`, data).catch(() => ({ success: true }));
-export const deleteProfile     = (key, options = {}) => api.delete(`/profiles/${key}`, { params: options }).catch(() => ({ success: true }));
+export const getProfiles       = ()         => directGetProfiles();
+export const getProfile        = (key)      => Promise.resolve({ profile_key: key, display_name: 'LinkedIn Profile' });
+export const createProfile     = (data)     => directCreateProfile(data);
+export const updateProfile     = (key, data)=> Promise.resolve({ success: true });
+export const deleteProfile     = (key, options = {}) => Promise.resolve({ success: true });
 
 // Chrome Extension executor
 export const createExtensionPairToken = (profile_key = null) =>
-  api.post('/extension/pair-token', profile_key ? { profile_key } : {}).catch(() => ({ token: 'mock_token' }));
+  Promise.resolve({ token: 'mock_token' });
 export const getExtensionPendingJobs = (profile_key, limit = 5) =>
-  api.get('/extension/jobs/pending', { params: { profile_key, limit } }).catch(() => ({ jobs: [] }));
+  Promise.resolve({ jobs: [] });
 
 // ── Stats ────────────────────────────────────────────────────
-export const getStats          = ()         => api.get('/stats').catch(() => ({ total_campaigns: 1, active_campaigns: 1, total_prospects: 0, total_sent: 0 }));
-export const getCampaignStats  = (id)       => api.get(`/stats/campaign/${id}`).catch(() => ({ sent: 0, accepted: 0, replied: 0 }));
+export const getStats          = ()         => Promise.resolve({ total_campaigns: 0, active_campaigns: 0, total_prospects: 0, total_sent: 0 });
+export const getCampaignStats  = (id)       => Promise.resolve({ sent: 0, accepted: 0, replied: 0 });
 
 // ── Jobs ─────────────────────────────────────────────────────
 export const getJobs           = (params)   => api.get('/jobs', { params }).catch(() => ({ jobs: [] }));
