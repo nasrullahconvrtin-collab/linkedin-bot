@@ -54,6 +54,18 @@ export const getStoredDisconnectedFlag = () => {
   return false;
 };
 
+export const getActiveUserAccount = () => {
+  try {
+    const str = localStorage.getItem('lf_user_account');
+    if (str) return JSON.parse(str);
+  } catch (e) {}
+  return null;
+};
+
+export const isSuperAdminUser = () => {
+  return localStorage.getItem('lf_is_superadmin') === '1';
+};
+
 let activeAccountId = getStoredDisconnectedFlag() ? null : DEFAULT_ACCOUNT_ID;
 
 export const directGetProfiles = async () => {
@@ -61,15 +73,25 @@ export const directGetProfiles = async () => {
     return [];
   }
 
+  const userAcc = getActiveUserAccount();
+  const isSuper = isSuperAdminUser();
+
   try {
-    const { data, error } = await supabaseDirect.from('profiles').select('*');
-    if (!error && data && data.length > 0) {
-      if (data[0].unipile_account_id) {
-        activeAccountId = data[0].unipile_account_id;
+    let query = supabaseDirect.from('profiles').select('*');
+    if (!isSuper && userAcc) {
+      if (userAcc.organization_id) {
+        query = query.eq('organization_id', userAcc.organization_id);
+      } else if (userAcc.email) {
+        query = query.eq('user_email', userAcc.email.toLowerCase());
       }
+    }
+
+    const { data, error } = await query;
+    if (!error && data && data.length > 0) {
+      activeAccountId = data[0].unipile_account_id || activeAccountId;
       return data.map(p => ({
         profile_key: p.profile_key || p.id || 'profile_1',
-        display_name: p.display_name && p.display_name !== 'Maryam Ansar' ? p.display_name : 'Fatima Maqsood',
+        display_name: p.display_name || 'LinkedIn Profile',
         unipile_account_id: p.unipile_account_id || activeAccountId,
         session_active: p.session_active ?? true,
         enabled: p.enabled ?? true,
@@ -80,17 +102,22 @@ export const directGetProfiles = async () => {
     console.warn('Supabase fetch error:', e);
   }
 
-  const currentId = activeAccountId || DEFAULT_ACCOUNT_ID;
-  return [
-    {
-      profile_key: 'profile_1',
-      display_name: 'Fatima Maqsood',
-      unipile_account_id: currentId,
-      session_active: true,
-      enabled: true,
-      daily_sent: 0,
-    },
-  ];
+  // Super-admin demo fallback ONLY for super admin
+  if (isSuper) {
+    return [
+      {
+        profile_key: 'profile_1',
+        display_name: 'Fatima Maqsood',
+        unipile_account_id: DEFAULT_ACCOUNT_ID,
+        session_active: true,
+        enabled: true,
+        daily_sent: 0,
+      },
+    ];
+  }
+
+  // New user accounts start 100% EMPTY until they connect their own LinkedIn account
+  return [];
 };
 
 export const directCreateProfile = async (data) => {
@@ -100,8 +127,9 @@ export const directCreateProfile = async (data) => {
     }
   } catch (e) {}
 
-  const profile_key = data.profile_key || 'profile_1';
-  const display_name = data.display_name || 'Fatima Maqsood';
+  const userAcc = getActiveUserAccount();
+  const profile_key = data.profile_key || `prof_${Date.now()}`;
+  const display_name = data.display_name || 'LinkedIn Profile';
   const unipile_account_id = data.unipile_account_id || DEFAULT_ACCOUNT_ID;
   activeAccountId = unipile_account_id;
 
@@ -111,6 +139,8 @@ export const directCreateProfile = async (data) => {
         profile_key,
         display_name,
         unipile_account_id,
+        organization_id: userAcc?.organization_id || null,
+        user_email: userAcc?.email ? userAcc.email.toLowerCase() : null,
         session_active: true,
         enabled: true,
       },
@@ -312,8 +342,20 @@ export const directWithdrawOldInvitations = async (maxAgeDays = 90) => {
 // ── Unipile & Supabase Campaign / Prospect / List Direct Operations ──
 
 export const directGetCampaigns = async () => {
+  const userAcc = getActiveUserAccount();
+  const isSuper = isSuperAdminUser();
+
   try {
-    const { data: campaigns, error } = await supabaseDirect.from('campaigns').select('*').order('created_at', { ascending: false });
+    let query = supabaseDirect.from('campaigns').select('*').order('created_at', { ascending: false });
+    if (!isSuper && userAcc) {
+      if (userAcc.organization_id) {
+        query = query.eq('organization_id', userAcc.organization_id);
+      } else if (userAcc.email) {
+        query = query.eq('user_email', userAcc.email.toLowerCase());
+      }
+    }
+
+    const { data: campaigns, error } = await query;
     if (!error && campaigns) {
       const { data: prospects } = await supabaseDirect.from('prospects').select('id, campaign_id, status, reply_date, custom_variables, current_step');
       const prospectMap = new Map();
@@ -402,9 +444,12 @@ export const directGetCampaigns = async () => {
 };
 
 export const directCreateCampaign = async (data) => {
+  const userAcc = getActiveUserAccount();
   const payload = {
     name: data.name || 'New Campaign',
     status: data.status || 'draft',
+    organization_id: userAcc?.organization_id || null,
+    user_email: userAcc?.email ? userAcc.email.toLowerCase() : null,
     profile_key: data.profile_key || (data.settings && data.settings.profile_key) || 'profile_1',
     daily_limit: data.daily_limit || 25,
     sequence: data.sequence || [],

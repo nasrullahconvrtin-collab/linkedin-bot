@@ -95,8 +95,9 @@ export default function Dashboard() {
       const cRes = await directGetCampaigns();
       setCampaigns(cRes || []);
 
-      // 2. Fetch all prospects
-      const { data: pData } = await supabaseDirect.from('prospects').select('*').order('updated_at', { ascending: false });
+      // 2. Fetch prospects using multi-tenant filtered directGetProspects
+      const { directGetProspects } = await import('../services/directServices');
+      const { prospects: pData } = await directGetProspects({ limit: 1000 });
       setProspects(pData || []);
 
     } catch (err) {

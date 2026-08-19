@@ -87,14 +87,23 @@ export default function Inbox() {
   const loadConversations = useCallback(async () => {
     setLoadingList(true);
     try {
+      // Fetch user's profiles first
+      const { directGetProfiles, directGetProspects } = await import('../services/directServices');
+      const userProfiles = await directGetProfiles();
+      if (!userProfiles || userProfiles.length === 0) {
+        setChats([]);
+        setLoadingList(false);
+        return;
+      }
+
       // Fetch Supabase campaigns map
       const { data: cData } = await supabaseDirect.from('campaigns').select('id, name');
       const cMap = {};
       (cData || []).forEach(c => { cMap[c.id] = c.name; });
       setCampaignsMap(cMap);
 
-      // Fetch Supabase prospects map
-      const { data: pData } = await supabaseDirect.from('prospects').select('*');
+      // Fetch Supabase prospects filtered by user organization
+      const { prospects: pData } = await directGetProspects({ limit: 1000 });
       const pMap = {};
       (pData || []).forEach(p => {
         if (p.provider_id) pMap[p.provider_id] = p;

@@ -28,15 +28,11 @@ export default function Replies() {
       (cData || []).forEach(c => { cMap[c.id] = c.name; });
       setCampaignsMap(cMap);
 
-      // 2. Fetch prospects with status = 'Replied' or having a reply_date / last_message
-      const { data: pData } = await supabaseDirect
-        .from('prospects')
-        .select('*')
-        .not('campaign_id', 'is', null)
-        .or('status.eq.Replied,status.eq.replied,reply_date.not.is.null')
-        .order('updated_at', { ascending: false });
-
-      setProspects(pData || []);
+      // 2. Fetch prospects filtered by user organization
+      const { directGetProspects } = await import('../services/directServices');
+      const { prospects: pData } = await directGetProspects({ limit: 1000 });
+      const repliedProspects = (pData || []).filter(p => p.campaign_id && (['replied', 'replied'].includes(p.status?.toLowerCase()) || p.reply_date));
+      setProspects(repliedProspects);
     } catch (err) {
       console.error('Error loading replies:', err);
       toast.error('Failed to load prospect replies');
