@@ -66,6 +66,20 @@ export const isSuperAdminUser = () => {
   return localStorage.getItem('lf_is_superadmin') === '1';
 };
 
+export const getActiveOrganizationId = () => {
+  try {
+    const isSuper = isSuperAdminUser();
+    if (isSuper) return null;
+
+    const userAcc = getActiveUserAccount();
+    if (userAcc) {
+      if (userAcc.organization_id) return userAcc.organization_id;
+      if (userAcc.email) return `org_${userAcc.email.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+    }
+  } catch (e) {}
+  return null;
+};
+
 let activeAccountId = getStoredDisconnectedFlag() ? null : DEFAULT_ACCOUNT_ID;
 
 export const directGetProfiles = async () => {
@@ -73,17 +87,16 @@ export const directGetProfiles = async () => {
     return [];
   }
 
-  const userAcc = getActiveUserAccount();
   const isSuper = isSuperAdminUser();
+  const orgId = getActiveOrganizationId();
+  const userAcc = getActiveUserAccount();
 
   try {
     let query = supabaseDirect.from('profiles').select('*');
-    if (!isSuper && userAcc) {
-      if (userAcc.organization_id) {
-        query = query.eq('organization_id', userAcc.organization_id);
-      } else if (userAcc.email) {
-        query = query.eq('user_email', userAcc.email.toLowerCase());
-      }
+    if (!isSuper && orgId) {
+      query = query.eq('organization_id', orgId);
+    } else if (!isSuper && userAcc?.email) {
+      query = query.eq('user_email', userAcc.email.toLowerCase());
     }
 
     const { data, error } = await query;
@@ -102,7 +115,7 @@ export const directGetProfiles = async () => {
     console.warn('Supabase fetch error:', e);
   }
 
-  // Super-admin demo fallback ONLY for super admin
+  // Super-admin master demo fallback ONLY for super admin
   if (isSuper) {
     return [
       {
@@ -116,7 +129,7 @@ export const directGetProfiles = async () => {
     ];
   }
 
-  // New user accounts start 100% EMPTY until they connect their own LinkedIn account
+  // Normal user accounts start 100% EMPTY until they connect their own LinkedIn account
   return [];
 };
 
@@ -128,6 +141,7 @@ export const directCreateProfile = async (data) => {
   } catch (e) {}
 
   const userAcc = getActiveUserAccount();
+  const orgId = getActiveOrganizationId();
   const profile_key = data.profile_key || `prof_${Date.now()}`;
   const display_name = data.display_name || 'LinkedIn Profile';
   const unipile_account_id = data.unipile_account_id || DEFAULT_ACCOUNT_ID;
@@ -139,7 +153,7 @@ export const directCreateProfile = async (data) => {
         profile_key,
         display_name,
         unipile_account_id,
-        organization_id: userAcc?.organization_id || null,
+        organization_id: orgId || userAcc?.organization_id || null,
         user_email: userAcc?.email ? userAcc.email.toLowerCase() : null,
         session_active: true,
         enabled: true,

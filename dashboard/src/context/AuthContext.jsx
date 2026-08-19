@@ -13,13 +13,23 @@ export function AuthProvider({ children }) {
     async function initAuth() {
       try {
         const { data: { session } } = await supabaseDirect.auth.getSession();
-        if (session && session.user) {
+        const userAccStr = localStorage.getItem('lf_user_account');
+        
+        if (userAccStr) {
+          const userAcc = JSON.parse(userAccStr);
+          setUser({ id: userAcc.id || userAcc.email, email: userAcc.email });
+          const uniqueOrgId = userAcc.organization_id || `org_${userAcc.email.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+          setOrganization({ id: uniqueOrgId, name: userAcc.workspace_name || userAcc.organizations?.name || 'My Workspace' });
+          setRole(userAcc.role || 'member');
+        } else if (session && session.user) {
           setUser(session.user);
           await loadOrganization(session.user.id);
         } else if (localStorage.getItem('lf_auth') === '1') {
-          setUser({ id: 'local_user', email: 'user@linkedflow.com' });
-          setOrganization({ id: 'local_org', name: 'My Workspace' });
-          setRole('owner');
+          const isSuper = localStorage.getItem('lf_is_superadmin') === '1';
+          const orgId = isSuper ? 'org_superadmin_master' : `org_user_${Date.now()}`;
+          setUser({ id: 'local_user', email: isSuper ? 'nasrullah.freelancer@gmail.com' : 'user@linkedflow.com' });
+          setOrganization({ id: orgId, name: 'My Workspace' });
+          setRole(isSuper ? 'owner' : 'member');
         }
       } catch (err) {
         console.warn('AuthContext init warning:', err);

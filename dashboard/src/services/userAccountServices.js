@@ -16,7 +16,7 @@ export const dbCreateUserAccount = async ({ email, password, displayName, worksp
     console.warn('Org creation notice:', orgError);
   }
 
-  const orgId = org?.id || null;
+  const orgId = org?.id || `org_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`;
 
   // 2. Create Safety Settings for Organization
   if (orgId) {
