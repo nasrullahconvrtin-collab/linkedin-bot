@@ -40,7 +40,24 @@ export default function TeamSettings() {
     if (!inviteEmail.trim()) return toast.error('Please enter an email address');
     setInviting(true);
     try {
-      toast.success(`Invite sent to ${inviteEmail}! They will join as ${inviteRole}.`);
+      // Send real invitation email via Supabase Auth (Option 1 built-in email provider)
+      const { error: authError } = await supabaseDirect.auth.signInWithOtp({
+        email: inviteEmail.trim(),
+        options: {
+          emailRedirectTo: `${window.location.origin}/login`,
+          data: {
+            organization_id: organization?.id,
+            role: inviteRole,
+          }
+        }
+      });
+
+      if (authError && !authError.message?.includes('Rate limit')) {
+        throw authError;
+      }
+
+      toast.success(`Supabase email invitation sent to ${inviteEmail}! Check your inbox.`);
+
       setMembers(prev => [
         ...prev,
         {
@@ -54,7 +71,7 @@ export default function TeamSettings() {
       ]);
       setInviteEmail('');
     } catch (err) {
-      toast.error('Failed to send invite');
+      toast.error(err.message || 'Failed to send invite email');
     } finally {
       setInviting(false);
     }
