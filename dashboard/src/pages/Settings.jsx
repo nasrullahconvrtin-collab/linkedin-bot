@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Clock, Shield, Save, Check, Moon, Sun, Palette,
   ToggleLeft, ToggleRight, Sliders, Calendar, Zap, Sparkles, Loader2,
@@ -7,6 +8,7 @@ import {
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import {
   directGetAppSettings,
   directSaveAppSettings,
@@ -54,6 +56,8 @@ function Section({ title, icon: Icon, description, children }) {
 
 export default function Settings() {
   const { theme, setTheme, profiles, fetchProfiles } = useApp();
+  const { logout } = useAuth();
+  const nav = useNavigate();
 
   // Settings State
   const [settings, setSettings] = useState(DEFAULT_APP_SETTINGS);
@@ -621,6 +625,29 @@ export default function Settings() {
               </button>
             </div>
           </form>
+        </Section>
+
+        {/* ── 7. ACCOUNT SESSION & LOGOUT ────────────────────────────────────────── */}
+        <Section title="Account & Session" icon={LogOut} description="Sign out of your active workspace session on this device.">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl border border-red-500/20 bg-red-500/5">
+            <div>
+              <p className="text-white font-bold text-sm">Sign Out of LinkedFlow</p>
+              <p className="text-[#6b7280] text-xs mt-0.5">
+                End your active session securely and return to the login screen.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                await logout();
+                toast.success('Logged out successfully');
+                nav('/login');
+              }}
+              className="px-5 py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+            >
+              <LogOut size={16} /> Log Out
+            </button>
+          </div>
         </Section>
       </div>
     </Layout>

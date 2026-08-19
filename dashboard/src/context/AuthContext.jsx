@@ -127,6 +127,8 @@ export function AuthProvider({ children }) {
   const logout = async () => {
     await supabaseDirect.auth.signOut().catch(() => {});
     localStorage.removeItem('lf_auth');
+    localStorage.removeItem('lf_is_superadmin');
+    localStorage.removeItem('lf_user_account');
     setUser(null);
     setOrganization(null);
   };
