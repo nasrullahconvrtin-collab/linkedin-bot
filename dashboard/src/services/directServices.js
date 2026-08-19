@@ -110,15 +110,35 @@ export const directGetProfiles = async () => {
 
   try {
     let query = supabaseDirect.from('profiles').select('*');
-    if (!isSuper && orgId) {
-      query = query.eq('organization_id', orgId);
-    } else if (!isSuper && userAcc?.email) {
-      query = query.eq('user_email', userAcc.email.toLowerCase());
+
+    if (!isSuper) {
+      if (orgId && userAcc?.email) {
+        // OR filter: match rows with this org_id OR this user_email (catches old rows saved without org_id)
+        query = query.or(`organization_id.eq.${orgId},user_email.eq.${userAcc.email.toLowerCase()}`);
+      } else if (orgId) {
+        query = query.eq('organization_id', orgId);
+      } else if (userAcc?.email) {
+        query = query.eq('user_email', userAcc.email.toLowerCase());
+      } else {
+        return [];
+      }
     }
 
     const { data, error } = await query;
     if (!error && data && data.length > 0) {
       activeAccountId = data[0].unipile_account_id || activeAccountId;
+
+      // Auto-backfill: if any row is missing organization_id, stamp it now so future queries find it
+      if (orgId && userAcc?.email) {
+        const rowsMissingOrg = data.filter(p => !p.organization_id);
+        if (rowsMissingOrg.length > 0) {
+          await supabaseDirect.from('profiles')
+            .update({ organization_id: orgId, user_email: userAcc.email.toLowerCase() })
+            .in('profile_key', rowsMissingOrg.map(p => p.profile_key))
+            .catch(() => {});
+        }
+      }
+
       return data.map(p => ({
         profile_key: p.profile_key || p.id || 'profile_1',
         display_name: p.display_name || 'LinkedIn Profile',
