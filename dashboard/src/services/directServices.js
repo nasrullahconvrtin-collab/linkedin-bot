@@ -85,9 +85,6 @@ export const isSuperAdminUser = () => {
 
 export const getActiveOrganizationId = () => {
   try {
-    const isSuper = isSuperAdminUser();
-    if (isSuper) return null;
-
     const userAcc = getActiveUserAccount();
     if (userAcc) {
       if (userAcc.organization_id) return userAcc.organization_id;
@@ -104,23 +101,20 @@ export const directGetProfiles = async () => {
     return [];
   }
 
-  const isSuper = isSuperAdminUser();
   const orgId = getActiveOrganizationId();
   const userAcc = getActiveUserAccount();
 
   try {
     let query = supabaseDirect.from('profiles').select('*');
 
-    if (!isSuper) {
-      if (orgId && userAcc?.email) {
-        query = query.or(`organization_id.eq.${orgId},user_email.eq.${userAcc.email.toLowerCase()}`);
-      } else if (orgId) {
-        query = query.eq('organization_id', orgId);
-      } else if (userAcc?.email) {
-        query = query.eq('user_email', userAcc.email.toLowerCase());
-      } else {
-        return [];
-      }
+    if (orgId && userAcc?.email) {
+      query = query.or(`organization_id.eq.${orgId},user_email.eq.${userAcc.email.toLowerCase()}`);
+    } else if (orgId) {
+      query = query.eq('organization_id', orgId);
+    } else if (userAcc?.email) {
+      query = query.eq('user_email', userAcc.email.toLowerCase());
+    } else {
+      return [];
     }
 
     const { data, error } = await query;
@@ -358,29 +352,23 @@ export const directWithdrawOldInvitations = async (maxAgeDays = 90) => {
 
 export const directGetCampaigns = async () => {
   const userAcc = getActiveUserAccount();
-  const isSuper = isSuperAdminUser();
   const orgId = getActiveOrganizationId();
 
   try {
     let query = supabaseDirect.from('campaigns').select('*').order('created_at', { ascending: false });
-    if (!isSuper) {
-      if (orgId) {
-        query = query.eq('organization_id', orgId);
-      } else if (userAcc?.email) {
-        query = query.eq('user_email', userAcc.email.toLowerCase());
-      } else {
-        return [];
-      }
+    if (orgId) {
+      query = query.eq('organization_id', orgId);
+    } else if (userAcc?.email) {
+      query = query.eq('user_email', userAcc.email.toLowerCase());
+    } else {
+      return [];
     }
 
     const { data: campaigns, error } = await query;
     if (!error && campaigns) {
-      // Also filter the prospects stats query by org
       let prospectsQuery = supabaseDirect.from('prospects').select('id, campaign_id, status, reply_date, custom_variables, current_step');
-      if (!isSuper) {
-        if (orgId) prospectsQuery = prospectsQuery.eq('organization_id', orgId);
-        else if (userAcc?.email) prospectsQuery = prospectsQuery.eq('user_email', userAcc.email.toLowerCase());
-      }
+      if (orgId) prospectsQuery = prospectsQuery.eq('organization_id', orgId);
+      else if (userAcc?.email) prospectsQuery = prospectsQuery.eq('user_email', userAcc.email.toLowerCase());
       const { data: prospects } = await prospectsQuery;
       const prospectMap = new Map();
       (prospects || []).forEach(p => {
@@ -591,22 +579,17 @@ export const directLaunchCampaign = async (id, data = {}) => {
 
 export const directGetProspects = async (params = {}) => {
   try {
-    const isSuper = isSuperAdminUser();
     const orgId = getActiveOrganizationId();
     const userAcc = getActiveUserAccount();
 
     let query = supabaseDirect.from('prospects').select('*', { count: 'exact' });
 
-    // Strict tenant isolation: always filter by org unless super admin
-    if (!isSuper) {
-      if (orgId) {
-        query = query.eq('organization_id', orgId);
-      } else if (userAcc?.email) {
-        query = query.eq('user_email', userAcc.email.toLowerCase());
-      } else {
-        // No identity = return empty for safety
-        return { prospects: [], total: 0 };
-      }
+    if (orgId) {
+      query = query.eq('organization_id', orgId);
+    } else if (userAcc?.email) {
+      query = query.eq('user_email', userAcc.email.toLowerCase());
+    } else {
+      return { prospects: [], total: 0 };
     }
 
     if (params.campaign_id) query = query.eq('campaign_id', params.campaign_id);

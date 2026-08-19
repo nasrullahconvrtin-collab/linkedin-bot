@@ -15,6 +15,7 @@ import {
   DEFAULT_APP_SETTINGS,
   supabaseDirect,
   directDisconnectProfile,
+  directCreateProfile,
 } from '../services/directServices';
 import {
   connectUnipileCookie,
