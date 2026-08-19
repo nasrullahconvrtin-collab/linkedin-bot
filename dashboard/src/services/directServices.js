@@ -116,29 +116,31 @@ export const directGetProfiles = async () => {
 
   const orgId = getActiveOrganizationId();
   const userAcc = getActiveUserAccount();
+  const userEmail = userAcc?.email ? userAcc.email.toLowerCase() : null;
 
   try {
-    let query = supabaseDirect.from('profiles').select('*');
-
-    if (orgId && userAcc?.email) {
-      query = query.or(`organization_id.eq.${orgId},user_email.eq.${userAcc.email.toLowerCase()}`);
-    } else if (orgId) {
-      query = query.eq('organization_id', orgId);
-    } else if (userAcc?.email) {
-      query = query.eq('user_email', userAcc.email.toLowerCase());
-    } else {
-      return [];
-    }
-
-    const { data, error } = await query;
+    const { data, error } = await supabaseDirect.from('profiles').select('*');
     if (!error && data && data.length > 0) {
-      return data.map(p => ({
+      // Filter out user account pseudo-profiles (profile_key starting with 'user_')
+      const realProfiles = data.filter(p => {
+        if (!p.unipile_account_id || p.profile_key?.startsWith('user_')) return false;
+
+        const pOrgId = p.organization_id || p.settings?.organization_id || p.settings?.orgId;
+        const pEmail = (p.user_email || p.settings?.user_email || p.settings?.email || '').toLowerCase();
+
+        if (orgId && pOrgId && pOrgId === orgId) return true;
+        if (userEmail && pEmail && pEmail === userEmail) return true;
+        if (!pOrgId && !pEmail) return true;
+        return false;
+      });
+
+      return realProfiles.map(p => ({
         profile_key: p.profile_key || p.id || `prof_${p.id}`,
         display_name: p.display_name || 'LinkedIn Profile',
         unipile_account_id: p.unipile_account_id || null,
-        session_active: p.session_active ?? true,
-        enabled: p.enabled ?? true,
-        daily_sent: p.daily_sent || 0,
+        session_active: p.session_active ?? p.settings?.session_active ?? true,
+        enabled: p.enabled ?? p.settings?.enabled ?? true,
+        daily_sent: p.daily_sent || p.settings?.daily_sent || 0,
       }));
     }
   } catch (e) {
@@ -163,16 +165,23 @@ export const directCreateProfile = async (data) => {
   const unipile_account_id = data.unipile_account_id || null;
   activeAccountId = unipile_account_id;
 
+  const email = userAcc?.email ? userAcc.email.toLowerCase() : null;
+
   try {
     await supabaseDirect.from('profiles').upsert([
       {
         profile_key,
         display_name,
         unipile_account_id,
-        organization_id: orgId || userAcc?.organization_id || null,
-        user_email: userAcc?.email ? userAcc.email.toLowerCase() : null,
-        session_active: true,
-        enabled: true,
+        status: 'active',
+        settings: {
+          organization_id: orgId || userAcc?.organization_id || null,
+          user_email: email,
+          session_active: true,
+          enabled: true,
+          ...(data.settings || {}),
+        },
+        updated_at: new Date().toISOString(),
       },
     ], { onConflict: 'profile_key' });
   } catch (err) {
@@ -194,14 +203,21 @@ export const directDisconnectProfile = async () => {
     }
   } catch (e) {}
 
-  // Only delete THIS user's profiles, not everyone's
   const orgId = getActiveOrganizationId();
   const userAcc = getActiveUserAccount();
+  const userEmail = userAcc?.email ? userAcc.email.toLowerCase() : null;
+
   try {
-    if (orgId) {
-      await supabaseDirect.from('profiles').delete().eq('organization_id', orgId);
-    } else if (userAcc?.email) {
-      await supabaseDirect.from('profiles').delete().eq('user_email', userAcc.email.toLowerCase());
+    const { data: allProfiles } = await supabaseDirect.from('profiles').select('id, profile_key, settings');
+    if (allProfiles && allProfiles.length > 0) {
+      for (const p of allProfiles) {
+        if (p.profile_key?.startsWith('user_')) continue;
+        const pOrgId = p.organization_id || p.settings?.organization_id || p.settings?.orgId;
+        const pEmail = (p.user_email || p.settings?.user_email || p.settings?.email || '').toLowerCase();
+        if ((orgId && pOrgId === orgId) || (userEmail && pEmail === userEmail)) {
+          await supabaseDirect.from('profiles').delete().eq('id', p.id);
+        }
+      }
     }
   } catch (err) {
     console.warn('directDisconnectProfile error:', err);
