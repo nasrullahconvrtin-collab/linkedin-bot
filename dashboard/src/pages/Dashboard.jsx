@@ -144,7 +144,7 @@ export default function Dashboard() {
   // Filter Prospects by Selected Timeline
   const filteredProspects = useMemo(() => {
     const { start, end } = dateBounds;
-    return prospects.filter(p => {
+    return (prospects || []).filter(p => {
       const tsStr = p.updated_at || p.reply_date || p.created_at;
       if (!tsStr) return true;
       const ts = new Date(tsStr);
@@ -163,7 +163,7 @@ export default function Dashboard() {
 
     const { start, end } = dateBounds;
 
-    prospects.forEach(p => {
+    (prospects || []).forEach(p => {
       // 1. Connection Invite Sent
       const invDate = getEventDate(p, 'invitation');
       if (invDate && invDate >= start && invDate <= end) {
@@ -213,7 +213,7 @@ export default function Dashboard() {
   // Extract Replies & Activity for the selected timeline
   const timelineReplies = useMemo(() => {
     const { start, end } = dateBounds;
-    return prospects.filter(p => {
+    return (prospects || []).filter(p => {
       if (!p.campaign_id || !p.reply_date) return false;
       const d = new Date(p.reply_date);
       return d >= start && d <= end;
@@ -223,7 +223,7 @@ export default function Dashboard() {
   const timelineActivities = useMemo(() => {
     const { start, end } = dateBounds;
     const list = [];
-    prospects.forEach(p => {
+    (prospects || []).forEach(p => {
       const prospectName = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || p.name || 'LinkedIn Member';
       const headlineStr = p.title || p.company || 'Prospect';
       
@@ -309,15 +309,15 @@ export default function Dashboard() {
   }, [prospects, dateBounds]);
 
   // Campaign pagination calculations
-  const totalCampaignPages = Math.ceil(campaigns.length / itemsPerPage) || 1;
+  const totalCampaignPages = Math.ceil((campaigns || []).length / itemsPerPage) || 1;
   const paginatedCampaigns = useMemo(() => {
     const start = (campaignPage - 1) * itemsPerPage;
-    return campaigns.slice(start, start + itemsPerPage);
+    return (campaigns || []).slice(start, start + itemsPerPage);
   }, [campaigns, campaignPage, itemsPerPage]);
 
   // Chart Data preparation
   const chartData = useMemo(() => {
-    return campaigns.slice(0, 6).map(c => ({
+    return (campaigns || []).slice(0, 6).map(c => ({
       name: c.name ? (c.name.length > 18 ? c.name.slice(0, 18) + '...' : c.name) : 'Campaign',
       Sent: c.sent || 0,
       Accepted: c.accepted || 0,
@@ -328,7 +328,7 @@ export default function Dashboard() {
   // Campaign ID to Name map
   const campaignsMap = useMemo(() => {
     const map = {};
-    campaigns.forEach(c => { map[c.id] = c.name; });
+    (campaigns || []).forEach(c => { map[c.id] = c.name; });
     return map;
   }, [campaigns]);
 

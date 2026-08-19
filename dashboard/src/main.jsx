@@ -3,7 +3,10 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 
-const savedTheme = localStorage.getItem('lf_theme') === 'light' ? 'light' : 'dark';
+let savedTheme = 'dark';
+try {
+  savedTheme = localStorage.getItem('lf_theme') === 'light' ? 'light' : 'dark';
+} catch (e) {}
 document.documentElement.dataset.theme = savedTheme;
 document.documentElement.style.colorScheme = savedTheme;
 
