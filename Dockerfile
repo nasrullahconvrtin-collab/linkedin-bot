@@ -1,15 +1,11 @@
 FROM python:3.11-slim
 
-WORKDIR /app
+WORKDIR /app/backend
 
-# Copy requirements and install
 COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend application code
-COPY backend/ ./backend/
-
-WORKDIR /app/backend
+COPY backend/ ./
 
 EXPOSE 8000
 
