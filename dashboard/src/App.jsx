@@ -54,6 +54,7 @@ class ErrorBoundary extends React.Component {
 }
 
 import Login          from './pages/Login';
+import Signup         from './pages/Signup';
 import Dashboard      from './pages/Dashboard';
 import Campaigns      from './pages/Campaigns';
 import CampaignDetail from './pages/CampaignDetail';
@@ -65,6 +66,7 @@ import Inbox          from './pages/Inbox';
 import Replies        from './pages/Replies';
 import Profiles       from './pages/Profiles';
 import Settings       from './pages/Settings';
+import { AuthProvider } from './context/AuthContext';
 
 function RequireAuth({ children }) {
   return localStorage.getItem('lf_auth') === '1'
@@ -97,39 +99,42 @@ function ThemedToaster() {
 export default function App() {
   return (
     <ErrorBoundary>
-    <BrowserRouter>
-      <ThemedToaster />
-      <Routes>
-        <Route path="/login" element={<Login />} />
+      <AuthProvider>
+        <BrowserRouter>
+          <ThemedToaster />
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
 
-        {/* All authenticated routes share one AppProvider */}
-        <Route
-          path="/*"
-          element={
-            <RequireAuth>
-              <AppProvider>
-                <Routes>
-                  <Route path="/"               element={<Dashboard />} />
-                  <Route path="/campaign-wizard" element={<Navigate to="/campaigns" replace />} />
-                  <Route path="/campaigns"      element={<Campaigns />} />
-                  <Route path="/campaigns/:id"  element={<CampaignDetail />} />
-                  <Route path="/queue"          element={<Queue />} />
-                  <Route path="/message-templates" element={<MessageTemplates />} />
-                  <Route path="/prospects"      element={<Prospects />} />
-                  <Route path="/needs-personalization" element={<NeedsPersonalization />} />
-                  <Route path="/inbox"          element={<Inbox />} />
-                  <Route path="/replies font"   element={<Navigate to="/replies" replace />} />
-                  <Route path="/replies"        element={<Replies />} />
-                  <Route path="/profiles"       element={<Profiles />} />
-                  <Route path="/settings"       element={<Settings />} />
-                  <Route path="*"               element={<Navigate to="/" replace />} />
-                </Routes>
-              </AppProvider>
-            </RequireAuth>
-          }
-        />
-      </Routes>
-    </BrowserRouter>
+            {/* All authenticated routes share one AppProvider */}
+            <Route
+              path="/*"
+              element={
+                <RequireAuth>
+                  <AppProvider>
+                    <Routes>
+                      <Route path="/"               element={<Dashboard />} />
+                      <Route path="/campaign-wizard" element={<Navigate to="/campaigns" replace />} />
+                      <Route path="/campaigns"      element={<Campaigns />} />
+                      <Route path="/campaigns/:id"  element={<CampaignDetail />} />
+                      <Route path="/queue"          element={<Queue />} />
+                      <Route path="/message-templates" element={<MessageTemplates />} />
+                      <Route path="/prospects"      element={<Prospects />} />
+                      <Route path="/needs-personalization" element={<NeedsPersonalization />} />
+                      <Route path="/inbox"          element={<Inbox />} />
+                      <Route path="/replies font"   element={<Navigate to="/replies" replace />} />
+                      <Route path="/replies"        element={<Replies />} />
+                      <Route path="/profiles"       element={<Profiles />} />
+                      <Route path="/settings"       element={<Settings />} />
+                      <Route path="*"               element={<Navigate to="/" replace />} />
+                    </Routes>
+                  </AppProvider>
+                </RequireAuth>
+              }
+            />
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
     </ErrorBoundary>
   );
 }
