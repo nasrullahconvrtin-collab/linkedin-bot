@@ -1290,10 +1290,13 @@ export const directSendUnipileInMail = async (prospect, subject = '', text = '')
 };
 
 export const directGetUnipileChats = async (limit = 50) => {
-  if (!activeAccountId) {
+  // Always look up the current user's connected account ID fresh — never rely on stale module var
+  const userProfiles = await directGetProfiles();
+  const accountId = userProfiles?.[0]?.unipile_account_id || (isSuperAdminUser() ? DEFAULT_ACCOUNT_ID : null);
+  if (!accountId) {
     return { success: false, chats: [] };
   }
-  const { ok, data } = await unipileFetch(`/chats?account_id=${activeAccountId}&limit=${limit}`);
+  const { ok, data } = await unipileFetch(`/chats?account_id=${accountId}&limit=${limit}`);
   if (ok && data) {
     return { success: true, chats: data.items || data.chats || [] };
   }
@@ -1301,8 +1304,11 @@ export const directGetUnipileChats = async (limit = 50) => {
 };
 
 export const directGetChatMessages = async (chatId, limit = 50) => {
-  if (!chatId || !activeAccountId) return { success: false, messages: [] };
-  const { ok, data } = await unipileFetch(`/chats/${encodeURIComponent(chatId)}/messages?account_id=${activeAccountId}&limit=${limit}`);
+  if (!chatId) return { success: false, messages: [] };
+  const userProfiles = await directGetProfiles();
+  const accountId = userProfiles?.[0]?.unipile_account_id || (isSuperAdminUser() ? DEFAULT_ACCOUNT_ID : null);
+  if (!accountId) return { success: false, messages: [] };
+  const { ok, data } = await unipileFetch(`/chats/${encodeURIComponent(chatId)}/messages?account_id=${accountId}&limit=${limit}`);
   if (ok && data) {
     return { success: true, messages: data.items || data.messages || [] };
   }
@@ -1312,7 +1318,9 @@ export const directGetChatMessages = async (chatId, limit = 50) => {
 export const directGetUnipileUserProfile = async (identifier) => {
   if (!identifier) return { success: false, profile: null };
   const cleanId = String(identifier).trim().replace(/^https?:\/\/(www\.)?linkedin\.com\/in\//i, '').replace(/\/$/, '');
-  const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(cleanId)}?account_id=${DEFAULT_ACCOUNT_ID}`);
+  const userProfiles = await directGetProfiles();
+  const accountId = userProfiles?.[0]?.unipile_account_id || DEFAULT_ACCOUNT_ID;
+  const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(cleanId)}?account_id=${accountId}`);
   if (ok && data) {
     return { success: true, profile: data };
   }

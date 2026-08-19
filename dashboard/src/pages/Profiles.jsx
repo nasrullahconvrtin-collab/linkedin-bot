@@ -20,7 +20,7 @@ import {
   submitUnipile2FA,
   withdrawOldInvitations,
 } from '../services/api';
-import { supabaseDirect, directDisconnectProfile, getStoredDisconnectedFlag } from '../services/directServices';
+import { supabaseDirect, directDisconnectProfile, getStoredDisconnectedFlag, directCreateProfile, getActiveOrganizationId, getActiveUserAccount, isSuperAdminUser } from '../services/directServices';
 
 const TIMELINE_PRESETS = [
   { key: 'today', label: 'Today' },
@@ -113,19 +113,29 @@ export default function Profiles() {
   const loadNetworkData = async () => {
     setNetLoading(true);
     try {
+      const isSuper = isSuperAdminUser();
+      const orgId = getActiveOrganizationId();
+      const userAcc = getActiveUserAccount();
+
+      let pQuery = supabaseDirect.from('prospects').select('*');
+      if (!isSuper) {
+        if (orgId) pQuery = pQuery.eq('organization_id', orgId);
+        else if (userAcc?.email) pQuery = pQuery.eq('user_email', userAcc.email.toLowerCase());
+      }
+
       const [accRes, connRes, invRes, pRes] = await Promise.all([
         getUnipileAccountInfo().catch(() => null),
         getNetworkingConnections().catch(() => ({ connections: [] })),
         getNetworkingInvitations().catch(() => ({ invitations: [] })),
-        supabaseDirect.from('prospects').select('*').catch(() => ({ data: [] })),
+        pQuery.catch(() => ({ data: [] })),
       ]);
 
       if (accRes && accRes.id) {
         setAccountInfo(accRes);
-        const resolvedName = accRes.name && accRes.name !== 'Maryam Ansar' ? accRes.name : 'Fatima Maqsood';
+        const resolvedName = accRes.name || 'LinkedIn Profile';
         setEditName(resolvedName);
-        setEditAccId(accRes.id || 'zXneBg9WRZ-m7iFuKULo1Q');
-        setExistingAccId(accRes.id || 'zXneBg9WRZ-m7iFuKULo1Q');
+        setEditAccId(accRes.id);
+        setExistingAccId(accRes.id);
         setDisplayName(resolvedName);
       } else {
         setAccountInfo(null);
@@ -258,20 +268,14 @@ export default function Profiles() {
     e.preventDefault();
     setSavingSettings(true);
     try {
-      await supabaseDirect.from('profiles').upsert([{
+      // Use directCreateProfile so organization_id is always stamped on the row
+      await directCreateProfile({
         profile_key: 'profile_1',
-        display_name: editName || 'Fatima Maqsood',
-        unipile_account_id: editAccId || 'zXneBg9WRZ-m7iFuKULo1Q',
-        session_active: true,
-        updated_at: new Date().toISOString(),
-      }]);
-      await createProfile({
-        profile_key: 'profile_1',
-        display_name: editName || 'Fatima Maqsood',
-        unipile_account_id: editAccId || 'zXneBg9WRZ-m7iFuKULo1Q',
+        display_name: editName || 'LinkedIn Profile',
+        unipile_account_id: editAccId,
         session_active: true,
       });
-      toast.success('Account settings updated and saved to database!');
+      toast.success('Account settings updated and saved!');
       await fetchProfiles();
       await loadNetworkData();
     } catch (err) {
@@ -319,6 +323,15 @@ export default function Profiles() {
         setCheckpointAccId(res.account_id || '');
         toast.error('2FA / Verification code required for LinkedIn');
       } else if (res.success) {
+        // Save profile row with correct organization_id
+        if (res.account_id) {
+          await directCreateProfile({
+            profile_key: `profile_${Date.now()}`,
+            display_name: directEmail.split('@')[0] || 'LinkedIn Profile',
+            unipile_account_id: res.account_id,
+            session_active: true,
+          });
+        }
         toast.success(`LinkedIn account connected successfully!`);
         setModal(false);
         fetchProfiles();
@@ -339,6 +352,15 @@ export default function Profiles() {
     try {
       const res = await submitUnipile2FA(checkpointAccId, twoFACode);
       if (res.success) {
+        // Save profile row with correct organization_id
+        if (checkpointAccId) {
+          await directCreateProfile({
+            profile_key: `profile_${Date.now()}`,
+            display_name: directEmail.split('@')[0] || 'LinkedIn Profile',
+            unipile_account_id: checkpointAccId,
+            session_active: true,
+          });
+        }
         toast.success('2FA verification successful! LinkedIn account connected.');
         setCheckpointReq(false);
         setModal(false);
@@ -360,6 +382,15 @@ export default function Profiles() {
     try {
       const res = await connectUnipileCookie(cookieVal);
       if (res.success) {
+        // Save profile row with correct organization_id
+        if (res.account_id) {
+          await directCreateProfile({
+            profile_key: `profile_${Date.now()}`,
+            display_name: 'LinkedIn Profile',
+            unipile_account_id: res.account_id,
+            session_active: true,
+          });
+        }
         toast.success('LinkedIn profile connected via session cookie!');
         setModal(false);
         fetchProfiles();
@@ -378,20 +409,14 @@ export default function Profiles() {
     e.preventDefault();
     setLoading(true);
     try {
-      await supabaseDirect.from('profiles').upsert([{
-        profile_key: 'profile_1',
-        display_name: displayName || 'Fatima Maqsood',
-        unipile_account_id: existingAccId || 'zXneBg9WRZ-m7iFuKULo1Q',
-        session_active: true,
-        updated_at: new Date().toISOString(),
-      }]);
-      await createProfile({
-        profile_key: 'profile_1',
-        display_name: displayName || 'Fatima Maqsood',
-        unipile_account_id: existingAccId || 'zXneBg9WRZ-m7iFuKULo1Q',
+      // directCreateProfile stamps organization_id automatically
+      await directCreateProfile({
+        profile_key: `profile_${Date.now()}`,
+        display_name: displayName || 'LinkedIn Profile',
+        unipile_account_id: existingAccId,
         session_active: true,
       });
-      toast.success(`LinkedIn Account (${displayName || 'Fatima Maqsood'}) connected & saved!`);
+      toast.success(`LinkedIn Account (${displayName || 'LinkedIn Profile'}) connected & saved!`);
       setModal(false);
       fetchProfiles();
       loadNetworkData();
