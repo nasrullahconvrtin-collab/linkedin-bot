@@ -1,10 +1,14 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { Zap, Lock, Eye, EyeOff, Mail, Building, ArrowRight } from 'lucide-react';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { Zap, Lock, Eye, EyeOff, Mail, Building, ArrowRight, UserPlus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 
 export default function Signup() {
+  const [searchParams] = useSearchParams();
+  const invitedOrgId = searchParams.get('org_id');
+  const invitedRole = searchParams.get('role') || 'member';
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [orgName, setOrgName] = useState('');
@@ -21,7 +25,7 @@ export default function Signup() {
     setLoading(true);
     try {
       await signUpWithEmail(email, password, orgName.trim() || 'My Workspace');
-      toast.success('Account created successfully! Welcome to LinkedFlow.');
+      toast.success(invitedOrgId ? 'Joined workspace successfully!' : 'Account created successfully! Welcome to LinkedFlow.');
       nav('/');
     } catch (err) {
       toast.error(err.message || 'Registration failed');

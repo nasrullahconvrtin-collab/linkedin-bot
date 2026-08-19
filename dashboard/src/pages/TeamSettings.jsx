@@ -144,14 +144,27 @@ export default function TeamSettings() {
               </select>
             </div>
 
-            <div className="flex items-end">
+            <div className="flex items-end gap-2">
               <button
                 type="submit"
                 disabled={inviting || !inviteEmail.trim()}
-                className="w-full py-2 bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold text-xs rounded-xl shadow-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2 h-10"
+                className="flex-1 py-2 bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold text-xs rounded-xl shadow-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2 h-10"
               >
                 {inviting ? <Loader2 size={15} className="animate-spin" /> : <UserPlus size={15} />}
                 Send Invite
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const link = `${window.location.origin}/signup?org_id=${organization?.id || ''}&role=${inviteRole}`;
+                  navigator.clipboard.writeText(link);
+                  toast.success('Direct workspace invite link copied to clipboard!');
+                }}
+                className="px-3 py-2 bg-[#111111] hover:bg-[#222222] text-[#9ca3af] hover:text-white border border-[#2a2a2a] text-xs font-semibold rounded-xl transition-all h-10 flex items-center gap-1.5 shrink-0"
+                title="Copy Direct Workspace Invite Link"
+              >
+                <Copy size={14} /> Copy Link
               </button>
             </div>
           </form>
