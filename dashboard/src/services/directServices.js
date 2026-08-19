@@ -97,7 +97,7 @@ export const getActiveOrganizationId = () => {
   return null;
 };
 
-let activeAccountId = getStoredDisconnectedFlag() ? null : DEFAULT_ACCOUNT_ID;
+let activeAccountId = null;
 
 export const directGetProfiles = async () => {
   if (getStoredDisconnectedFlag()) {
@@ -153,7 +153,7 @@ export const directCreateProfile = async (data) => {
   const orgId = getActiveOrganizationId();
   const profile_key = data.profile_key || `prof_${Date.now()}`;
   const display_name = data.display_name || 'LinkedIn Profile';
-  const unipile_account_id = data.unipile_account_id || DEFAULT_ACCOUNT_ID;
+  const unipile_account_id = data.unipile_account_id || null;
   activeAccountId = unipile_account_id;
 
   try {
