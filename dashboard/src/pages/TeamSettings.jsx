@@ -41,10 +41,14 @@ export default function TeamSettings() {
     setInviting(true);
     try {
       // Send real invitation email via Supabase Auth (Option 1 built-in email provider)
+      const redirectUrl = typeof window !== 'undefined' && !window.location.hostname.includes('localhost')
+        ? `${window.location.origin}/login`
+        : 'https://linkedflow-lite.vercel.app/login';
+
       const { error: authError } = await supabaseDirect.auth.signInWithOtp({
         email: inviteEmail.trim(),
         options: {
-          emailRedirectTo: `${window.location.origin}/login`,
+          emailRedirectTo: redirectUrl,
           data: {
             organization_id: organization?.id,
             role: inviteRole,

@@ -76,8 +76,18 @@ export function AuthProvider({ children }) {
     return data;
   };
 
+  const getRedirectUrl = () => {
+    return typeof window !== 'undefined' && !window.location.hostname.includes('localhost')
+      ? `${window.location.origin}/login`
+      : 'https://linkedflow-lite.vercel.app/login';
+  };
+
   const signUpWithEmail = async (email, password, orgName = 'My Workspace') => {
-    const { data, error } = await supabaseDirect.auth.signUp({ email, password });
+    const { data, error } = await supabaseDirect.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo: getRedirectUrl() }
+    });
     if (error) throw error;
 
     if (data.user) {
@@ -108,7 +118,7 @@ export function AuthProvider({ children }) {
   const loginWithGoogle = async () => {
     const { data, error } = await supabaseDirect.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: window.location.origin },
+      options: { redirectTo: getRedirectUrl() },
     });
     if (error) throw error;
     return data;
