@@ -75,12 +75,14 @@ export const isSuperAdminUser = () => {
     if (email === 'nasrullah.freelancer@gmail.com' || email === 'nasrullah.freelancer@gmail.con' || role === 'superadmin') {
       return true;
     }
-    // Purge stale super admin flag if current account is a normal member/user
+    // Purge stale super admin flag — this is a normal member account
     localStorage.removeItem('lf_is_superadmin');
     return false;
   }
 
-  return true;
+  // No user account found — cannot confirm super admin, purge the stale flag
+  localStorage.removeItem('lf_is_superadmin');
+  return false;
 };
 
 export const getActiveOrganizationId = () => {
