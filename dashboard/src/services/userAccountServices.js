@@ -20,17 +20,19 @@ export const dbCreateUserAccount = async ({ email, password, displayName, worksp
 
   // 2. Create Safety Settings for Organization
   if (orgId) {
-    await supabaseDirect.from('account_safety_settings').insert([{
-      organization_id: orgId,
-      max_daily_invites: 25,
-      max_daily_messages: 50,
-      max_daily_profile_visits: 80,
-      jitter_delay_min_minutes: 4,
-      jitter_delay_max_minutes: 12,
-      working_hours_start: '09:00',
-      working_hours_end: '18:00',
-      timezone: 'UTC',
-    }]).catch(() => {});
+    try {
+      await supabaseDirect.from('account_safety_settings').insert([{
+        organization_id: orgId,
+        max_daily_invites: 25,
+        max_daily_messages: 50,
+        max_daily_profile_visits: 80,
+        jitter_delay_min_minutes: 4,
+        jitter_delay_max_minutes: 12,
+        working_hours_start: '09:00',
+        working_hours_end: '18:00',
+        timezone: 'UTC',
+      }]);
+    } catch (e) {}
   }
 
   // 3. Create User Account Credentials
