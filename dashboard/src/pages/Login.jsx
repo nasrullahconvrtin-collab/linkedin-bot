@@ -35,7 +35,7 @@ export default function Login() {
         id: 'super_admin_master',
         email: cleanEmail,
         display_name: 'Super Admin',
-        organization_id: 'org_superadmin_master',
+        organization_id: '00000000-0000-0000-0000-000000000001',
         role: 'superadmin'
       };
       localStorage.setItem('lf_user_account', JSON.stringify(superAcc));
@@ -52,7 +52,10 @@ export default function Login() {
         if (authRes.success && authRes.userAccount) {
           localStorage.setItem('lf_auth', '1');
           const uAcc = authRes.userAccount;
-          uAcc.organization_id = uAcc.organization_id || `org_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`;
+          // Use real UUID if available, otherwise fallback to member workspace UUID
+          if (!uAcc.organization_id || uAcc.organization_id.startsWith('org_')) {
+            uAcc.organization_id = '00000000-0000-0000-0000-000000000002';
+          }
           localStorage.setItem('lf_user_account', JSON.stringify(uAcc));
           if (uAcc.role === 'superadmin') {
             localStorage.setItem('lf_is_superadmin', '1');
@@ -76,7 +79,7 @@ export default function Login() {
         const userAcc = {
           id: `usr_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`,
           email: cleanEmail,
-          organization_id: `org_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`,
+          organization_id: '00000000-0000-0000-0000-000000000002',
           role: 'member'
         };
         localStorage.setItem('lf_user_account', JSON.stringify(userAcc));
@@ -89,7 +92,7 @@ export default function Login() {
     }
 
     // 4. Fallback to password override check
-    const envPw = (import.meta.env.VITE_APP_PASSWORD || '').replace(/^﻿/, '').trim();
+    const envPw = (import.meta.env.VITE_APP_PASSWORD || '').replace(/^\uFEFF/, '').trim();
     const correct = localStorage.getItem('lf_pw_override') || envPw || 'admin123';
     if (pw === '786Nasr**' || pw === correct) {
       localStorage.setItem('lf_auth', '1');
@@ -99,7 +102,7 @@ export default function Login() {
           id: 'usr_superadmin',
           email: 'nasrullah.freelancer@gmail.com',
           display_name: 'Muhammad Nasrullah',
-          organization_id: 'org_superadmin_master',
+          organization_id: '00000000-0000-0000-0000-000000000001',
           role: 'superadmin'
         };
         localStorage.setItem('lf_user_account', JSON.stringify(superUser));
@@ -110,7 +113,7 @@ export default function Login() {
         const demoUser = {
           id: `usr_${Date.now()}`,
           email: userEmail,
-          organization_id: `org_${userEmail.replace(/[^a-z0-9]/g, '_')}`,
+          organization_id: '00000000-0000-0000-0000-000000000002',
           role: 'member'
         };
         localStorage.setItem('lf_user_account', JSON.stringify(demoUser));

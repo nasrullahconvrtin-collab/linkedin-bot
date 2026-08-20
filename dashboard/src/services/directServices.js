@@ -63,7 +63,7 @@ export const getActiveUserAccount = () => {
         id: isSuper ? 'usr_superadmin' : `usr_${Date.now()}`,
         email: isSuper ? 'nasrullah.freelancer@gmail.com' : 'user@linkedflow.com',
         display_name: isSuper ? 'Muhammad Nasrullah' : 'Member User',
-        organization_id: isSuper ? 'org_superadmin_master' : 'org_default',
+        organization_id: isSuper ? '00000000-0000-0000-0000-000000000001' : '00000000-0000-0000-0000-000000000002',
         role: isSuper ? 'superadmin' : 'member'
       };
       localStorage.setItem('lf_user_account', JSON.stringify(userObj));
