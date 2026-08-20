@@ -880,6 +880,12 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             }
           });
 
+          const orgId = getActiveOrganizationId();
+          const userAcc = getActiveUserAccount();
+          const userEmail = userAcc?.email ? userAcc.email.toLowerCase() : null;
+          customVars.organization_id = orgId || userAcc?.organization_id || null;
+          customVars.user_email = userEmail;
+
           // Compute names & contacts
           let firstName = rowData.first_name || rowData.name?.split(' ')[0] || 'Lead';
           let lastName = rowData.last_name || rowData.name?.split(' ').slice(1).join(' ') || '';
