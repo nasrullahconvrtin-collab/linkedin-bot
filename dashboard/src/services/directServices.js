@@ -174,6 +174,10 @@ export const directCreateProfile = async (data) => {
         display_name,
         unipile_account_id,
         status: 'active',
+        organization_id: orgId || userAcc?.organization_id || null,
+        user_email: email,
+        session_active: true,
+        enabled: true,
         settings: {
           organization_id: orgId || userAcc?.organization_id || null,
           user_email: email,
@@ -490,6 +494,8 @@ export const directCreateCampaign = async (data) => {
   const payload = {
     name: data.name || 'New Campaign',
     status: data.status || 'draft',
+    organization_id: orgId || userAcc?.organization_id || null,
+    user_email: email,
     profile_key: data.profile_key || (data.settings && data.settings.profile_key) || 'profile_1',
     daily_limit: data.daily_limit || 25,
     sequence: data.sequence || [],
@@ -666,6 +672,8 @@ export const directCreateProspect = async (data) => {
     campaign_id: data.campaign_id || null,
     list_id: data.list_id || null,
     assigned_account: data.assigned_account || 'profile_1',
+    organization_id: orgId || userAcc?.organization_id || null,
+    user_email: email,
     custom_variables: {
       ...(data.custom_variables || {}),
       organization_id: orgId || userAcc?.organization_id || null,
@@ -1090,9 +1098,23 @@ export const downloadSampleCSVTemplate = () => {
 // ── Prospect Lists Direct Operations ────────────────────────────
 
 export const directGetProspectLists = async () => {
+  const userAcc = getActiveUserAccount();
+  const orgId = getActiveOrganizationId();
+  const userEmail = userAcc?.email ? userAcc.email.toLowerCase() : null;
+
   try {
-    const { data, error } = await supabaseDirect.from('prospect_lists').select('*').order('created_at', { ascending: false });
-    if (!error && data) return { lists: data };
+    const { data: rawLists, error } = await supabaseDirect.from('prospect_lists').select('*').order('created_at', { ascending: false });
+    if (!error && rawLists) {
+      const lists = rawLists.filter(l => {
+        const lOrgId = l.organization_id;
+        const lEmail = (l.user_email || '').toLowerCase();
+        if (orgId && lOrgId && lOrgId === orgId) return true;
+        if (userEmail && lEmail && lEmail === userEmail) return true;
+        if (!lOrgId && !lEmail) return true;
+        return false;
+      });
+      return { lists };
+    }
   } catch (e) {
     console.warn('directGetProspectLists warning:', e);
   }
@@ -1100,9 +1122,15 @@ export const directGetProspectLists = async () => {
 };
 
 export const directCreateProspectList = async (data) => {
+  const userAcc = getActiveUserAccount();
+  const orgId = getActiveOrganizationId();
+  const email = userAcc?.email ? userAcc.email.toLowerCase() : null;
+
   const payload = {
     name: data.name || 'New List',
     description: data.description || '',
+    organization_id: orgId || userAcc?.organization_id || null,
+    user_email: email,
     created_at: new Date().toISOString(),
   };
   try {
