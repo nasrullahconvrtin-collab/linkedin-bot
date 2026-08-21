@@ -412,7 +412,7 @@ export const directGetCampaigns = async () => {
         return false;
       });
 
-      const { data: prospects } = await supabaseDirect.from('prospects').select('id, campaign_id, status, reply_date, custom_variables, current_step');
+      const { data: prospects } = await supabaseDirect.from('prospects').select('id, campaign_id, status, connection_status, connection_sent_date, message_sent_date, custom_variables');
       const prospectMap = new Map();
       (prospects || []).forEach(p => {
         if (!p.campaign_id) return;
@@ -427,7 +427,7 @@ export const directGetCampaigns = async () => {
         if (['Connection Accepted', 'CONNECTED', 'Replied'].includes(p.status)) {
           stats.accepted += 1;
         }
-        if (p.status?.toLowerCase() === 'replied' || p.reply_date) {
+        if (p.status?.toLowerCase() === 'replied' || p.custom_variables?.reply_date) {
           stats.replied += 1;
         }
         if (['Completed', 'Replied', 'replied', 'No Response'].includes(p.status) || p.reply_date) {
@@ -536,7 +536,7 @@ export const directGetCampaign = async (id) => {
     if (!error && campaign) {
       const { data: prospects } = await supabaseDirect
         .from('prospects')
-        .select('id, campaign_id, status, connection_status, connection_sent_date, message_sent_date, reply_date, custom_variables, current_step')
+        .select('id, campaign_id, status, connection_status, connection_sent_date, message_sent_date, custom_variables')
         .eq('campaign_id', id);
       
       const rows = prospects || [];
@@ -576,14 +576,14 @@ export const directGetCampaign = async (id) => {
         messaged: rows.filter(r => r.status === 'Initial Message Sent' || r.status === 'Message Sent' || r.message_sent_date).length,
         following_up: rows.filter(r => r.status === 'Following Up').length,
         followup_due: rows.filter(r => r.status === 'Following Up').length,
-        completed: rows.filter(r => ['Replied', 'replied', 'No Response', 'Completed'].includes(r.status) || r.reply_date).length,
+        completed: rows.filter(r => ['Replied', 'replied', 'No Response', 'Completed'].includes(r.status) || r.custom_variables?.reply_date).length,
         failed: rows.filter(r => ['Needs Attention', 'failed', 'error', 'needs_attention'].includes(r.status?.toLowerCase())).length,
-        replied: rows.filter(r => r.status?.toLowerCase() === 'replied' || r.reply_date).length,
+        replied: rows.filter(r => r.status?.toLowerCase() === 'replied' || r.custom_variables?.reply_date).length,
         no_response: rows.filter(r => r.status === 'No Response').length,
         sequence_complete: rows.filter(r => r.status === 'Completed').length,
         needs_attention: rows.filter(r => r.status === 'Needs Attention').length,
         actions_executed,
-        replies_count: rows.filter(r => r.status?.toLowerCase() === 'replied' || r.reply_date).length,
+        replies_count: rows.filter(r => r.status?.toLowerCase() === 'replied' || r.custom_variables?.reply_date).length,
         steps_count,
         days_running,
       };
@@ -593,13 +593,13 @@ export const directGetCampaign = async (id) => {
   } catch (e) {
     console.warn('directGetCampaign warning:', e);
   }
-  return { campaign: { id, name: 'Campaign', status: 'draft', sequence: [] }, total: 0, sent: 0, accepted: 0, replied: 0, completed: 0 };
+  return { campaign: null, total: 0 };
 };
 
 export const directUpdateCampaign = async (id, updates) => {
   try {
-    const { data, error } = await supabaseDirect.from('campaigns').update(updates).eq('id', id).select();
-    if (!error && data && data[0]) return data[0];
+    const { data, error } = await supabaseDirect.from('campaigns').update(updates).eq('id', id).select().single();
+    if (!error && data) return data;
   } catch (e) {
     console.warn('directUpdateCampaign warning:', e);
   }
@@ -637,7 +637,9 @@ export const directGetProspects = async (params = {}) => {
     let query = supabaseDirect.from('prospects').select('*', { count: 'exact' });
 
     if (!isSuper) {
-      if (orgId) {
+      if (orgId && userEmail) {
+        query = query.or(`organization_id.eq.${orgId},user_email.eq.${userEmail}`);
+      } else if (orgId) {
         query = query.eq('organization_id', orgId);
       } else if (userEmail) {
         query = query.eq('user_email', userEmail);
