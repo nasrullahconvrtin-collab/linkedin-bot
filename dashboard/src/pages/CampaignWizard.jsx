@@ -421,48 +421,50 @@ export default function CampaignWizard({ onClose, onCreated }) {
                 </div>
               </div>
             )}
-
             {step === 1 && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                                <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
+              <div className="space-y-5">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                  <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-white font-semibold">Import Prospects</h3>
                     <button
                       type="button"
                       onClick={() => fileRef.current?.click()}
-                      className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#6366f1] hover:bg-[#4f46e5] text-white text-sm font-semibold transition-colors cursor-pointer"
+                      className="text-[#6366f1] hover:text-[#4f46e5] text-xs font-medium cursor-pointer"
                     >
-                      <FileUp size={15} /> Select CSV
+                      {csvFile ? 'Change CSV' : 'Choose CSV'}
                     </button>
                   </div>
-                  
                   <input
                     ref={fileRef}
                     type="file"
                     accept=".csv"
+                    onChange={e => handleCSV(e.target.files?.[0])}
                     className="hidden"
-                    onChange={(e) => handleCSV(e.target.files?.[0])}
                   />
-
                   {csvFile ? (
-                    <div className="space-y-3">
-                      <div
-                        onClick={() => setIsWizardOpen(true)}
-                        className="rounded-xl border border-[#22c55e]/30 bg-[#22c55e]/5 p-5 text-center cursor-pointer hover:bg-[#22c55e]/10 transition-all"
-                      >
-                        <FileUp size={28} className="mx-auto mb-2 text-[#22c55e]" />
-                        <p className="text-white text-sm font-bold truncate">{csvFile.name}</p>
-                        <p className="text-emerald-400 text-xs font-semibold mt-1">
-                          ✓ {csvMeta?.count || 'All'} prospects mapped
-                        </p>
+                    <div className="rounded-xl border border-[#6366f1]/30 bg-[#6366f1]/5 p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-white text-sm font-medium truncate">{csvFile.name}</p>
+                          <p className="text-[#6b7280] text-xs mt-0.5">
+                            {csvMeta?.totalRows ? `${csvMeta.totalRows} prospects detected` : `${(csvFile.size / 1024).toFixed(1)} KB`}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => { setCsvFile(null); setCsvMeta(null); setWizardColumnMapping(null); }}
+                          className="text-[#6b7280] hover:text-red-400 p-1"
+                        >
+                          <X size={15} />
+                        </button>
                       </div>
-
                       <button
                         type="button"
                         onClick={() => setIsWizardOpen(true)}
                         className="w-full py-2.5 rounded-lg border border-[#2a2a2a] bg-[#111111] hover:bg-[#222222] text-[#6366f1] hover:text-[#4f46e5] font-semibold text-xs transition-colors cursor-pointer text-center"
                       >
-                        ✏️ Re-open CSV Import Wizard
+                        ✏️ Edit mapping
                       </button>
                     </div>
                   ) : (
@@ -477,30 +479,9 @@ export default function CampaignWizard({ onClose, onCreated }) {
                   )}
                 </div>
 
-                {/* VariableMappingPanel replaced by CSVImportWizardModal */}
-<div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
-                  <h3 className="text-white font-semibold mb-4">Prospect Lists</h3>
-                  <div className="max-h-[360px] overflow-y-auto space-y-2">
-                    {lists.map(list => (
-                      <label key={list.id} className="flex items-center gap-3 p-3 rounded-lg bg-[#111111] border border-[#2a2a2a]">
-                        <input
-                          type="checkbox"
-                          checked={!!selectedLists[list.id]}
-                          onChange={e => setSelectedLists(s => ({ ...s, [list.id]: e.target.checked }))}
-                        />
-                        <div>
-                          <p className="text-white text-sm">{list.name}</p>
-                          <p className="text-[#6b7280] text-xs">{list.prospect_count || 0} prospects</p>
-                        </div>
-                      </label>
-                    ))}
-                    {lists.length === 0 && <p className="text-[#6b7280] text-sm">No lists yet.</p>}
-                  </div>
-                </div>
-
                 <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-white font-semibold">Individual Prospects</h3>
+                    <h3 className="text-white font-semibold">Select Existing Prospects</h3>
                     <button
                       onClick={() => {
                         const all = selectedIds.length !== prospects.length;
@@ -527,47 +508,49 @@ export default function CampaignWizard({ onClose, onCreated }) {
                         </div>
                       </label>
                     ))}
+                    {prospects.length === 0 && <p className="text-[#6b7280] text-sm">No existing prospects found.</p>}
                   </div>
-                </div>
-
-                <div className="lg:col-span-3 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="text-white font-semibold">Add One New Prospect</h3>
-                      <p className="text-[#6b7280] text-xs mt-1">Manual prospects are saved once, selected for this campaign, and deduplicated by the backend.</p>
-                    </div>
-                    <button
-                      onClick={() => setManualOpen(v => !v)}
-                      className="px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-sm"
-                    >
-                      {manualOpen ? 'Close' : 'Add manually'}
-                    </button>
-                  </div>
-                  {manualOpen && (
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
-                      {[
-                        ['first_name', 'First name'], ['last_name', 'Last name'], ['linkedin_url', 'LinkedIn URL'],
-                        ['email', 'Email'], ['company', 'Company'], ['job_title', 'Job title'],
-                      ].map(([key, label]) => (
-                        <input
-                          key={key}
-                          value={manualProspect[key] || ''}
-                          onChange={e => setManualProspect(p => ({ ...p, [key]: e.target.value }))}
-                          placeholder={label}
-                          className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm"
-                        />
-                      ))}
-                      <button
-                        onClick={addManualProspect}
-                        className="md:col-span-3 px-4 py-2.5 rounded-lg bg-[#6366f1] text-white text-sm font-medium"
-                      >
-                        Save and select prospect
-                      </button>
-                    </div>
-                  )}
                 </div>
               </div>
-            )}
+
+              <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-white font-semibold">Add One New Prospect</h3>
+                    <p className="text-[#6b7280] text-xs mt-1">Manual prospects are saved once, selected for this campaign, and deduplicated by the backend.</p>
+                  </div>
+                  <button
+                    onClick={() => setManualOpen(v => !v)}
+                    className="px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-sm"
+                  >
+                    {manualOpen ? 'Close' : 'Add manually'}
+                  </button>
+                </div>
+                {manualOpen && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+                    {[
+                      ['first_name', 'First name'], ['last_name', 'Last name'], ['linkedin_url', 'LinkedIn URL'],
+                      ['email', 'Email'], ['company', 'Company'], ['job_title', 'Job title'],
+                    ].map(([key, label]) => (
+                      <input
+                        key={key}
+                        value={manualProspect[key] || ''}
+                        onChange={e => setManualProspect(p => ({ ...p, [key]: e.target.value }))}
+                        placeholder={label}
+                        className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm"
+                      />
+                    ))}
+                    <button
+                      onClick={addManualProspect}
+                      className="md:col-span-3 px-4 py-2.5 rounded-lg bg-[#6366f1] text-white text-sm font-medium"
+                    >
+                      Save and select prospect
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
             {step === 2 && (
               <div className="space-y-3">

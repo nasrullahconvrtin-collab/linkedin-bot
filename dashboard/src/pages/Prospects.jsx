@@ -407,8 +407,8 @@ export default function Prospects() {
     <Layout>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-white text-2xl font-bold">Prospects / Lists</h1>
-          <p className="text-[#6b7280] text-sm mt-1">Manage prospects once, reuse them across lists and campaigns.</p>
+          <h1 className="text-white text-2xl font-bold">Prospects</h1>
+          <p className="text-[#6b7280] text-sm mt-1">Manage and organize all target leads for your outreach campaigns.</p>
         </div>
         <div className="flex gap-2">
           <button onClick={downloadSampleCSVTemplate} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#818cf8] hover:text-white text-sm" title="Download Standard CSV Template">
@@ -426,73 +426,34 @@ export default function Prospects() {
         </div>
       </div>
 
-      <div className="grid grid-cols-[280px_1fr] gap-5">
-        <aside className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-4 h-fit">
-          <button onClick={() => setActiveList('')} className={`w-full text-left px-3 py-2 rounded-lg text-sm ${!activeList ? 'bg-[#6366f1] text-white' : 'text-[#9ca3af] hover:bg-[#111111]'}`}>
-            All Prospects <span className="float-right">{total}</span>
-          </button>
-          <div className="mt-4 mb-2 flex gap-2">
-            <input value={newListName} onChange={e => setNewListName(e.target.value)} placeholder="Add list" className="min-w-0 flex-1 bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm" />
-            <button onClick={createList} className="p-2 rounded-lg bg-[#6366f1] text-white"><ListPlus size={15} /></button>
-          </div>
-          <div className="space-y-1 max-h-[520px] overflow-y-auto">
-            {lists.map(list => (
-              <div key={list.id} className={`group flex items-center gap-2 rounded-lg ${activeList === list.id ? 'bg-[#111111]' : ''}`}>
-                <button onClick={() => setActiveList(list.id)} className="flex-1 text-left px-3 py-2 text-sm text-[#9ca3af] hover:text-white">
-                  {list.name} <span className="float-right text-[#6b7280]">{list.prospect_count || 0}</span>
-                </button>
-                <button onClick={() => renameList(list)} className="hidden group-hover:block text-[#6b7280] hover:text-white"><Edit3 size={13} /></button>
-                <button onClick={() => removeList(list)} className="hidden group-hover:block text-[#6b7280] hover:text-red-400 pr-2"><Trash2 size={13} /></button>
-              </div>
-            ))}
-          </div>
-        </aside>
-
-        <main className="space-y-4">
-          <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-4">
-            <div className="flex flex-wrap gap-2">
-              <div className="relative flex-1 min-w-[220px]">
-                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6b7280]" />
-                <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name, company, LinkedIn URL, email" className="w-full pl-9 pr-3 py-2 bg-[#111111] border border-[#2a2a2a] rounded-lg text-white text-sm" />
-              </div>
-              <select value={status} onChange={e => setStatus(e.target.value)} className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white">
-                <option value="">All statuses</option>
-                {STATUSES.filter(Boolean).map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <select value={campaignId} onChange={e => setCampaignId(e.target.value)} className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white">
-                <option value="">All campaigns</option>
-                {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-              <select value={account} onChange={e => setAccount(e.target.value)} className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white">
-                <option value="">All profiles</option>
-                {['profile_1','profile_2','profile_3','profile_4','profile_5'].map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
-              {selectedIds.length > 0 && (
-                <>
-                  <select onChange={e => addSelectedToList(e.target.value)} defaultValue="" className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white">
-                    <option value="">Add selected to list...</option>
-                    {lists.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-                  </select>
-                  <select onChange={e => moveSelectedToList(e.target.value)} defaultValue="" className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white">
-                    <option value="">Move selected to list...</option>
-                    {lists.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-                  </select>
-                  <select onChange={e => addSelectedToCampaign(e.target.value)} defaultValue="" className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white">
-                    <option value="">Move/enroll to campaign...</option>
-                    {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                  {activeList && (
-                    <button onClick={removeSelectedFromActiveList} className="px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-sm">
-                      Remove from list
-                    </button>
-                  )}
-                  <button onClick={deleteSelected} className="px-3 py-2 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 text-sm">
-                    Delete selected
-                  </button>
-                </>
-              )}
+      <div className="space-y-4">
+        <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-4">
+          <div className="flex flex-wrap gap-2">
+            <div className="relative flex-1 min-w-[220px]">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6b7280]" />
+              <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name, company, LinkedIn URL, email" className="w-full pl-9 pr-3 py-2 bg-[#111111] border border-[#2a2a2a] rounded-lg text-white text-sm" />
             </div>
+            <select value={status} onChange={e => setStatus(e.target.value)} className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white">
+              <option value="">All statuses</option>
+              {STATUSES.filter(Boolean).map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <select value={campaignId} onChange={e => setCampaignId(e.target.value)} className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white">
+              <option value="">All campaigns</option>
+              {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            {selectedIds.length > 0 && (
+              <>
+                <select onChange={e => addSelectedToCampaign(e.target.value)} defaultValue="" className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white">
+                  <option value="">Move/enroll to campaign...</option>
+                  {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <button onClick={deleteSelected} className="px-3 py-2 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 text-sm">
+                  Delete selected ({selectedIds.length})
+                </button>
+              </>
+            )}
           </div>
+        </div>
 
           <div className="rounded-xl border border-[#2a2a2a] overflow-hidden">
             <table className="w-full text-sm">
@@ -553,8 +514,7 @@ export default function Prospects() {
               </tbody>
             </table>
           </div>
-        </main>
-      </div>
+        </div>
 
       {panel && (
         <div className="fixed inset-0 z-50 flex">

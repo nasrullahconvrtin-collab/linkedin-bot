@@ -8,7 +8,7 @@ import { useApp } from '../context/AppContext';
 
 const NAV = [
   { to: '/',          label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: '/prospects', label: 'Prospects / Lists', icon: Users },
+  { to: '/prospects', label: 'Prospects', icon: Users },
 ];
 
 const CAMPAIGN_NAV = [

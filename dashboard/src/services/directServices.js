@@ -130,11 +130,10 @@ export const directGetProfiles = async () => {
         const pOrgId = p.organization_id || p.settings?.organization_id || p.settings?.orgId;
         const pEmail = (p.user_email || p.settings?.user_email || p.settings?.email || '').toLowerCase();
 
-        // If super admin, prioritize superadmin profiles
+        // If super admin, ONLY return superadmin profile (Muhammad Nasrullah)
         if (isSuper) {
           if (pOrgId === '00000000-0000-0000-0000-000000000001' || pEmail === 'nasrullah.freelancer@gmail.com') return true;
-          if (!pOrgId && !pEmail) return true;
-          return true; // Super admin can manage all
+          return false;
         }
 
         // For member users, STRICTLY match their orgId or userEmail
