@@ -114,24 +114,15 @@ export const directGetProfiles = async () => {
     return [];
   }
 
-  const orgId = getActiveOrganizationId();
-  const userAcc = getActiveUserAccount();
-  const userEmail = userAcc?.email ? userAcc.email.toLowerCase() : null;
-
   try {
     const { data, error } = await supabaseDirect.from('profiles').select('*');
     if (!error && data && data.length > 0) {
-      // Filter out user account pseudo-profiles (profile_key starting with 'user_')
+      // Only filter out pseudo-profiles created by the user-account system (profile_key starting with 'user_')
+      // Real LinkedIn profiles have a unipile_account_id
       const realProfiles = data.filter(p => {
-        if (!p.unipile_account_id || p.profile_key?.startsWith('user_')) return false;
-
-        const pOrgId = p.organization_id || p.settings?.organization_id || p.settings?.orgId;
-        const pEmail = (p.user_email || p.settings?.user_email || p.settings?.email || '').toLowerCase();
-
-        if (orgId && pOrgId && pOrgId === orgId) return true;
-        if (userEmail && pEmail && pEmail === userEmail) return true;
-        if (!pOrgId && !pEmail) return true;
-        return false;
+        if (p.profile_key?.startsWith('user_')) return false;
+        if (!p.unipile_account_id) return false;
+        return true;
       });
 
       return realProfiles.map(p => ({
@@ -147,9 +138,10 @@ export const directGetProfiles = async () => {
     console.warn('Supabase fetch error:', e);
   }
 
-  // Return empty array if no profiles exist — NO demo data fallbacks
+  // Return empty array if no profiles exist
   return [];
 };
+
 
 export const directCreateProfile = async (data) => {
   try {
