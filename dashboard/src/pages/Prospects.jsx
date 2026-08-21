@@ -503,16 +503,16 @@ export default function Prospects() {
                     rows.forEach(r => { next[r.id] = e.target.checked; });
                     setSelected(next);
                   }} /></th>
-                  {['Name', 'Job Title', 'Company', 'Campaign', 'Email', 'Status', 'LinkedIn URL', 'Custom Fields'].map(h => (
+                  {['Name', 'Job Title', 'Company', 'Campaign', 'Email', 'Status', 'LinkedIn URL', 'Custom Fields', 'Actions'].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs text-[#6b7280] uppercase">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#1f1f1f]">
                 {loading ? (
-                  <tr><td colSpan={9} className="px-4 py-8 text-center text-[#6b7280]">Loading prospects...</td></tr>
+                  <tr><td colSpan={10} className="px-4 py-8 text-center text-[#6b7280]">Loading prospects...</td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan={9} className="px-4 py-8 text-center text-[#6b7280]">No prospects found</td></tr>
+                  <tr><td colSpan={10} className="px-4 py-8 text-center text-[#6b7280]">No prospects found</td></tr>
                 ) : rows.map(r => (
                   <tr key={r.id} className="hover:bg-[#111111] cursor-pointer" onClick={() => openPanel(r)}>
                     <td className="px-4 py-3" onClick={e => e.stopPropagation()}><input type="checkbox" checked={!!selected[r.id]} onChange={e => setSelected(s => ({ ...s, [r.id]: e.target.checked }))} /></td>
@@ -524,6 +524,30 @@ export default function Prospects() {
                     <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
                     <td className="px-4 py-3 text-[#6b7280] max-w-[220px] truncate">{r.linkedin_url || '-'}</td>
                     <td className="px-4 py-3 text-[#6b7280]">{Object.keys(r.custom_fields || {}).length}</td>
+                    <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => openPanel(r)}
+                          title="Edit prospect"
+                          className="p-1.5 rounded-lg text-[#6b7280] hover:text-white hover:bg-[#2a2a2a] transition-colors"
+                        >
+                          <Edit3 size={14} />
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`Delete prospect "${[r.first_name, r.last_name].filter(Boolean).join(' ') || 'this lead'}"?`)) return;
+                            await deleteProspect(r.id);
+                            toast.success('Prospect deleted');
+                            loadRows();
+                            loadLists();
+                          }}
+                          title="Delete prospect"
+                          className="p-1.5 rounded-lg text-[#6b7280] hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -718,9 +742,26 @@ export default function Prospects() {
                   </div>
                 </div>
               )}
-              <button onClick={saveProspect} className="flex items-center gap-2 px-4 py-2.5 bg-[#6366f1] rounded-lg text-white text-sm font-medium">
-                <Save size={15} /> Save Prospect
-              </button>
+              <div className="flex items-center justify-between pt-4 border-t border-[#2a2a2a]">
+                <button onClick={saveProspect} className="flex items-center gap-2 px-5 py-2.5 bg-[#6366f1] hover:bg-[#4f46e5] rounded-lg text-white text-sm font-semibold shadow-md transition-colors">
+                  <Save size={15} /> Save Prospect
+                </button>
+                {panel?.mode === 'edit' && (
+                  <button
+                    onClick={async () => {
+                      if (!confirm(`Are you sure you want to permanently delete this prospect?`)) return;
+                      await deleteProspect(panel.id);
+                      toast.success('Prospect deleted');
+                      setPanel(null);
+                      loadRows();
+                      loadLists();
+                    }}
+                    className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-lg text-sm font-medium transition-colors"
+                  >
+                    <Trash2 size={15} /> Delete Prospect
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
