@@ -110,10 +110,6 @@ export const getActiveOrganizationId = () => {
 let activeAccountId = null;
 
 export const directGetProfiles = async () => {
-  if (getStoredDisconnectedFlag()) {
-    return [];
-  }
-
   const isSuper = isSuperAdminUser();
   const orgId = getActiveOrganizationId();
   const userAcc = getActiveUserAccount();
@@ -252,10 +248,6 @@ export const directDisconnectProfile = async () => {
 };
 
 export const directGetUnipileAccountInfo = async (accountId = null) => {
-  if (getStoredDisconnectedFlag()) {
-    return null;
-  }
-
   const userProfiles = await directGetProfiles();
   const targetAccId = accountId || userProfiles[0]?.unipile_account_id;
   if (!targetAccId) return null;
@@ -282,10 +274,6 @@ export const directGetUnipileAccountInfo = async (accountId = null) => {
 };
 
 export const directGetNetworkingConnections = async () => {
-  if (getStoredDisconnectedFlag()) {
-    return { success: true, connections: [], total: 0 };
-  }
-
   const userProfiles = await directGetProfiles();
   const targetAccId = userProfiles[0]?.unipile_account_id;
   if (!targetAccId) {
@@ -319,10 +307,6 @@ export const directGetNetworkingConnections = async () => {
 };
 
 export const directGetNetworkingInvitations = async () => {
-  if (getStoredDisconnectedFlag()) {
-    return { success: true, invitations: [], total: 0 };
-  }
-
   const userProfiles = await directGetProfiles();
   const targetAccId = userProfiles[0]?.unipile_account_id;
   if (!targetAccId) {
