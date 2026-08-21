@@ -170,6 +170,8 @@ export function AppProvider({ children }) {
 
   const staleProfiles = profiles.filter(p => {
     if (p.enabled === false) return false;
+    // Cloud-connected Unipile profiles do not require an extension heartbeat
+    if (p.unipile_account_id) return false;
     if (!p.last_extension_heartbeat) return true;
     return Date.now() - new Date(p.last_extension_heartbeat).getTime() > HEARTBEAT_STALE_MS;
   });
