@@ -1198,13 +1198,18 @@ const getLinkedinId = (prospect) => {
   if (prospect.provider_id) return prospect.provider_id;
   if (prospect.public_identifier) return prospect.public_identifier;
   if (prospect.member_id) return prospect.member_id;
-  if (prospect.linkedin_url) {
-    const parts = prospect.linkedin_url.split('/in/');
+
+  const cv = prospect.custom_variables || prospect.custom_fields || {};
+  const rawUrl = prospect.linkedin_url || cv.linkedin_url || cv.linkedinUrl || cv.linkedinurl || cv.url || '';
+
+  if (rawUrl) {
+    const parts = rawUrl.split('/in/');
     if (parts[1]) {
       return parts[1].split('?')[0].replace(/\//g, '').trim();
     }
+    if (!rawUrl.includes('http')) return rawUrl.trim();
   }
-  return prospect.id;
+  return null;
 };
 
 export const directResolveLinkedinProfile = async (prospect) => {
