@@ -864,7 +864,7 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
           'accepted_at', 'message_sent_date', 'initial_message', 'followup_1', 'followup_2', 
           'followup_3', 'followup_4', 'invite_note', 'inmail_subject', 'inmail_message', 
           'notes', 'tags', 'custom_fields', 'custom_variables', 'campaign_id', 'list_id', 
-          'assigned_account', 'created_at', 'updated_at'
+          'assigned_account', 'organization_id', 'user_email', 'created_at', 'updated_at'
         ]);
 
         const rawHeaders = parsedData[0].map(h => h.trim().replace(/^["']|["']$/g, ''));
@@ -952,6 +952,8 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             status: 'Not Contacted',
             campaign_id: campaignId || null,
             assigned_account: 'profile_1',
+            organization_id: orgId || userAcc?.organization_id || null,
+            user_email: userEmail,
             custom_variables: customVars,
             custom_fields: customVars,
             created_at: new Date().toISOString(),
