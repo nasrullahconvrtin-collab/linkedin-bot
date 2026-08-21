@@ -1392,7 +1392,7 @@ export const directGetUnipileUserProfile = async (identifier) => {
 };
 
 export const directCheckProspectReplied = async (prospect) => {
-  if (prospect.reply_date && prospect.status?.toLowerCase() === 'replied') {
+  if (prospect.custom_variables?.reply_date && prospect.status?.toLowerCase() === 'replied') {
     return { success: true, replied: true };
   }
 
@@ -1403,6 +1403,15 @@ export const directCheckProspectReplied = async (prospect) => {
   const accountId = userProfiles?.[0]?.unipile_account_id;
   if (!accountId) return { success: true, replied: false };
 
+  // When did our campaign start contacting this person?
+  const outreachTimestamp = new Date(
+    prospect.message_sent_date ||
+    prospect.custom_variables?.message_sent_at ||
+    prospect.connection_sent_date ||
+    prospect.created_at ||
+    0
+  ).getTime();
+
   const { ok, data } = await unipileFetch(`/chats?account_id=${accountId}&attendees_ids=${encodeURIComponent(recipientId)}`);
   if (ok && data && Array.isArray(data.items) && data.items.length > 0) {
     const chat = data.items[0];
@@ -1410,37 +1419,37 @@ export const directCheckProspectReplied = async (prospect) => {
       // Fetch messages history
       const { ok: msgOk, data: msgData } = await unipileFetch(`/chats/${encodeURIComponent(chat.id)}/messages?account_id=${accountId}&limit=100`);
       if (msgOk && msgData && Array.isArray(msgData.items)) {
-        // Sort messages chronologically (oldest first)
-        const messages = [...msgData.items].sort((a, b) => {
-          const tA = new Date(a.timestamp || a.created_at || 0).getTime();
-          const tB = new Date(b.timestamp || b.created_at || 0).getTime();
-          return tA - tB;
+        // Find incoming message sent by the prospect AFTER our campaign message
+        const firstReply = msgData.items.find(m => {
+          const isFromProspect = m.is_sender === 0;
+          if (!isFromProspect) return false;
+          const msgTime = new Date(m.timestamp || m.created_at || 0).getTime();
+          // Must have been received at least 2 seconds after our outreach was sent
+          return msgTime > (outreachTimestamp + 2000);
         });
-
-        // Find the index of our first message to establish the baseline
-        const firstSentMsgIdx = messages.findIndex(m => m.sender_id === accountId);
-
-        let firstReply = null;
-        if (firstSentMsgIdx !== -1) {
-          const firstSentTimestamp = new Date(messages[firstSentMsgIdx].timestamp || messages[firstSentMsgIdx].created_at || 0).getTime();
-          firstReply = messages.find((m, idx) => {
-            if (idx <= firstSentMsgIdx) return false;
-            if (m.sender_id === accountId) return false;
-            const msgTime = new Date(m.timestamp || m.created_at || 0).getTime();
-            return msgTime > firstSentTimestamp;
-          });
-        } else {
-          firstReply = messages.find(m => m.sender_id !== accountId);
-        }
 
         if (firstReply) {
           const replyText = firstReply.text || firstReply.message || 'Incoming message';
           const replyDateStr = firstReply.timestamp || firstReply.created_at || new Date().toISOString();
 
+          const cv = prospect.custom_variables || {};
+          const history = cv.history || [];
+          history.push({
+            node_id: 'check_reply',
+            node_type: 'check_reply',
+            status: 'replied',
+            reply_text: replyText,
+            executed_at: replyDateStr
+          });
+
           await supabaseDirect.from('prospects').update({
             status: 'Replied',
-            reply_date: replyDateStr,
-            last_message: replyText,
+            custom_variables: {
+              ...cv,
+              reply_date: replyDateStr,
+              last_message: replyText,
+              history
+            },
             updated_at: new Date().toISOString()
           }).eq('id', prospect.id);
 
