@@ -30,13 +30,18 @@ export default function ProspectTable({ campaignId, onRowClick }) {
     getCampaigns().then(setCampaigns).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (campaignId) setFilterCampaign(campaignId);
+  }, [campaignId]);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      const activeCampaignId = campaignId || filterCampaign;
       const params = { limit: LIMIT, offset: page * LIMIT };
-      if (filterStatus)   params.status           = filterStatus;
-      if (filterAccount)  params.assigned_account = filterAccount;
-      if (filterCampaign) params.campaign_id      = filterCampaign;
+      if (filterStatus)     params.status           = filterStatus;
+      if (filterAccount)    params.assigned_account = filterAccount;
+      if (activeCampaignId) params.campaign_id      = activeCampaignId;
       const d = await getProspects(params);
       let list = d.prospects || [];
       // Client-side search
@@ -59,7 +64,7 @@ export default function ProspectTable({ campaignId, onRowClick }) {
       setTotal(d.total || 0);
     } catch {}
     finally { setLoading(false); }
-  }, [page, filterStatus, filterAccount, filterCampaign, search, sortCol, sortDir]);
+  }, [page, filterStatus, filterAccount, filterCampaign, campaignId, search, sortCol, sortDir]);
 
   useEffect(() => { load(); }, [load]);
 

@@ -636,8 +636,7 @@ export const directGetProspects = async (params = {}) => {
     query = query.order('created_at', { ascending: false });
     
     const limit = params.limit || 50;
-    const page = params.page || 1;
-    const offset = (page - 1) * limit;
+    const offset = params.offset !== undefined ? Number(params.offset) : ((params.page || 1) - 1) * limit;
     query = query.range(offset, offset + limit - 1);
     
     const { data: rawData, count, error } = await query;
