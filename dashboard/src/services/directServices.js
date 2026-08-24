@@ -1759,8 +1759,12 @@ export const directRunFlow = async () => {
         }
 
         if (!isConnected && prospect.status !== 'Connection Request Sent') {
-          const inviteNote = render(nodeConfig.note || '');
-          console.log(`Sending connection invite to ${prospect.name}...`);
+          const hasNoteToggle = nodeConfig.add_note !== undefined ? Boolean(nodeConfig.add_note)
+            : (nodeConfig.include_note !== undefined ? Boolean(nodeConfig.include_note)
+            : (nodeConfig.send_note !== undefined ? Boolean(nodeConfig.send_note)
+            : (nodeConfig.has_note !== undefined ? Boolean(nodeConfig.has_note) : Boolean(nodeConfig.note))));
+          const inviteNote = hasNoteToggle ? render(nodeConfig.note || '') : '';
+          console.log(`Sending connection invite to ${prospect.name} (hasNote=${hasNoteToggle})...`);
           const res = await directSendUnipileConnectionInvite(prospect, inviteNote);
           
           if (res.success) {
