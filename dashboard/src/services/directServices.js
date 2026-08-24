@@ -891,7 +891,6 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
               customVars[keyName] = val;
             } else {
               rowData[mappedTarget] = val;
-              customVars[rawH] = val;
             }
           });
 
