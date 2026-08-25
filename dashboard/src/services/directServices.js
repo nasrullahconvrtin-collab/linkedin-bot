@@ -553,8 +553,8 @@ export const directGetCampaign = async (id) => {
       const stats = {
         total: rows.length,
         contacts: rows.length,
-        sent: rows.filter(r => r.status === 'Connection Requested' || r.status === 'Sent' || r.connection_sent_date).length,
-        accepted: rows.filter(r => ['Connection Accepted', 'CONNECTED', 'Replied'].includes(r.status)).length,
+        sent: rows.filter(r => r.status === 'Connection Requested' || r.status === 'Connection Request Sent' || r.status === 'Sent' || r.connection_sent_date || r.connection_status === 'invitation_sent').length,
+        accepted: rows.filter(r => r.status === 'Connection Accepted' || r.status === 'Accepted').length,
         already_connected: rows.filter(r => r.connection_status === 'connected').length,
         ready_for_message: rows.filter(r => r.status === 'Ready to Send').length,
         messaged: rows.filter(r => r.status === 'Initial Message Sent' || r.status === 'Message Sent' || r.message_sent_date).length,
