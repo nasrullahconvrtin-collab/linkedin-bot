@@ -1211,6 +1211,24 @@ const getLinkedinId = (prospect) => {
   return null;
 };
 
+// --- HUMAN EMULATION & PACING HELPERS ---
+const randomRange = (minMs, maxMs) => Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+
+export const humanPause = (minSeconds, maxSeconds, reason = 'Human reading pause') => {
+  const ms = randomRange(minSeconds * 1000, maxSeconds * 1000);
+  console.log(`🛡️ Humanization [${reason}]: Pausing for ${(ms / 1000).toFixed(1)}s...`);
+  return new Promise(resolve => setTimeout(resolve, ms));
+};
+
+export const humanTypingDelay = (textLength = 50) => {
+  const estimatedSeconds = Math.min(25, Math.max(5, Math.floor(textLength / 4)));
+  return humanPause(estimatedSeconds * 0.8, estimatedSeconds * 1.2, `Simulated human typing (${textLength} chars)`);
+};
+
+export const humanInterProspectDelay = () => {
+  return humanPause(120, 300, 'Inter-prospect pacing jitter (2 - 5 mins)');
+};
+
 export const getAccountForProspect = async (prospect) => {
   const pOrgId = prospect?.organization_id || prospect?.custom_variables?.organization_id;
   const pEmail = (prospect?.user_email || prospect?.custom_variables?.user_email || '').toLowerCase();
@@ -1260,6 +1278,10 @@ export const directResolveLinkedinProfile = async (prospect) => {
 
 export const directVisitProfile = async (prospect) => {
   const data = await directResolveLinkedinProfile(prospect);
+  if (data) {
+    // Simulate a real human viewing & scrolling the prospect's profile page
+    await humanPause(15, 35, `Viewing profile of ${prospect.name || 'prospect'}`);
+  }
   return { success: Boolean(data), data };
 };
 
@@ -1268,7 +1290,10 @@ export const directFollowProfile = async (prospect) => {
   if (!targetId) return { success: true };
   const accountId = await getAccountForProspect(prospect);
   if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
+  
+  await humanPause(6, 15, 'Pre-follow profile pause');
   await unipileFetch(`/users/${targetId}?account_id=${accountId}`);
+  await humanPause(8, 20, 'Post-follow profile pause');
   return { success: true };
 };
 
@@ -1277,7 +1302,10 @@ export const directEndorseProfile = async (prospect) => {
   if (!targetId) return { success: true };
   const accountId = await getAccountForProspect(prospect);
   if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
+  
+  await humanPause(10, 25, 'Reviewing skills before endorsing');
   await unipileFetch(`/users/${targetId}?account_id=${accountId}`);
+  await humanPause(8, 20, 'Post-endorse pause');
   return { success: true };
 };
 
@@ -1285,6 +1313,14 @@ export const directSendUnipileConnectionInvite = async (prospect, message = '') 
   const provider_id = getLinkedinId(prospect);
   const accountId = await getAccountForProspect(prospect);
   if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
+
+  // Pre-invite human review pause
+  await humanPause(12, 30, `Reviewing ${prospect.name || 'prospect'} before sending invitation`);
+
+  if (message) {
+    // Simulate human typing the invite note
+    await humanTypingDelay(message.length);
+  }
 
   const payload = {
     account_id: accountId,
@@ -1307,6 +1343,8 @@ export const directSendUnipileConnectionInvite = async (prospect, message = '') 
     } catch (e) {
       console.warn('Supabase update warning:', e);
     }
+    // Post-invite human cool-off pause
+    await humanPause(15, 35, 'Post-invitation cooloff');
     return { success: true, data };
   }
   return { success: false, error: data?.detail || 'Unipile invite failed' };
@@ -1317,16 +1355,35 @@ export const directSendUnipileChatMessage = async (prospect, text = '') => {
   const accountId = await getAccountForProspect(prospect);
   if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
 
+  const messageText = text || prospect.initial_message || 'Hello!';
+
+  // Pre-message human review pause & typing simulation
+  await humanPause(10, 22, 'Opening chat window');
+  await humanTypingDelay(messageText.length);
+
   const payload = {
     account_id: accountId,
     attendees_ids: [recipientId],
-    text: text || prospect.initial_message || 'Hello!',
+    text: messageText,
   };
 
   const { ok, data } = await unipileFetch('/chats', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+
+  if (ok) {
+    try {
+      await supabaseDirect.from('prospects').update({
+        status: 'Initial Message Sent',
+        message_sent_date: new Date().toISOString(),
+      }).eq('id', prospect.id);
+    } catch (e) {
+      console.warn('Supabase update warning:', e);
+    }
+    await humanPause(15, 30, 'Post-message cooloff');
+    return { success: true, data };
+  }
 
   if (ok) {
     try {
