@@ -1457,6 +1457,7 @@ export const DEFAULT_APP_SETTINGS = {
   daily_follow_limit: 30,
   daily_connection_limit: 25,
   daily_message_limit: 40,
+  global_daily_limit: 40,
   enable_working_hours: true,
   start_time: '09:00',
   end_time: '18:00',
@@ -1557,11 +1558,46 @@ export const directRunFlow = async () => {
     return { success: false, error: err.message };
   }
 
+  if (campaigns.length === 0) {
+    return { success: true, totalExecuted: 0, message: 'No active running campaigns found.' };
+  }
+
+  // Global Account Safety Daily Limit from Settings
+  const globalDailyLimit = Number(appSettings.global_daily_limit || appSettings.daily_connection_limit || 40);
+
+  // Calculate today's executed actions count across all prospects
+  const todayDateStr = new Date().toISOString().split('T')[0];
+  let todayActionsTotal = 0;
+  try {
+    const { data: allProspects } = await supabaseDirect.from('prospects').select('custom_variables');
+    (allProspects || []).forEach(p => {
+      const history = p.custom_variables?.history || [];
+      history.forEach(h => {
+        if (h.executed_at && h.executed_at.startsWith(todayDateStr) && (h.status === 'success' || h.status === 'replied')) {
+          todayActionsTotal += 1;
+        }
+      });
+    });
+  } catch (e) {
+    console.warn('Error counting daily executed actions:', e);
+  }
+
+  let remainingGlobalQuota = Math.max(0, globalDailyLimit - todayActionsTotal);
+  if (remainingGlobalQuota <= 0) {
+    console.log(`Global account safety quota reached for today (${todayActionsTotal}/${globalDailyLimit}). Pausing execution.`);
+    return { success: true, totalExecuted: 0, message: `Global daily safety limit reached (${todayActionsTotal}/${globalDailyLimit})` };
+  }
+
+  // Divide remaining quota equally across running campaigns (Round-Robin)
+  const quotaPerCampaign = Math.max(1, Math.floor(remainingGlobalQuota / campaigns.length));
+
   let totalExecuted = 0;
   let totalConnections = 0;
   let totalMessages = 0;
 
   for (const campaign of campaigns) {
+    if (remainingGlobalQuota <= 0) break;
+
     const flowSequence = campaign.sequence_config?.flow_sequence;
     if (!flowSequence || !Array.isArray(flowSequence.nodes) || flowSequence.nodes.length === 0) {
       continue;
@@ -1591,11 +1627,12 @@ export const directRunFlow = async () => {
       continue;
     }
 
-    let dailyLimit = campaign.daily_limit || 25;
+    // Effective daily limit for this campaign in this run batch
+    let effectiveLimit = Math.min(quotaPerCampaign, campaign.daily_limit || quotaPerCampaign, remainingGlobalQuota);
     let actionsTaken = 0;
 
     for (const prospect of prospects) {
-      if (actionsTaken >= dailyLimit) break;
+      if (actionsTaken >= effectiveLimit || remainingGlobalQuota <= 0) break;
 
       if (['Completed', 'Failed', 'Replied'].includes(prospect.status)) {
         continue;

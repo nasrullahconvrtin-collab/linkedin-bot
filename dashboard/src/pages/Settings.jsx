@@ -431,7 +431,24 @@ export default function Settings() {
         </div>
 
         {/* ── 2. DAILY ACTION LIMITS ───────────────────────────────────────────── */}
-        <Section title="Daily Action Limits" icon={Zap} description="Set daily safety limits for outbound automation tasks.">
+        <Section title="Daily Action Limits" icon={Zap} description="Set daily safety limits for outbound automation tasks across all campaigns.">
+          <div className="p-4 rounded-xl bg-[#6366f1]/10 border border-[#6366f1]/20 mb-4">
+            <label className="block text-xs font-bold text-indigo-300 mb-1">
+              🛡️ Global Daily Account Safety Cap (All Campaigns Combined)
+            </label>
+            <p className="text-[#9ca3af] text-[11px] mb-2.5">
+              Maximum total actions allowed per 24 hours across ALL running campaigns combined. When running multiple campaigns, daily activity is divided equally among them.
+            </p>
+            <input
+              type="number"
+              min={1}
+              max={250}
+              value={settings.global_daily_limit || 40}
+              onChange={e => handleChange('global_daily_limit', Number(e.target.value))}
+              className="w-full bg-[#111111] border border-[#6366f1]/40 rounded-xl px-4 py-2.5 text-white text-sm font-bold focus:outline-none focus:border-[#6366f1]"
+            />
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-[#9ca3af] mb-1.5">Daily Connection Requests</label>
