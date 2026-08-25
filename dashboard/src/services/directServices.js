@@ -2037,6 +2037,10 @@ export const directRunFlow = async () => {
       }
 
       if (nodeType === 'completed') {
+        if (prospect.status === 'Connection Request Sent') {
+          // Keep prospect in Connection Request Sent status while waiting for acceptance on LinkedIn
+          continue;
+        }
         prospect.status = 'Completed';
         try {
           await supabaseDirect.from('prospects').update({ status: 'Completed' }).eq('id', prospect.id);
