@@ -1230,6 +1230,7 @@ export const humanInterProspectDelay = () => {
 };
 
 export const getAccountForProspect = async (prospect) => {
+  if (!prospect) return null;
   const pOrgId = prospect?.organization_id || prospect?.custom_variables?.organization_id;
   const pEmail = (prospect?.user_email || prospect?.custom_variables?.user_email || '').toLowerCase();
 
@@ -1248,8 +1249,8 @@ export const getAccountForProspect = async (prospect) => {
     console.warn('getAccountForProspect error:', e);
   }
 
-  const userProfiles = await directGetProfiles();
-  return userProfiles?.[0]?.unipile_account_id || null;
+  // STRICT ISOLATION: Never default to userProfiles[0]. If no matching profile belongs to this prospect, return null.
+  return null;
 };
 
 export const directResolveLinkedinProfile = async (prospect) => {
