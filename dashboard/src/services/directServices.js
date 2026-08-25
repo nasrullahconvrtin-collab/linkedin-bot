@@ -1211,11 +1211,33 @@ const getLinkedinId = (prospect) => {
   return null;
 };
 
+export const getAccountForProspect = async (prospect) => {
+  const pOrgId = prospect?.organization_id || prospect?.custom_variables?.organization_id;
+  const pEmail = (prospect?.user_email || prospect?.custom_variables?.user_email || '').toLowerCase();
+
+  try {
+    const { data: allProfiles } = await supabaseDirect.from('profiles').select('id, user_email, organization_id, unipile_account_id');
+    if (allProfiles && allProfiles.length > 0) {
+      const match = allProfiles.find(p => {
+        if (!p.unipile_account_id) return false;
+        if (pOrgId && p.organization_id === pOrgId) return true;
+        if (pEmail && p.user_email && p.user_email.toLowerCase() === pEmail) return true;
+        return false;
+      });
+      if (match?.unipile_account_id) return match.unipile_account_id;
+    }
+  } catch (e) {
+    console.warn('getAccountForProspect error:', e);
+  }
+
+  const userProfiles = await directGetProfiles();
+  return userProfiles?.[0]?.unipile_account_id || null;
+};
+
 export const directResolveLinkedinProfile = async (prospect) => {
   const targetId = getLinkedinId(prospect);
   if (!targetId) return null;
-  const userProfiles = await directGetProfiles();
-  const accountId = userProfiles?.[0]?.unipile_account_id;
+  const accountId = await getAccountForProspect(prospect);
   if (!accountId) return null;
   const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(targetId)}?account_id=${accountId}`);
   if (ok && data) {
@@ -1244,8 +1266,7 @@ export const directVisitProfile = async (prospect) => {
 export const directFollowProfile = async (prospect) => {
   const targetId = getLinkedinId(prospect);
   if (!targetId) return { success: true };
-  const userProfiles = await directGetProfiles();
-  const accountId = userProfiles?.[0]?.unipile_account_id;
+  const accountId = await getAccountForProspect(prospect);
   if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
   await unipileFetch(`/users/${targetId}?account_id=${accountId}`);
   return { success: true };
@@ -1254,8 +1275,7 @@ export const directFollowProfile = async (prospect) => {
 export const directEndorseProfile = async (prospect) => {
   const targetId = getLinkedinId(prospect);
   if (!targetId) return { success: true };
-  const userProfiles = await directGetProfiles();
-  const accountId = userProfiles?.[0]?.unipile_account_id;
+  const accountId = await getAccountForProspect(prospect);
   if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
   await unipileFetch(`/users/${targetId}?account_id=${accountId}`);
   return { success: true };
@@ -1263,8 +1283,7 @@ export const directEndorseProfile = async (prospect) => {
 
 export const directSendUnipileConnectionInvite = async (prospect, message = '') => {
   const provider_id = getLinkedinId(prospect);
-  const userProfiles = await directGetProfiles();
-  const accountId = userProfiles?.[0]?.unipile_account_id;
+  const accountId = await getAccountForProspect(prospect);
   if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
 
   const payload = {
@@ -1295,8 +1314,7 @@ export const directSendUnipileConnectionInvite = async (prospect, message = '') 
 
 export const directSendUnipileChatMessage = async (prospect, text = '') => {
   const recipientId = getLinkedinId(prospect);
-  const userProfiles = await directGetProfiles();
-  const accountId = userProfiles?.[0]?.unipile_account_id;
+  const accountId = await getAccountForProspect(prospect);
   if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
 
   const payload = {
