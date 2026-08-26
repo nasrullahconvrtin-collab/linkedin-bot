@@ -752,45 +752,13 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
     reader.onload = async (e) => {
       try {
         const text = e.target?.result || '';
-        
-        const parseCSV = (csvText) => {
-          const lines = [];
-          let row = [""];
-          let inQuotes = false;
+        const parsedData = parseCSVText(text);
 
-          for (let i = 0; i < csvText.length; i++) {
-            const char = csvText[i];
-            const nextChar = csvText[i + 1];
+        if (parsedData.length <= 1) {
+          return resolve({ success: false, error: 'CSV file is empty', imported_count: 0 });
+        }
 
-            if (char === '"') {
-              if (inQuotes && nextChar === '"') {
-                row[row.length - 1] += '"';
-                i++;
-              } else {
-                inQuotes = !inQuotes;
-              }
-            } else if (char === ',' && !inQuotes) {
-              row.push("");
-            } else if ((char === '\r' || char === '\n') && !inQuotes) {
-              if (char === '\r' && nextChar === '\n') {
-                i++;
-              }
-              lines.push(row.map(c => c.trim()));
-              row = [""];
-            } else {
-              row[row.length - 1] += char;
-            }
-          }
-          if (row.length > 1 || row[0] !== "") {
-            lines.push(row.map(c => c.trim()));
-          }
-          return lines;
-        };
-
-        const parsedData = parseCSV(text);
-        if (parsedData.length <= 1) return resolve({ success: true, imported_count: 0 });
-
-        // 1. Fetch existing prospects to build duplicate check maps
+        // 1. Fetch existing prospects to build duplicate maps
         const { data: existingList } = await supabaseDirect
           .from('prospects')
           .select('id, linkedin_url, email');
@@ -801,7 +769,7 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
         if (existingList) {
           existingList.forEach(p => {
             if (p.linkedin_url) {
-              const cleaned = p.linkedin_url.trim().toLowerCase();
+              const cleaned = cleanLinkedinUrl(p.linkedin_url);
               if (cleaned) linkedinMap.set(cleaned, p.id);
             }
             if (p.email) {
@@ -811,13 +779,7 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
           });
         }
 
-        // 2. Fetch a single prospect to check which columns exist on the table
-        const { data: sampleList } = await supabaseDirect
-          .from('prospects')
-          .select('*')
-          .limit(1);
-
-        const validColumns = new Set(sampleList && sampleList[0] ? Object.keys(sampleList[0]) : [
+        const validColumns = new Set([
           'id', 'first_name', 'last_name', 'name', 'company', 'job_title', 
           'email', 'linkedin_url', 'location', 'public_identifier', 'member_id', 'provider_id', 
           'status', 'connection_status', 'connection_sent_date', 'accepted_at', 'message_sent_date', 
@@ -828,9 +790,13 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
         const rawHeaders = parsedData[0].map(h => h.trim().replace(/^["']|["']$/g, ''));
         const prospectsToInsert = [];
 
+        const orgId = getActiveOrganizationId();
+        const userAcc = getActiveUserAccount();
+        const userEmail = userAcc?.email ? userAcc.email.toLowerCase() : null;
+
         for (let i = 1; i < parsedData.length; i += 1) {
           const cols = parsedData[i];
-          if (cols.length === 0 || (cols.length === 1 && !cols[0])) continue;
+          if (!cols || cols.length === 0 || (cols.length === 1 && !cols[0])) continue;
 
           const rowData = {};
           const customVars = {};
@@ -839,80 +805,56 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             const val = (cols[idx] || '').trim();
             const mappedTarget = columnMapping?.[rawH] || autoGuessHeader(rawH);
 
-            if (mappedTarget === 'skip') {
-              return;
-            }
+            if (mappedTarget === 'skip') return;
 
             if (mappedTarget === 'custom_var') {
               const keyName = rawH.toLowerCase().replace(/[^a-z0-9]/g, '_');
               customVars[rawH] = val;
-              customVars[keyName] = val;
+              if (keyName) customVars[keyName] = val;
             } else {
               rowData[mappedTarget] = val;
             }
           });
 
-          const orgId = getActiveOrganizationId();
-          const userAcc = getActiveUserAccount();
-          const userEmail = userAcc?.email ? userAcc.email.toLowerCase() : null;
           customVars.organization_id = orgId || userAcc?.organization_id || null;
           customVars.user_email = userEmail;
 
-          // Compute names & contacts
-          let firstName = rowData.first_name || rowData.name?.split(' ')[0] || 'Lead';
-          let lastName = rowData.last_name || rowData.name?.split(' ').slice(1).join(' ') || '';
-          let linkedinUrl = rowData.linkedin_url || '';
-          let emailVal = rowData.email || '';
+          let rawLinkedin = rowData.linkedin_url || '';
+          let cleanedUrl = cleanLinkedinUrl(rawLinkedin);
+          let emailVal = (rowData.email || '').trim().toLowerCase();
 
-          const isValidUrl = linkedinUrl && linkedinUrl.length < 250 && (!linkedinUrl.includes(' ') || linkedinUrl.includes('http') || linkedinUrl.includes('linkedin'));
-          const isValidEmail = emailVal && emailVal.includes('@') && emailVal.includes('.') && !emailVal.includes(' ');
+          let firstName = (rowData.first_name || rowData.name?.split(' ')[0] || '').trim();
+          let lastName = (rowData.last_name || rowData.name?.split(' ').slice(1).join(' ') || '').trim();
 
-          if (!isValidUrl && !isValidEmail && !firstName) {
+          if (!firstName && !lastName && !cleanedUrl && !emailVal) {
             continue;
+          }
+          if (!firstName && !lastName) {
+            firstName = cleanedUrl ? (cleanedUrl.split('/in/')[1] || '').split('/')[0].replace(/[-_]/g, ' ') || 'Prospect' : 'Prospect';
           }
 
           let existingId = null;
-          if (isValidUrl) {
-            existingId = linkedinMap.get(linkedinUrl.trim().toLowerCase());
-          }
-          if (!existingId && isValidEmail) {
-            existingId = emailMap.get(emailVal.trim().toLowerCase());
-          }
+          if (cleanedUrl) existingId = linkedinMap.get(cleanedUrl);
+          if (!existingId && emailVal) existingId = emailMap.get(emailVal);
 
-          if (importMode === 'create' && existingId) {
-            continue;
-          }
-          if (importMode === 'update' && !existingId) {
-            continue;
-          }
+          if (importMode === 'create' && existingId) continue;
+          if (importMode === 'update' && !existingId) continue;
 
           const prospectObj = {
-            first_name: firstName,
-            last_name: lastName,
+            first_name: firstName || 'Lead',
+            last_name: lastName || '',
             name: rowData.name || `${firstName} ${lastName}`.trim(),
-            headline: rowData.headline || rowData.job_title || '',
-            job_title: rowData.job_title || rowData.headline || '',
             company: rowData.company || '',
-            linkedin_url: isValidUrl ? linkedinUrl : '',
-            email: isValidEmail ? emailVal : '',
+            job_title: rowData.job_title || rowData.headline || '',
+            email: emailVal || '',
+            linkedin_url: cleanedUrl || rawLinkedin || '',
             location: rowData.location || '',
-            notes: rowData.notes || '',
-            invite_note: rowData.invite_note || '',
-            initial_message: rowData.initial_message || '',
-            followup_1: rowData.followup_1 || '',
-            followup_2: rowData.followup_2 || '',
-            followup_3: rowData.followup_3 || '',
-            followup_4: rowData.followup_4 || '',
-            followup_5: rowData.followup_5 || '',
-            inmail_subject: rowData.inmail_subject || '',
-            inmail_message: rowData.inmail_message || '',
             status: 'Not Contacted',
             campaign_id: campaignId || null,
-            assigned_account: 'profile_1',
+            list_id: listId || null,
             organization_id: orgId || userAcc?.organization_id || null,
             user_email: userEmail,
             custom_variables: customVars,
-            custom_fields: customVars,
             created_at: new Date().toISOString(),
           };
 
@@ -923,10 +865,10 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             prospectObj.updated_at = new Date().toISOString();
           }
 
-          // Clean fields to only send columns that exist in the database schema
+          // Clean fields to strictly send columns that exist on the table
           const cleanedObj = {};
           Object.keys(prospectObj).forEach(key => {
-            if (validColumns.has(key) && key !== 'custom_fields') {
+            if (validColumns.has(key)) {
               cleanedObj[key] = prospectObj[key];
             } else {
               cleanedObj.custom_variables = cleanedObj.custom_variables || {};
@@ -937,56 +879,96 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
           prospectsToInsert.push(cleanedObj);
         }
 
-                let createdCount = 0;
+        if (prospectsToInsert.length === 0) {
+          return resolve({ success: true, created_count: 0, updated_count: 0, imported_count: 0, message: 'No new prospects to import' });
+        }
+
+        // Process in chunks of 50 for max database stability & fast performance
+        let createdCount = 0;
         let updatedCount = 0;
+        const chunkSize = 50;
 
-        if (prospectsToInsert.length > 0) {
-          const { data: insertedData, error } = await supabaseDirect.from('prospects').upsert(prospectsToInsert).select();
-          if (error) console.error('Supabase prospect import error:', error);
-          
-          if (insertedData) {
-            insertedData.forEach(p => {
-              const orig = prospectsToInsert.find(x => x.linkedin_url === p.linkedin_url || x.email === p.email);
-              if (orig && orig.id) {
-                updatedCount++;
-              } else {
-                createdCount++;
+        for (let i = 0; i < prospectsToInsert.length; i += chunkSize) {
+          const chunk = prospectsToInsert.slice(i, i + chunkSize);
+          const { data: insertedData, error: chunkErr } = await supabaseDirect.from('prospects').upsert(chunk).select();
+
+          if (chunkErr) {
+            console.warn(`Chunk ${i / chunkSize + 1} upsert failed, retrying row-by-row...`, chunkErr.message);
+            // Fallback row-by-row retry to ensure valid rows are never lost due to one bad row
+            for (const singleProspect of chunk) {
+              const { data: singleData, error: sErr } = await supabaseDirect.from('prospects').upsert([singleProspect]).select();
+              if (!sErr && singleData && singleData[0]) {
+                if (singleProspect.id) updatedCount++;
+                else createdCount++;
+              } else if (sErr) {
+                console.error('Row import error:', sErr.message, singleProspect);
               }
+            }
+          } else if (insertedData) {
+            insertedData.forEach(p => {
+              const orig = chunk.find(x => x.id === p.id || (x.linkedin_url && x.linkedin_url === p.linkedin_url) || (x.email && x.email === p.email));
+              if (orig && orig.id) updatedCount++;
+              else createdCount++;
             });
-          }
-
-          // If targetListId provided, associate prospects to list
-          if (listId && insertedData && insertedData.length > 0) {
-            const listMembers = insertedData.map(p => ({
-              list_id: listId,
-              prospect_id: p.id,
-              created_at: new Date().toISOString(),
-            }));
-            await supabaseDirect.from('prospect_list_members').upsert(listMembers);
-          }
-
-          // If targetCampaignId provided, enroll prospects to campaign
-          if (campaignId && insertedData && insertedData.length > 0) {
-            const enrollments = insertedData.map(p => ({
-              campaign_id: campaignId,
-              prospect_id: p.id,
-              status: 'active',
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            }));
-            await supabaseDirect.from('campaign_enrollments').upsert(enrollments);
           }
         }
 
-        resolve({ success: true, created_count: createdCount, updated_count: updatedCount, imported_count: createdCount + updatedCount });
+        resolve({
+          success: true,
+          created_count: createdCount,
+          updated_count: updatedCount,
+          imported_count: createdCount + updatedCount,
+          total_processed: prospectsToInsert.length
+        });
       } catch (err) {
-        console.error('directBulkImportProspects error:', err);
+        console.error('directBulkImportProspects critical error:', err);
         resolve({ success: false, error: err.message, imported_count: 0 });
       }
     };
     reader.readAsText(file);
   });
 };
+
+function cleanLinkedinUrl(url) {
+  if (!url) return '';
+  let cleaned = url.trim().toLowerCase();
+  if (!cleaned.includes('http://') && !cleaned.includes('https://')) {
+    cleaned = 'https://' + cleaned;
+  }
+  return cleaned.split('?')[0].replace(/\/$/, '');
+}
+
+function parseCSVText(csvText) {
+  const lines = [];
+  let row = [""];
+  let inQuotes = false;
+
+  for (let i = 0; i < csvText.length; i++) {
+    const char = csvText[i];
+    const nextChar = csvText[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        row[row.length - 1] += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      row.push("");
+    } else if ((char === '\r' || char === '\n') && !inQuotes) {
+      if (char === '\r' && nextChar === '\n') i++;
+      lines.push(row.map(c => c.trim()));
+      row = [""];
+    } else {
+      row[row.length - 1] += char;
+    }
+  }
+  if (row.length > 1 || row[0] !== "") {
+    lines.push(row.map(c => c.trim()));
+  }
+  return lines;
+}
 
 function autoGuessHeader(header) {
   const clean = (header || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '_');
