@@ -632,7 +632,6 @@ export const directCreateProspect = async (data) => {
     first_name: firstName,
     last_name: (data.last_name || data.name?.split(' ').slice(1).join(' ') || '').trim(),
     name: data.name || `${firstName} ${data.last_name || ''}`.trim(),
-    headline: data.headline || '',
     company: data.company || '',
     job_title: data.job_title || data.title || '',
     email: data.email || '',
@@ -819,7 +818,7 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
           .limit(1);
 
         const validColumns = new Set(sampleList && sampleList[0] ? Object.keys(sampleList[0]) : [
-          'id', 'first_name', 'last_name', 'name', 'headline', 'company', 'job_title', 
+          'id', 'first_name', 'last_name', 'name', 'company', 'job_title', 
           'email', 'linkedin_url', 'location', 'public_identifier', 'member_id', 'provider_id', 
           'status', 'connection_status', 'connection_sent_date', 'accepted_at', 'message_sent_date', 
           'custom_variables', 'campaign_id', 'list_id', 'organization_id', 'user_email', 
