@@ -672,7 +672,6 @@ export const directCreateProspect = async (data) => {
     status: data.status || 'Not Contacted',
     campaign_id: data.campaign_id || null,
     list_id: data.list_id || null,
-    assigned_account: data.assigned_account || 'profile_1',
     organization_id: orgId || userAcc?.organization_id || null,
     user_email: email,
     custom_variables: {
@@ -853,12 +852,10 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
 
         const validColumns = new Set(sampleList && sampleList[0] ? Object.keys(sampleList[0]) : [
           'id', 'first_name', 'last_name', 'name', 'headline', 'company', 'job_title', 
-          'email', 'linkedin_url', 'public_identifier', 'member_id', 'provider_id', 
-          'status', 'connection_status', 'connection_message', 'connection_sent_date', 
-          'accepted_at', 'message_sent_date', 'initial_message', 'followup_1', 'followup_2', 
-          'followup_3', 'followup_4', 'invite_note', 'inmail_subject', 'inmail_message', 
-          'notes', 'tags', 'custom_fields', 'custom_variables', 'campaign_id', 'list_id', 
-          'assigned_account', 'organization_id', 'user_email', 'created_at', 'updated_at'
+          'email', 'linkedin_url', 'location', 'public_identifier', 'member_id', 'provider_id', 
+          'status', 'connection_status', 'connection_sent_date', 'accepted_at', 'message_sent_date', 
+          'custom_variables', 'campaign_id', 'list_id', 'organization_id', 'user_email', 
+          'created_at', 'updated_at'
         ]);
 
         const rawHeaders = parsedData[0].map(h => h.trim().replace(/^["']|["']$/g, ''));
