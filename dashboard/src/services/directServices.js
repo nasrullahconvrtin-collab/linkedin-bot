@@ -385,16 +385,7 @@ export const directGetCampaigns = async () => {
   try {
     const { data: rawCampaigns, error } = await supabaseDirect.from('campaigns').select('*').order('created_at', { ascending: false });
     if (!error && rawCampaigns) {
-      const campaigns = rawCampaigns.filter(c => {
-        const cOrgId = c.organization_id || c.settings?.organization_id || c.settings?.orgId;
-        const cEmail = (c.user_email || c.settings?.user_email || c.settings?.email || '').toLowerCase();
-        if (isSuper) {
-          return true;
-        }
-        if (orgId && cOrgId && cOrgId === orgId) return true;
-        if (userEmail && cEmail && cEmail === userEmail) return true;
-        return false;
-      });
+      const campaigns = rawCampaigns;
 
       const { data: prospects } = await supabaseDirect.from('prospects').select('id, campaign_id, status, connection_status, connection_sent_date, message_sent_date, custom_variables');
       const prospectMap = new Map();
@@ -607,43 +598,20 @@ export const directLaunchCampaign = async (id, data = {}) => {
 
 export const directGetProspects = async (params = {}) => {
   try {
-    const isSuper = isSuperAdminUser();
-    const orgId = getActiveOrganizationId();
-    const userAcc = getActiveUserAccount();
-    const userEmail = userAcc?.email ? userAcc.email.toLowerCase() : null;
-
     let query = supabaseDirect.from('prospects').select('*', { count: 'exact' });
-
-    if (!isSuper) {
-      if (orgId && userEmail) {
-        query = query.or(`organization_id.eq.${orgId},user_email.eq.${userEmail}`);
-      } else if (orgId) {
-        query = query.eq('organization_id', orgId);
-      } else if (userEmail) {
-        query = query.eq('user_email', userEmail);
-      }
-    }
 
     if (params.campaign_id) query = query.eq('campaign_id', params.campaign_id);
     if (params.status) query = query.eq('status', params.status);
     if (params.list_id) query = query.eq('list_id', params.list_id);
     query = query.order('created_at', { ascending: false });
     
-    const limit = params.limit || 50;
+    const limit = params.limit || 500;
     const offset = params.offset !== undefined ? Number(params.offset) : ((params.page || 1) - 1) * limit;
     query = query.range(offset, offset + limit - 1);
     
     const { data: rawData, count, error } = await query;
     if (!error && rawData) {
-      const data = rawData.filter(p => {
-        if (isSuper) return true;
-        const pOrgId = p.organization_id || p.custom_variables?.organization_id || p.custom_variables?.orgId;
-        const pEmail = (p.user_email || p.custom_variables?.user_email || p.custom_variables?.email || '').toLowerCase();
-        if (orgId && pOrgId && pOrgId === orgId) return true;
-        if (userEmail && pEmail && pEmail === userEmail) return true;
-        return false;
-      });
-      return { prospects: data, total: count || data.length };
+      return { prospects: rawData, total: count || rawData.length };
     }
   } catch (e) {
     console.warn('directGetProspects warning:', e);
@@ -1102,15 +1070,7 @@ export const directGetProspectLists = async () => {
   try {
     const { data: rawLists, error } = await supabaseDirect.from('prospect_lists').select('*').order('created_at', { ascending: false });
     if (!error && rawLists) {
-      const lists = rawLists.filter(l => {
-        if (isSuper) return true;
-        const lOrgId = l.organization_id;
-        const lEmail = (l.user_email || '').toLowerCase();
-        if (orgId && lOrgId && lOrgId === orgId) return true;
-        if (userEmail && lEmail && lEmail === userEmail) return true;
-        return false;
-      });
-      return { lists };
+      return { lists: rawLists };
     }
   } catch (e) {
     console.warn('directGetProspectLists warning:', e);
