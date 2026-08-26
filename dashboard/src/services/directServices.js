@@ -962,14 +962,11 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
           // Clean fields to only send columns that exist in the database schema
           const cleanedObj = {};
           Object.keys(prospectObj).forEach(key => {
-            if (validColumns.has(key)) {
+            if (validColumns.has(key) && key !== 'custom_fields') {
               cleanedObj[key] = prospectObj[key];
             } else {
               cleanedObj.custom_variables = cleanedObj.custom_variables || {};
               cleanedObj.custom_variables[key] = prospectObj[key];
-              
-              cleanedObj.custom_fields = cleanedObj.custom_fields || {};
-              cleanedObj.custom_fields[key] = prospectObj[key];
             }
           });
 
