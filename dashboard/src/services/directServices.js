@@ -494,16 +494,10 @@ export const directCreateCampaign = async (data) => {
     user_email: email,
     profile_key: data.profile_key || (data.settings && data.settings.profile_key) || 'profile_1',
     daily_limit: data.daily_limit || 25,
-    sequence: data.sequence || [],
     sequence_config: data.sequence_config || {},
-    settings: {
-      ...(data.settings || {}),
-      organization_id: orgId || userAcc?.organization_id || null,
-      user_email: email,
-    },
-    template: data.template || {},
     created_at: new Date().toISOString(),
   };
+
   try {
     const { data: res, error } = await supabaseDirect.from('campaigns').insert([payload]).select();
     if (error) console.error('directCreateCampaign error:', error);
