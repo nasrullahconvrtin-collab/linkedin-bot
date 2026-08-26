@@ -51,7 +51,7 @@ export default function Sidebar({ collapsed = false, onToggle }) {
           <Zap size={16} className="text-white" />
         </div>
         <div className={collapsed ? 'hidden' : ''}>
-          <span className="text-white font-bold text-base tracking-tight block">LinkedFlow</span>
+          <span className="text-white font-bold text-base tracking-tight block">{import.meta.env.VITE_APP_NAME || 'LinkedFlow'}</span>
           <span className="text-[#6b7280] text-[11px] font-medium">Automation OS</span>
         </div>
       </div>

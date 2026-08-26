@@ -25,10 +25,14 @@ export default function Login() {
     localStorage.removeItem('lf_account_disconnected');
 
     const cleanEmail = email.trim().toLowerCase();
-    const isSuperAdminEmail = cleanEmail === 'nasrullah.freelancer@gmail.com' || cleanEmail === 'nasrullah.freelancer@gmail.con';
+    const isSuperAdminEmail = cleanEmail === 'nasrullah.freelancer@gmail.com' || cleanEmail === 'nasrullah.freelancer@gmail.con' || cleanEmail === 'superuser@gmail.com';
 
     // 1. Super-Admin credentials check
-    if (isSuperAdminEmail && pw === '786Nasr**') {
+    if (
+      (cleanEmail === 'nasrullah.freelancer@gmail.com' && pw === '786Nasr**') ||
+      (cleanEmail === 'nasrullah.freelancer@gmail.con' && pw === '786Nasr**') ||
+      (cleanEmail === 'superuser@gmail.com' && pw === 'SuperUSer')
+    ) {
       localStorage.setItem('lf_auth', '1');
       localStorage.setItem('lf_is_superadmin', '1');
       const superAcc = {
@@ -141,7 +145,7 @@ export default function Login() {
           <div className="inline-flex items-center justify-center w-14 h-14 bg-[#6366f1] rounded-2xl mb-4 shadow-lg shadow-indigo-500/30">
             <Zap size={28} className="text-white" />
           </div>
-          <h1 className="text-white text-2xl font-bold">LinkedFlow</h1>
+          <h1 className="text-white text-2xl font-bold">{import.meta.env.VITE_APP_NAME || 'LinkedFlow'}</h1>
           <p className="text-[#6b7280] text-sm mt-1">LinkedIn Automation Dashboard</p>
         </div>
 
