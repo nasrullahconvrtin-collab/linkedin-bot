@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Upload, FileText, X, Loader2, CheckCircle, AlertCircle, Rocket, Pause, Archive, Plus, UserPlus, Trash2, PlusCircle, WifiOff } from 'lucide-react';
+import { ArrowLeft, Upload, FileText, X, Loader2, CheckCircle, AlertCircle, Rocket, Pause, Archive, Plus, UserPlus, Trash2, PlusCircle, WifiOff, Download, Activity, Check, ExternalLink, Clock, MessageSquare, UserCheck, Eye, Send } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import toast from 'react-hot-toast';
 import { ReactFlowProvider } from 'reactflow';
@@ -128,9 +128,6 @@ export default function CampaignDetail() {
   const [loading,  setLoading]  = useState(true);
   const fileRef = useRef();
 
-  // CSV import state
-  const [csvFile,    setCsvFile]    = useState(null);
-  const [csvHeaders, setCsvHeaders] = useState([]);
   const [csvPreview, setCsvPreview] = useState([]);
   const [mapping,    setMapping]    = useState({});
   const [customFieldMappings, setCustomFieldMappings] = useState([{ key: '', csvCol: '' }]);
@@ -138,6 +135,7 @@ export default function CampaignDetail() {
   const [importResult, setImportResult] = useState(null);
   const [dragging,   setDragging]   = useState(false);
   const [importMode, setImportMode] = useState('create_or_update');
+
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [sequence, setSequence] = useState(null);
   const [actioning, setActioning] = useState(false);
@@ -153,18 +151,102 @@ export default function CampaignDetail() {
   const [messageTemplates, setMessageTemplates] = useState([]);
   const [editorStep, setEditorStep] = useState(null);
 
-  useEffect(() => {
-    getCampaign(id)
-      .then(d => {
-        setCampaign(d.campaign); setStats(d);
-        setEditName(d.campaign?.name || '');
-        setProfileKey(d.campaign?.profile_key || d.campaign?.settings?.profile_key || 'profile_1');
-        setEditConfig(JSON.stringify(d.campaign?.sequence_config || {}, null, 2));
-      })
-      .catch(() => toast.error('Campaign not found'))
-      .finally(() => setLoading(false));
-  }, [id]);
+  const [acceptedProspects, setAcceptedProspects] = useState([]);
+  const [activityLogs, setActivityLogs] = useState([]);
+  const [loadingActivity, setLoadingActivity] = useState(false);
+  const [loadingAccepted, setLoadingAccepted] = useState(false);
 
+  const loadAcceptedProspects = () => {
+    setLoadingAccepted(true);
+    getProspects({ campaign_id: id, limit: 1000 }).then(d => {
+      const all = d.prospects || [];
+      const accepted = all.filter(p => 
+        p.status === 'Connection Accepted' || 
+        p.connection_status === 'connected' || 
+        p.accepted_at || 
+        p.custom_variables?.accepted_at
+      );
+      setAcceptedProspects(accepted);
+    }).catch(() => {}).finally(() => setLoadingAccepted(false));
+  };
+
+  const loadActivityLogs = () => {
+    setLoadingActivity(true);
+    getProspects({ campaign_id: id, limit: 1000 }).then(d => {
+      const prospects = d.prospects || [];
+      const events = [];
+
+      prospects.forEach(p => {
+        const pName = p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.linkedin_url || 'Prospect';
+        const cv = p.custom_variables || {};
+        const history = cv.history || [];
+
+        if (Array.isArray(history) && history.length > 0) {
+          history.forEach(h => {
+            events.push({
+              id: `${p.id}-${h.executed_at || Math.random()}`,
+              prospect_name: pName,
+              prospect_id: p.id,
+              linkedin_url: p.linkedin_url,
+              company: p.company,
+              job_title: p.job_title,
+              node_type: h.node_type || h.type || 'action',
+              node_label: h.node_label || h.label || h.node_type || 'Action Executed',
+              status: h.status || 'success',
+              executed_at: h.executed_at || h.timestamp || p.created_at,
+              details: h.reply_text || h.message || h.error || '',
+            });
+          });
+        } else {
+          if (p.created_at) {
+            events.push({ id: `${p.id}-created`, prospect_name: pName, prospect_id: p.id, linkedin_url: p.linkedin_url, company: p.company, job_title: p.job_title, node_type: 'enrolled', node_label: 'Added to Campaign', status: 'success', executed_at: p.created_at, details: '' });
+          }
+          if (p.connection_sent_date) {
+            events.push({ id: `${p.id}-invite`, prospect_name: pName, prospect_id: p.id, linkedin_url: p.linkedin_url, company: p.company, job_title: p.job_title, node_type: 'send_invitation', node_label: 'Connection Invite Sent', status: 'success', executed_at: p.connection_sent_date, details: '' });
+          }
+          if (p.accepted_at) {
+            events.push({ id: `${p.id}-accepted`, prospect_name: pName, prospect_id: p.id, linkedin_url: p.linkedin_url, company: p.company, job_title: p.job_title, node_type: 'connection_accepted', node_label: 'Connection Accepted', status: 'success', executed_at: p.accepted_at, details: '' });
+          }
+          if (p.message_sent_date) {
+            events.push({ id: `${p.id}-message`, prospect_name: pName, prospect_id: p.id, linkedin_url: p.linkedin_url, company: p.company, job_title: p.job_title, node_type: 'send_message', node_label: 'Initial Message Sent', status: 'success', executed_at: p.message_sent_date, details: '' });
+          }
+        }
+      });
+
+      events.sort((a, b) => new Date(b.executed_at || 0) - new Date(a.executed_at || 0));
+      setActivityLogs(events);
+    }).catch(() => {}).finally(() => setLoadingActivity(false));
+  };
+
+  useEffect(() => {
+    if (tab === 'accepted') loadAcceptedProspects();
+    if (tab === 'activity') loadActivityLogs();
+  }, [tab, id]);
+
+  const exportAcceptedCSV = () => {
+    if (!acceptedProspects.length) return toast.error('No accepted prospects to export');
+    const headers = ['First Name', 'Last Name', 'Full Name', 'Company', 'Job Title', 'Email', 'LinkedIn URL', 'Accepted At'];
+    const csvRows = acceptedProspects.map(p => [
+      csvEscape(p.first_name || ''),
+      csvEscape(p.last_name || ''),
+      csvEscape(p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim()),
+      csvEscape(p.company || ''),
+      csvEscape(p.job_title || p.headline || ''),
+      csvEscape(p.email || ''),
+      csvEscape(p.linkedin_url || ''),
+      csvEscape(p.accepted_at || p.custom_variables?.accepted_at || p.updated_at || '')
+    ]);
+    const content = `${headers.join(',')}\n${csvRows.map(r => r.join(',')).join('\n')}`;
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${(campaign?.name || 'campaign').toLowerCase().replace(/[^a-z0-9]/g, '_')}_accepted_prospects.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success(`Exported ${acceptedProspects.length} accepted prospects`);
+  };
   useEffect(() => {
     getProspects({ limit: 500 }).then(d => setProspectPicker(d.prospects || [])).catch(() => {});
     getMessages().then(d => setMessageTemplates(d.messages || [])).catch(() => {});
@@ -455,67 +537,211 @@ export default function CampaignDetail() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-5 bg-[#111111] rounded-xl p-1 w-fit border border-[#2a2a2a]">
-        {['prospects', 'import', 'sequence', 'edit', 'analytics'].map(t => (
+      <div className="flex gap-1 mb-5 bg-[#111111] rounded-xl p-1 w-fit border border-[#2a2a2a] flex-wrap">
+        {[
+          { id: 'prospects', label: 'Prospects' },
+          { id: 'accepted',  label: 'Accepted Prospects' },
+          { id: 'activity',  label: 'Activity Log' },
+          { id: 'import',    label: 'Import' },
+          { id: 'sequence',  label: 'Sequence' },
+          { id: 'edit',      label: 'Edit' },
+          { id: 'analytics', label: 'Analytics' },
+        ].map(t => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-5 py-2 rounded-lg text-sm font-medium capitalize transition-all ${
-              tab === t ? 'bg-[#1a1a1a] text-white shadow-sm' : 'text-[#9ca3af] hover:text-white'
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              tab === t.id ? 'bg-[#1a1a1a] text-white shadow-sm' : 'text-[#9ca3af] hover:text-white'
             }`}
           >
-            {t}
+            {t.label}
           </button>
         ))}
       </div>
 
       {/* Tab content */}
-      {tab === 'prospects' && (
+      {tab === 'accepted' && (
         <div className="space-y-4">
-          <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-4">
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_auto] gap-3">
-              <select value={pickedProspect} onChange={e => setPickedProspect(e.target.value)} className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white">
-                <option value="">Add existing prospect...</option>
-                {prospectPicker.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {[p.first_name, p.last_name].filter(Boolean).join(' ') || p.linkedin_url} {p.company ? `- ${p.company}` : ''}
-                  </option>
-                ))}
-              </select>
-              <button onClick={addExistingProspect} className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-sm">
-                <UserPlus size={15} /> Add Existing
-              </button>
-              <button onClick={() => setNewProspectOpen(v => !v)} className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-[#6366f1] text-white text-sm">
-                <Plus size={15} /> New Prospect
-              </button>
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-4">
+            <div>
+              <h3 className="text-white font-bold text-base flex items-center gap-2">
+                <UserCheck size={18} className="text-green-400" /> Accepted Prospects ({acceptedProspects.length})
+              </h3>
+              <p className="text-[#6b7280] text-xs mt-0.5">
+                Prospects in this campaign who have accepted your LinkedIn connection request.
+              </p>
             </div>
-            {newProspectOpen && (
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-                {[
-                  ['first_name', 'First name'], ['last_name', 'Last name'], ['linkedin_url', 'LinkedIn URL'],
-                  ['email', 'Email'], ['company', 'Company'], ['job_title', 'Job title'],
-                ].map(([key, label]) => (
-                  <input key={key} value={newProspect[key]} onChange={e => setNewProspect(p => ({ ...p, [key]: e.target.value }))} placeholder={label} className="bg-[#111111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-sm text-white" />
-                ))}
-                <button onClick={addSingleProspect} className="md:col-span-2 px-4 py-2.5 rounded-lg bg-[#22c55e] text-white text-sm font-medium">
-                  Save and Enroll Prospect
-                </button>
+            <button
+              onClick={exportAcceptedCSV}
+              disabled={acceptedProspects.length === 0}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#22c55e] hover:bg-[#16a34a] disabled:opacity-40 text-white font-semibold text-xs shadow-md transition-colors"
+            >
+              <Download size={15} /> Export Accepted CSV
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] overflow-hidden">
+            {loadingAccepted ? (
+              <div className="p-8 text-center text-[#6b7280]">
+                <Loader2 size={24} className="animate-spin mx-auto mb-2 text-[#6366f1]" />
+                Loading accepted prospects…
+              </div>
+            ) : acceptedProspects.length === 0 ? (
+              <div className="p-12 text-center text-[#6b7280]">
+                <UserCheck size={36} className="mx-auto mb-3 text-[#2a2a2a]" />
+                <p className="text-white font-medium text-sm">No Accepted Prospects Yet</p>
+                <p className="text-xs text-[#6b7280] mt-1">Prospects who accept your connection invite will automatically appear here.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-[#9ca3af]">
+                  <thead className="bg-[#111111] text-[#6b7280] uppercase tracking-wider font-semibold border-b border-[#2a2a2a]">
+                    <tr>
+                      <th className="px-4 py-3">Name</th>
+                      <th className="px-4 py-3">Company</th>
+                      <th className="px-4 py-3">Job Title</th>
+                      <th className="px-4 py-3">Email</th>
+                      <th className="px-4 py-3">Accepted Date</th>
+                      <th className="px-4 py-3 text-right">LinkedIn</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#2a2a2a]/60">
+                    {acceptedProspects.map(p => (
+                      <tr key={p.id} className="hover:bg-[#111111]/50 transition-colors">
+                        <td className="px-4 py-3 text-white font-medium">
+                          {p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Prospect'}
+                        </td>
+                        <td className="px-4 py-3">{p.company || '—'}</td>
+                        <td className="px-4 py-3">{p.job_title || p.headline || '—'}</td>
+                        <td className="px-4 py-3">{p.email || '—'}</td>
+                        <td className="px-4 py-3 text-[#6b7280]">
+                          {p.accepted_at || p.custom_variables?.accepted_at ? new Date(p.accepted_at || p.custom_variables?.accepted_at).toLocaleString() : 'Connected'}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {p.linkedin_url ? (
+                            <a
+                              href={p.linkedin_url.startsWith('http') ? p.linkedin_url : `https://${p.linkedin_url}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#6366f1]/10 text-[#818cf8] hover:bg-[#6366f1]/20 text-[11px] font-medium"
+                            >
+                              Profile <ExternalLink size={12} />
+                            </a>
+                          ) : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
-          <ProspectTable campaignId={id} />
+        </div>
+      )}
+
+      {tab === 'activity' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-4">
+            <div>
+              <h3 className="text-white font-bold text-base flex items-center gap-2">
+                <Activity size={18} className="text-[#6366f1]" /> Campaign Activity Log ({activityLogs.length})
+              </h3>
+              <p className="text-[#6b7280] text-xs mt-0.5">
+                Real-time chronological feed of all profile visits, connection requests, acceptances, and messages.
+              </p>
+            </div>
+            <button
+              onClick={loadActivityLogs}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-xs font-medium"
+            >
+              Refresh Feed
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] overflow-hidden">
+            {loadingActivity ? (
+              <div className="p-8 text-center text-[#6b7280]">
+                <Loader2 size={24} className="animate-spin mx-auto mb-2 text-[#6366f1]" />
+                Loading activity log…
+              </div>
+            ) : activityLogs.length === 0 ? (
+              <div className="p-12 text-center text-[#6b7280]">
+                <Clock size={36} className="mx-auto mb-3 text-[#2a2a2a]" />
+                <p className="text-white font-medium text-sm">No Activity Logged Yet</p>
+                <p className="text-xs text-[#6b7280] mt-1">Actions executed by the automated flow runner will appear here in real-time.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-[#9ca3af]">
+                  <thead className="bg-[#111111] text-[#6b7280] uppercase tracking-wider font-semibold border-b border-[#2a2a2a]">
+                    <tr>
+                      <th className="px-4 py-3">Timestamp</th>
+                      <th className="px-4 py-3">Prospect</th>
+                      <th className="px-4 py-3">Action Executed</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Details</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#2a2a2a]/60">
+                    {activityLogs.map((log) => {
+                      const actionType = (log.node_type || log.node_label || '').toLowerCase();
+                      let icon = <Clock size={14} className="text-[#9ca3af]" />;
+                      let badgeStyle = 'bg-[#2a2a2a] text-[#9ca3af]';
+
+                      if (actionType.includes('visit')) {
+                        icon = <Eye size={14} className="text-blue-400" />;
+                        badgeStyle = 'bg-blue-500/10 border border-blue-500/20 text-blue-400';
+                      } else if (actionType.includes('invite') || actionType.includes('invitation')) {
+                        icon = <Send size={14} className="text-purple-400" />;
+                        badgeStyle = 'bg-purple-500/10 border border-purple-500/20 text-purple-400';
+                      } else if (actionType.includes('accepted') || actionType.includes('connect')) {
+                        icon = <UserCheck size={14} className="text-green-400" />;
+                        badgeStyle = 'bg-green-500/10 border border-green-500/20 text-green-400';
+                      } else if (actionType.includes('message') || actionType.includes('followup')) {
+                        icon = <MessageSquare size={14} className="text-indigo-400" />;
+                        badgeStyle = 'bg-indigo-500/10 border border-indigo-500/20 text-indigo-400';
+                      } else if (actionType.includes('reply') || actionType.includes('replied')) {
+                        icon = <MessageSquare size={14} className="text-emerald-400" />;
+                        badgeStyle = 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400';
+                      }
+
+                      return (
+                        <tr key={log.id} className="hover:bg-[#111111]/50 transition-colors">
+                          <td className="px-4 py-3 text-[#6b7280] whitespace-nowrap">
+                            {log.executed_at ? new Date(log.executed_at).toLocaleString() : 'Recently'}
+                          </td>
+                          <td className="px-4 py-3 font-medium text-white">
+                            <div>
+                              <p className="text-white text-xs">{log.prospect_name}</p>
+                              {log.company && <p className="text-[#6b7280] text-[11px]">{log.company}</p>}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium ${badgeStyle}`}>
+                              {icon} {log.node_label || log.node_type}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="capitalize text-[11px] font-semibold text-green-400">
+                              {log.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 max-w-xs truncate text-[#6b7280]">
+                            {log.details || '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       {tab === 'import' && (
-        <div className="space-y-5 max-w-3xl">
-          {/* Campaign Variables — always visible, drives the message editor variable picker */}
-          <CampaignVariablesPanel
-            variables={campaignVariables}
-            onAdd={addCampaignVariable}
-            onRemove={removeCampaignVariable}
-          />
-
+        <div className="space-y-4">
           <div className="bg-[#6366f1]/10 border border-[#6366f1]/30 rounded-xl p-4 flex items-center justify-between">
             <div>
               <h4 className="text-white font-bold text-sm">Interactive CSV Import Wizard</h4>
