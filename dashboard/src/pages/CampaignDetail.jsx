@@ -247,6 +247,24 @@ export default function CampaignDetail() {
     document.body.removeChild(link);
     toast.success(`Exported ${acceptedProspects.length} accepted prospects`);
   };
+
+  useEffect(() => {
+    setLoading(true);
+    getCampaign(id)
+      .then(d => {
+        setCampaign(d.campaign);
+        setStats(d);
+        setEditName(d.campaign?.name || '');
+        setProfileKey(d.campaign?.profile_key || d.campaign?.settings?.profile_key || 'profile_1');
+        setEditConfig(JSON.stringify(d.campaign?.sequence_config || {}, null, 2));
+      })
+      .catch((err) => {
+        console.error('Error fetching campaign:', err);
+        toast.error('Campaign not found');
+      })
+      .finally(() => setLoading(false));
+  }, [id]);
+
   useEffect(() => {
     getProspects({ limit: 500 }).then(d => setProspectPicker(d.prospects || [])).catch(() => {});
     getMessages().then(d => setMessageTemplates(d.messages || [])).catch(() => {});
@@ -390,12 +408,10 @@ export default function CampaignDetail() {
 
   const buildMappedCsv = (rawText) => {
     const { headers, rows } = parseCSV(rawText);
-    // Build rename map: csvColumn → dbField
     const rename = {};
     Object.entries(mapping).forEach(([dbField, csvCol]) => {
       if (csvCol) rename[csvCol] = dbField;
     });
-    // Custom field mappings: csvColumn → custom_field_key (stored as-is; backend puts unknowns in custom_fields)
     customFieldMappings.forEach(({ key, csvCol }) => {
       if (key.trim() && csvCol) rename[csvCol] = key.trim().toLowerCase().replace(/\s+/g, '_');
     });
