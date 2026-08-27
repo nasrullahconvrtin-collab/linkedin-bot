@@ -1,7 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Eye } from 'lucide-react';
+import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Eye, Download } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { getProspects, getCampaigns } from '../services/api';
 import StatusBadge from './StatusBadge';
+
+function csvEscape(val) {
+  const s = String(val ?? '');
+  return /[",\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
+}
 
 const STATUSES = [
   '', 'Connection Request Sent', 'Connection Accepted', 'waiting_connection_acceptance',
@@ -87,6 +93,34 @@ export default function ProspectTable({ campaignId, onRowClick }) {
     </th>
   );
 
+  const exportTableCSV = () => {
+    if (!rows.length) return toast.error('No prospects to export');
+    const headers = ['First Name', 'Last Name', 'Company', 'Job Title', 'Email', 'LinkedIn URL', 'Account', 'Status', 'Next Steps', 'Connected Date', 'Message Sent Date'];
+    const csvRows = rows.map(r => [
+      csvEscape(r.first_name || ''),
+      csvEscape(r.last_name || ''),
+      csvEscape(r.company || ''),
+      csvEscape(r.job_title || ''),
+      csvEscape(r.email || ''),
+      csvEscape(r.linkedin_url || ''),
+      csvEscape(r.assigned_account || ''),
+      csvEscape(r.status || ''),
+      csvEscape(r.next_steps || ''),
+      csvEscape(r.connection_sent_date || ''),
+      csvEscape(r.message_sent_date || '')
+    ]);
+    const content = `${headers.join(',')}\n${csvRows.map(r => r.join(',')).join('\n')}`;
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `prospects_export.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success(`Exported ${rows.length} prospects`);
+  };
+
   const totalPages = Math.ceil(total / LIMIT);
 
   return (
@@ -131,6 +165,13 @@ export default function ProspectTable({ campaignId, onRowClick }) {
             Clear
           </button>
         )}
+        <button
+          onClick={exportTableCSV}
+          disabled={rows.length === 0}
+          className="flex items-center gap-1.5 px-3 py-2 text-sm text-white bg-[#6366f1] hover:bg-[#4f46e5] disabled:opacity-40 rounded-lg transition-colors font-medium ml-auto"
+        >
+          <Download size={14} /> Export CSV
+        </button>
       </div>
 
       {/* Table */}

@@ -28,6 +28,11 @@ import {
   saveMessage,
 } from '../services/api';
 
+function csvEscape(val) {
+  const s = String(val ?? '');
+  return /[",\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
+}
+
 const REQUIRED_FIELDS = [
   { key: 'first_name',       label: 'First Name' },
   { key: 'last_name',        label: 'Last Name' },
@@ -151,23 +156,37 @@ export default function CampaignDetail() {
   const [messageTemplates, setMessageTemplates] = useState([]);
   const [editorStep, setEditorStep] = useState(null);
 
-  const [acceptedProspects, setAcceptedProspects] = useState([]);
+  const [connectedProspects, setConnectedProspects] = useState([]);
+  const [loadingConnected, setLoadingConnected] = useState(false);
+  const [connectedSearch, setConnectedSearch] = useState('');
+
   const [activityLogs, setActivityLogs] = useState([]);
   const [loadingActivity, setLoadingActivity] = useState(false);
-  const [loadingAccepted, setLoadingAccepted] = useState(false);
+  const [activityFilter, setActivityFilter] = useState('all');
+  const [activitySearch, setActivitySearch] = useState('');
 
-  const loadAcceptedProspects = () => {
-    setLoadingAccepted(true);
-    getProspects({ campaign_id: id, limit: 1000 }).then(d => {
+  const loadConnectedProspects = () => {
+    setLoadingConnected(true);
+    getProspects({ campaign_id: id, limit: 2000 }).then(d => {
       const all = d.prospects || [];
-      const accepted = all.filter(p => 
-        p.status === 'Connection Accepted' || 
-        p.connection_status === 'connected' || 
-        p.accepted_at || 
-        p.custom_variables?.accepted_at
-      );
-      setAcceptedProspects(accepted);
-    }).catch(() => {}).finally(() => setLoadingAccepted(false));
+      const connected = all.filter(p => {
+        const s = (p.status || '').toLowerCase();
+        const cs = (p.connection_status || '').toLowerCase();
+        return (
+          s === 'connection accepted' ||
+          s === 'ready to send' ||
+          s === 'sent' ||
+          s === 'initial message sent' ||
+          s === 'following up' ||
+          s === 'replied' ||
+          s === 'completed' ||
+          cs === 'connected' ||
+          Boolean(p.accepted_at) ||
+          Boolean(p.custom_variables?.accepted_at)
+        );
+      });
+      setConnectedProspects(connected);
+    }).catch(() => {}).finally(() => setLoadingConnected(false));
   };
 
   const loadActivityLogs = () => {
@@ -219,14 +238,14 @@ export default function CampaignDetail() {
   };
 
   useEffect(() => {
-    if (tab === 'accepted') loadAcceptedProspects();
+    if (tab === 'connected' || tab === 'accepted') loadConnectedProspects();
     if (tab === 'activity') loadActivityLogs();
   }, [tab, id]);
 
-  const exportAcceptedCSV = () => {
-    if (!acceptedProspects.length) return toast.error('No accepted prospects to export');
-    const headers = ['First Name', 'Last Name', 'Full Name', 'Company', 'Job Title', 'Email', 'LinkedIn URL', 'Accepted At'];
-    const csvRows = acceptedProspects.map(p => [
+  const exportConnectedCSV = () => {
+    if (!connectedProspects.length) return toast.error('No connected prospects to export');
+    const headers = ['First Name', 'Last Name', 'Full Name', 'Company', 'Job Title', 'Email', 'LinkedIn URL', 'Account', 'Status', 'Connected Date', 'Message Sent Date'];
+    const csvRows = connectedProspects.map(p => [
       csvEscape(p.first_name || ''),
       csvEscape(p.last_name || ''),
       csvEscape(p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim()),
@@ -234,18 +253,60 @@ export default function CampaignDetail() {
       csvEscape(p.job_title || p.headline || ''),
       csvEscape(p.email || ''),
       csvEscape(p.linkedin_url || ''),
-      csvEscape(p.accepted_at || p.custom_variables?.accepted_at || p.updated_at || '')
+      csvEscape(p.assigned_account || ''),
+      csvEscape(p.status || ''),
+      csvEscape(p.accepted_at || p.custom_variables?.accepted_at || p.connection_sent_date || ''),
+      csvEscape(p.message_sent_date || '')
     ]);
     const content = `${headers.join(',')}\n${csvRows.map(r => r.join(',')).join('\n')}`;
     const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `${(campaign?.name || 'campaign').toLowerCase().replace(/[^a-z0-9]/g, '_')}_accepted_prospects.csv`);
+    link.setAttribute('download', `${(campaign?.name || 'campaign').toLowerCase().replace(/[^a-z0-9]/g, '_')}_connected_prospects.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    toast.success(`Exported ${acceptedProspects.length} accepted prospects`);
+    toast.success(`Exported ${connectedProspects.length} connected prospects to CSV`);
+  };
+
+  const exportConnectedJSON = () => {
+    if (!connectedProspects.length) return toast.error('No connected prospects to export');
+    const data = JSON.stringify(connectedProspects, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${(campaign?.name || 'campaign').toLowerCase().replace(/[^a-z0-9]/g, '_')}_connected_prospects.json`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success(`Exported ${connectedProspects.length} connected prospects to JSON`);
+  };
+
+  const exportActivityCSV = () => {
+    if (!activityLogs.length) return toast.error('No activity logs to export');
+    const headers = ['Timestamp', 'Prospect Name', 'Company', 'Job Title', 'Action Executed', 'Status', 'Details', 'LinkedIn URL'];
+    const csvRows = activityLogs.map(a => [
+      csvEscape(a.executed_at ? new Date(a.executed_at).toLocaleString() : ''),
+      csvEscape(a.prospect_name || ''),
+      csvEscape(a.company || ''),
+      csvEscape(a.job_title || ''),
+      csvEscape(a.node_label || a.node_type || ''),
+      csvEscape(a.status || ''),
+      csvEscape(a.details || ''),
+      csvEscape(a.linkedin_url || '')
+    ]);
+    const content = `${headers.join(',')}\n${csvRows.map(r => r.join(',')).join('\n')}`;
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${(campaign?.name || 'campaign').toLowerCase().replace(/[^a-z0-9]/g, '_')}_activity_log.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success(`Exported ${activityLogs.length} activity logs`);
   };
 
   useEffect(() => {
@@ -556,8 +617,8 @@ export default function CampaignDetail() {
       <div className="flex gap-1 mb-5 bg-[#111111] rounded-xl p-1 w-fit border border-[#2a2a2a] flex-wrap">
         {[
           { id: 'prospects', label: 'Prospects' },
-          { id: 'accepted',  label: 'Accepted Prospects' },
-          { id: 'activity',  label: 'Activity Log' },
+          { id: 'connected', label: 'Connected Prospects' },
+          { id: 'activity',  label: 'Activity' },
           { id: 'import',    label: 'Import' },
           { id: 'sequence',  label: 'Sequence' },
           { id: 'edit',      label: 'Edit' },
@@ -567,7 +628,7 @@ export default function CampaignDetail() {
             key={t.id}
             onClick={() => setTab(t.id)}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-              tab === t.id ? 'bg-[#1a1a1a] text-white shadow-sm' : 'text-[#9ca3af] hover:text-white'
+              (tab === t.id || (t.id === 'connected' && tab === 'accepted')) ? 'bg-[#1a1a1a] text-white shadow-sm' : 'text-[#9ca3af] hover:text-white'
             }`}
           >
             {t.label}
@@ -576,36 +637,54 @@ export default function CampaignDetail() {
       </div>
 
       {/* Tab content */}
-      {tab === 'accepted' && (
+      {(tab === 'connected' || tab === 'accepted') && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between gap-4 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-4">
             <div>
               <h3 className="text-white font-bold text-base flex items-center gap-2">
-                <UserCheck size={18} className="text-green-400" /> Accepted Prospects ({acceptedProspects.length})
+                <UserCheck size={18} className="text-green-400" /> Connected Prospects ({connectedProspects.length})
               </h3>
               <p className="text-[#6b7280] text-xs mt-0.5">
-                Prospects in this campaign who have accepted your LinkedIn connection request.
+                Prospects in this campaign who have accepted your LinkedIn connection request or reached connected status.
               </p>
             </div>
-            <button
-              onClick={exportAcceptedCSV}
-              disabled={acceptedProspects.length === 0}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#22c55e] hover:bg-[#16a34a] disabled:opacity-40 text-white font-semibold text-xs shadow-md transition-colors"
-            >
-              <Download size={15} /> Export Accepted CSV
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={exportConnectedCSV}
+                disabled={connectedProspects.length === 0}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#22c55e] hover:bg-[#16a34a] disabled:opacity-40 text-white font-semibold text-xs shadow-md transition-colors"
+              >
+                <Download size={14} /> Export CSV
+              </button>
+              <button
+                onClick={exportConnectedJSON}
+                disabled={connectedProspects.length === 0}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#2a2a2a] bg-[#111111] hover:bg-[#1f1f1f] disabled:opacity-40 text-white font-semibold text-xs transition-colors"
+              >
+                <Download size={14} /> Export JSON
+              </button>
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <input
+              value={connectedSearch}
+              onChange={e => setConnectedSearch(e.target.value)}
+              placeholder="Search connected prospects by name, company, or URL..."
+              className="flex-1 bg-[#111111] border border-[#2a2a2a] rounded-xl px-4 py-2 text-xs text-white placeholder-[#6b7280] focus:outline-none focus:border-[#6366f1]"
+            />
           </div>
 
           <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] overflow-hidden">
-            {loadingAccepted ? (
+            {loadingConnected ? (
               <div className="p-8 text-center text-[#6b7280]">
                 <Loader2 size={24} className="animate-spin mx-auto mb-2 text-[#6366f1]" />
-                Loading accepted prospects…
+                Loading connected prospects…
               </div>
-            ) : acceptedProspects.length === 0 ? (
+            ) : connectedProspects.length === 0 ? (
               <div className="p-12 text-center text-[#6b7280]">
                 <UserCheck size={36} className="mx-auto mb-3 text-[#2a2a2a]" />
-                <p className="text-white font-medium text-sm">No Accepted Prospects Yet</p>
+                <p className="text-white font-medium text-sm">No Connected Prospects Yet</p>
                 <p className="text-xs text-[#6b7280] mt-1">Prospects who accept your connection invite will automatically appear here.</p>
               </div>
             ) : (
@@ -616,37 +695,46 @@ export default function CampaignDetail() {
                       <th className="px-4 py-3">Name</th>
                       <th className="px-4 py-3">Company</th>
                       <th className="px-4 py-3">Job Title</th>
-                      <th className="px-4 py-3">Email</th>
-                      <th className="px-4 py-3">Accepted Date</th>
+                      <th className="px-4 py-3">Account</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Connected Date</th>
                       <th className="px-4 py-3 text-right">LinkedIn</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#2a2a2a]/60">
-                    {acceptedProspects.map(p => (
-                      <tr key={p.id} className="hover:bg-[#111111]/50 transition-colors">
-                        <td className="px-4 py-3 text-white font-medium">
-                          {p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Prospect'}
-                        </td>
-                        <td className="px-4 py-3">{p.company || '—'}</td>
-                        <td className="px-4 py-3">{p.job_title || p.headline || '—'}</td>
-                        <td className="px-4 py-3">{p.email || '—'}</td>
-                        <td className="px-4 py-3 text-[#6b7280]">
-                          {p.accepted_at || p.custom_variables?.accepted_at ? new Date(p.accepted_at || p.custom_variables?.accepted_at).toLocaleString() : 'Connected'}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          {p.linkedin_url ? (
-                            <a
-                              href={p.linkedin_url.startsWith('http') ? p.linkedin_url : `https://${p.linkedin_url}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#6366f1]/10 text-[#818cf8] hover:bg-[#6366f1]/20 text-[11px] font-medium"
-                            >
-                              Profile <ExternalLink size={12} />
-                            </a>
-                          ) : '—'}
-                        </td>
-                      </tr>
-                    ))}
+                    {connectedProspects
+                      .filter(p => {
+                        if (!connectedSearch) return true;
+                        const q = connectedSearch.toLowerCase();
+                        return [p.first_name, p.last_name, p.name, p.company, p.job_title, p.linkedin_url]
+                          .join(' ').toLowerCase().includes(q);
+                      })
+                      .map(p => (
+                        <tr key={p.id} className="hover:bg-[#111111]/50 transition-colors">
+                          <td className="px-4 py-3 text-white font-medium">
+                            {p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Prospect'}
+                          </td>
+                          <td className="px-4 py-3">{p.company || '—'}</td>
+                          <td className="px-4 py-3">{p.job_title || p.headline || '—'}</td>
+                          <td className="px-4 py-3 text-[#6b7280]">{p.assigned_account || '—'}</td>
+                          <td className="px-4 py-3"><StatusBadge status={p.status} /></td>
+                          <td className="px-4 py-3 text-[#6b7280]">
+                            {p.accepted_at || p.custom_variables?.accepted_at ? new Date(p.accepted_at || p.custom_variables?.accepted_at).toLocaleString() : (p.connection_sent_date ? new Date(p.connection_sent_date).toLocaleDateString() : 'Connected')}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {p.linkedin_url ? (
+                              <a
+                                href={p.linkedin_url.startsWith('http') ? p.linkedin_url : `https://${p.linkedin_url}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#6366f1]/10 text-[#818cf8] hover:bg-[#6366f1]/20 text-[11px] font-medium"
+                              >
+                                Profile <ExternalLink size={12} />
+                              </a>
+                            ) : '—'}
+                          </td>
+                        </tr>
+                      ))}
                   </tbody>
                 </table>
               </div>
@@ -657,7 +745,7 @@ export default function CampaignDetail() {
 
       {tab === 'activity' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between gap-4 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-4">
             <div>
               <h3 className="text-white font-bold text-base flex items-center gap-2">
                 <Activity size={18} className="text-[#6366f1]" /> Campaign Activity Log ({activityLogs.length})
@@ -666,12 +754,41 @@ export default function CampaignDetail() {
                 Real-time chronological feed of all profile visits, connection requests, acceptances, and messages.
               </p>
             </div>
-            <button
-              onClick={loadActivityLogs}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-xs font-medium"
+            <div className="flex items-center gap-2">
+              <button
+                onClick={exportActivityCSV}
+                disabled={activityLogs.length === 0}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#6366f1] hover:bg-[#4f46e5] disabled:opacity-40 text-white text-xs font-medium transition-colors"
+              >
+                <Download size={14} /> Export CSV
+              </button>
+              <button
+                onClick={loadActivityLogs}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white text-xs font-medium"
+              >
+                Refresh Feed
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <input
+              value={activitySearch}
+              onChange={e => setActivitySearch(e.target.value)}
+              placeholder="Filter by prospect name or company..."
+              className="flex-1 min-w-[200px] bg-[#111111] border border-[#2a2a2a] rounded-xl px-4 py-2 text-xs text-white placeholder-[#6b7280] focus:outline-none focus:border-[#6366f1]"
+            />
+            <select
+              value={activityFilter}
+              onChange={e => setActivityFilter(e.target.value)}
+              className="bg-[#111111] border border-[#2a2a2a] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#6366f1]"
             >
-              Refresh Feed
-            </button>
+              <option value="all">All Action Types</option>
+              <option value="invite">Connection Invites</option>
+              <option value="accepted">Acceptances</option>
+              <option value="message">Messages & Follow-ups</option>
+              <option value="reply">Replies</option>
+            </select>
           </div>
 
           <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] overflow-hidden">
@@ -699,55 +816,68 @@ export default function CampaignDetail() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#2a2a2a]/60">
-                    {activityLogs.map((log) => {
-                      const actionType = (log.node_type || log.node_label || '').toLowerCase();
-                      let icon = <Clock size={14} className="text-[#9ca3af]" />;
-                      let badgeStyle = 'bg-[#2a2a2a] text-[#9ca3af]';
+                    {activityLogs
+                      .filter(log => {
+                        const act = (log.node_type || log.node_label || '').toLowerCase();
+                        if (activityFilter === 'invite' && !act.includes('invite')) return false;
+                        if (activityFilter === 'accepted' && !act.includes('accept') && !act.includes('connect')) return false;
+                        if (activityFilter === 'message' && !act.includes('message') && !act.includes('followup')) return false;
+                        if (activityFilter === 'reply' && !act.includes('reply')) return false;
+                        if (activitySearch) {
+                          const q = activitySearch.toLowerCase();
+                          return [log.prospect_name, log.company, log.details].join(' ').toLowerCase().includes(q);
+                        }
+                        return true;
+                      })
+                      .map((log) => {
+                        const actionType = (log.node_type || log.node_label || '').toLowerCase();
+                        let icon = <Clock size={14} className="text-[#9ca3af]" />;
+                        let badgeStyle = 'bg-[#2a2a2a] text-[#9ca3af]';
 
-                      if (actionType.includes('visit')) {
-                        icon = <Eye size={14} className="text-blue-400" />;
-                        badgeStyle = 'bg-blue-500/10 border border-blue-500/20 text-blue-400';
-                      } else if (actionType.includes('invite') || actionType.includes('invitation')) {
-                        icon = <Send size={14} className="text-purple-400" />;
-                        badgeStyle = 'bg-purple-500/10 border border-purple-500/20 text-purple-400';
-                      } else if (actionType.includes('accepted') || actionType.includes('connect')) {
-                        icon = <UserCheck size={14} className="text-green-400" />;
-                        badgeStyle = 'bg-green-500/10 border border-green-500/20 text-green-400';
-                      } else if (actionType.includes('message') || actionType.includes('followup')) {
-                        icon = <MessageSquare size={14} className="text-indigo-400" />;
-                        badgeStyle = 'bg-indigo-500/10 border border-indigo-500/20 text-indigo-400';
-                      } else if (actionType.includes('reply') || actionType.includes('replied')) {
-                        icon = <MessageSquare size={14} className="text-emerald-400" />;
-                        badgeStyle = 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400';
-                      }
+                        if (actionType.includes('visit')) {
+                          icon = <Eye size={14} className="text-blue-400" />;
+                          badgeStyle = 'bg-blue-500/10 border border-blue-500/20 text-blue-400';
+                        } else if (actionType.includes('invite') || actionType.includes('invitation')) {
+                          icon = <Send size={14} className="text-purple-400" />;
+                          badgeStyle = 'bg-purple-500/10 border border-purple-500/20 text-purple-400';
+                        } else if (actionType.includes('accepted') || actionType.includes('connect')) {
+                          icon = <UserCheck size={14} className="text-green-400" />;
+                          badgeStyle = 'bg-green-500/10 border border-green-500/20 text-green-400';
+                        } else if (actionType.includes('message') || actionType.includes('followup')) {
+                          icon = <MessageSquare size={14} className="text-indigo-400" />;
+                          badgeStyle = 'bg-indigo-500/10 border border-indigo-500/20 text-indigo-400';
+                        } else if (actionType.includes('reply') || actionType.includes('replied')) {
+                          icon = <MessageSquare size={14} className="text-emerald-400" />;
+                          badgeStyle = 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400';
+                        }
 
-                      return (
-                        <tr key={log.id} className="hover:bg-[#111111]/50 transition-colors">
-                          <td className="px-4 py-3 text-[#6b7280] whitespace-nowrap">
-                            {log.executed_at ? new Date(log.executed_at).toLocaleString() : 'Recently'}
-                          </td>
-                          <td className="px-4 py-3 font-medium text-white">
-                            <div>
-                              <p className="text-white text-xs">{log.prospect_name}</p>
-                              {log.company && <p className="text-[#6b7280] text-[11px]">{log.company}</p>}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium ${badgeStyle}`}>
-                              {icon} {log.node_label || log.node_type}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="capitalize text-[11px] font-semibold text-green-400">
-                              {log.status}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 max-w-xs truncate text-[#6b7280]">
-                            {log.details || '—'}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                        return (
+                          <tr key={log.id} className="hover:bg-[#111111]/50 transition-colors">
+                            <td className="px-4 py-3 text-[#6b7280] whitespace-nowrap">
+                              {log.executed_at ? new Date(log.executed_at).toLocaleString() : 'Recently'}
+                            </td>
+                            <td className="px-4 py-3 font-medium text-white">
+                              <div>
+                                <p className="text-white text-xs">{log.prospect_name}</p>
+                                {log.company && <p className="text-[#6b7280] text-[11px]">{log.company}</p>}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium ${badgeStyle}`}>
+                                {icon} {log.node_label || log.node_type}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className="capitalize text-[11px] font-semibold text-green-400">
+                                {log.status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 max-w-xs truncate text-[#6b7280]">
+                              {log.details || '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
                   </tbody>
                 </table>
               </div>
