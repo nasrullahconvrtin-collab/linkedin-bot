@@ -1,6 +1,14 @@
 {
   "buildCommand": "cd dashboard && npm run build",
   "outputDirectory": "dashboard/dist",
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    }
+  ],
   "rewrites": [
     { "source": "/api/unipile/(.*)", "destination": "https://api20.unipile.com:15032/api/v1/$1" },
     { "source": "/downloads/(.*)", "destination": "/downloads/$1" },
