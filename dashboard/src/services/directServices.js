@@ -1568,18 +1568,24 @@ export const directRunFlow = async () => {
   }
 
   // Global Account Safety Daily Limit from Settings
-  const globalDailyLimit = Number(appSettings.global_daily_limit || appSettings.daily_connection_limit || 40);
+  const globalDailyLimit = Number(appSettings.global_daily_limit || 40);
+  const dailyConnectionLimit = Number(appSettings.daily_connection_limit || 15);
+  const dailyMessageLimit = Number(appSettings.daily_message_limit || 40);
 
   // Calculate today's executed actions count across all prospects
   const todayDateStr = new Date().toISOString().split('T')[0];
   let todayActionsTotal = 0;
+  let todayConnectionsTotal = 0;
+  let todayMessagesTotal = 0;
   try {
     const { data: allProspects } = await supabaseDirect.from('prospects').select('custom_variables');
     (allProspects || []).forEach(p => {
       const history = p.custom_variables?.history || [];
       history.forEach(h => {
-        if (h.executed_at && h.executed_at.startsWith(todayDateStr) && (h.status === 'success' || h.status === 'replied')) {
+        if (h.executed_at && h.executed_at.startsWith(todayDateStr)) {
           todayActionsTotal += 1;
+          if (h.node_type === 'send_invitation') todayConnectionsTotal += 1;
+          if (h.node_type === 'send_message') todayMessagesTotal += 1;
         }
       });
     });
@@ -1592,6 +1598,12 @@ export const directRunFlow = async () => {
     console.log(`Global account safety quota reached for today (${todayActionsTotal}/${globalDailyLimit}). Pausing execution.`);
     return { success: true, totalExecuted: 0, message: `Global daily safety limit reached (${todayActionsTotal}/${globalDailyLimit})` };
   }
+
+  const isProviderLimitError = (err) => {
+    if (!err) return false;
+    const str = String(err).toLowerCase();
+    return str.includes('provider limit') || str.includes('rate limit') || str.includes('429') || str.includes('limit reached') || str.includes('too many requests') || str.includes('restricted');
+  };
 
   // Divide remaining quota equally across running campaigns (Round-Robin)
   const quotaPerCampaign = Math.max(1, Math.floor(remainingGlobalQuota / campaigns.length));
@@ -1746,6 +1758,11 @@ export const directRunFlow = async () => {
       }
 
       if (nodeType === 'send_invitation') {
+        if (todayConnectionsTotal >= dailyConnectionLimit) {
+          console.log(`Daily connection limit reached (${todayConnectionsTotal}/${dailyConnectionLimit}). Skipping connection invitation for ${prospect.name}.`);
+          continue;
+        }
+
         let isConnected = prospect.connection_status === 'connected' || prospect.status === 'Connection Accepted';
         
         if (!isConnected) {
@@ -1809,9 +1826,12 @@ export const directRunFlow = async () => {
           console.log(`Sending connection invite to ${prospect.name} (hasNote=${hasNoteToggle})...`);
           const res = await directSendUnipileConnectionInvite(prospect, inviteNote);
           
+          actionsTaken += 1;
+          todayConnectionsTotal += 1;
+          todayActionsTotal += 1;
+
           if (res.success) {
             totalConnections += 1;
-            actionsTaken += 1;
             prospect.status = 'Connection Request Sent';
             prospect.connection_status = 'invitation_sent';
             prospect.custom_variables.invitation_sent_at = new Date().toISOString();
@@ -1842,6 +1862,12 @@ export const directRunFlow = async () => {
               }).eq('id', prospect.id);
             } catch (e) {
               console.warn(e);
+            }
+
+            // CIRCUIT BREAKER: If LinkedIn hit a rate/provider limit, IMMEDIATELY halt further campaign attempts
+            if (isProviderLimitError(res.error)) {
+              console.warn(`[CIRCUIT BREAKER ACTIVATED] LinkedIn provider limit reached (${res.error}). Halting remaining prospect processing for campaign.`);
+              break;
             }
           }
           continue;
