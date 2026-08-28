@@ -134,6 +134,8 @@ export default function CampaignDetail() {
   const fileRef = useRef();
 
   const [csvPreview, setCsvPreview] = useState([]);
+  const [csvFile, setCsvFile] = useState(null);
+  const [csvHeaders, setCsvHeaders] = useState([]);
   const [mapping,    setMapping]    = useState({});
   const [customFieldMappings, setCustomFieldMappings] = useState([{ key: '', csvCol: '' }]);
   const [importing,  setImporting]  = useState(false);
