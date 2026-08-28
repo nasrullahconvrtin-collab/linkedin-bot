@@ -22,39 +22,20 @@ async function unipileFetch(endpoint, options = {}) {
   }
 }
 
-async function getAppSettings() {
-  try {
-    const { data } = await supabase.from('profiles').select('settings').eq('profile_key', 'profile_1');
-    if (data && data[0] && data[0].settings) {
-      return {
-        daily_connection_limit: 15,
-        daily_message_limit: 40,
-        global_daily_limit: 40,
-        ...data[0].settings
-      };
-    }
-  } catch (e) {}
-  return { daily_connection_limit: 15, daily_message_limit: 40, global_daily_limit: 40 };
-}
-
-function getLinkedinId(prospect) {
-  if (prospect.provider_id) return prospect.provider_id;
-  if (prospect.member_id) return prospect.member_id;
-  if (prospect.linkedin_url) {
-    const match = prospect.linkedin_url.match(/linkedin\.com\/in\/([^\/\?]+)/i);
-    if (match) return match[1];
-  }
-  return null;
+function extractPublicId(url) {
+  if (!url) return '';
+  const match = String(url).match(/linkedin\.com\/in\/([^/?#]+)/i);
+  if (match) return match[1];
+  return String(url).replace(/^https?:\/\//, '').replace('www.linkedin.com/in/', '').replace(/\/$/, '').trim();
 }
 
 async function runCloudFlow() {
   console.log(`[${new Date().toISOString()}] Starting 24/7 Cloud Flow Runner cycle...`);
-  
-  const appSettings = await getAppSettings();
-  const globalDailyLimit = Number(appSettings.global_daily_limit || 40);
-  const dailyConnectionLimit = Number(appSettings.daily_connection_limit || 15);
 
+  const globalDailyLimit = 40;
+  const dailyConnectionLimit = 25;
   const todayDateStr = new Date().toISOString().split('T')[0];
+
   let todayActionsTotal = 0;
   let todayConnectionsTotal = 0;
 
@@ -69,22 +50,18 @@ async function runCloudFlow() {
         }
       });
     });
-  } catch (e) {
-    console.warn('Error checking daily limits:', e);
-  }
+  } catch (e) {}
 
   if (todayActionsTotal >= globalDailyLimit) {
     console.log(`Global daily safety limit reached (${todayActionsTotal}/${globalDailyLimit}). Cycle complete.`);
     return;
   }
 
-  const { data: campaigns, error: cErr } = await supabase.from('campaigns').select('*').eq('status', 'running');
-  if (cErr || !campaigns || campaigns.length === 0) {
-    console.log('No running campaigns found. Cycle complete.');
+  const { data: campaigns } = await supabase.from('campaigns').select('*').eq('status', 'running');
+  if (!campaigns || campaigns.length === 0) {
+    console.log('No running campaigns found.');
     return;
   }
-
-  console.log(`Found ${campaigns.length} active running campaign(s). Processing...`);
 
   for (const campaign of campaigns) {
     const flowSequence = campaign.sequence_config?.flow_sequence;
@@ -97,9 +74,13 @@ async function runCloudFlow() {
       sourceEdgesMap.get(edge.source).push(edge);
     }
 
-    const incomingEdgeTargets = new Set((flowSequence.edges || []).map(e => e.target));
-    const startNode = flowSequence.nodes.find(n => !incomingEdgeTargets.has(n.id)) || flowSequence.nodes[0];
+    const incomingTargets = new Set((flowSequence.edges || []).map(e => e.target));
+    const startNode = flowSequence.nodes.find(n => !incomingTargets.has(n.id)) || flowSequence.nodes[0];
     if (!startNode) continue;
+
+    const { data: profs } = await supabase.from('profiles').select('unipile_account_id').eq('profile_key', campaign.profile_key || 'profile_1');
+    const accountId = profs?.[0]?.unipile_account_id;
+    if (!accountId) continue;
 
     const { data: prospects } = await supabase.from('prospects').select('*').eq('campaign_id', campaign.id);
     if (!prospects || prospects.length === 0) continue;
@@ -108,68 +89,143 @@ async function runCloudFlow() {
       if (todayActionsTotal >= globalDailyLimit) break;
       if (['Completed', 'Failed', 'Replied'].includes(prospect.status)) continue;
 
-      let currentNodeId = prospect.custom_variables?.current_node_id || startNode.id;
+      const cv = prospect.custom_variables || {};
+      let currentNodeId = cv.current_node_id || startNode.id;
       let currentNode = nodesMap.get(currentNodeId);
-      if (!currentNode) continue;
 
-      const nodeType = currentNode.data?.nodeType;
+      if (!currentNode) {
+        currentNodeId = startNode.id;
+        currentNode = nodesMap.get(currentNodeId);
+        if (!currentNode) continue;
+      }
+
+      const nodeType = currentNode.data?.nodeType || currentNode.type;
       const nodeConfig = currentNode.data?.config || {};
+      const edges = sourceEdgesMap.get(currentNode.id) || [];
+      const nextEdge = edges.find(e => !e.data?.condition || e.data.condition === 'default') || edges[0];
 
-      if (nodeType === 'send_invitation') {
-        if (todayConnectionsTotal >= dailyConnectionLimit) {
-          console.log(`Daily connection limit reached (${todayConnectionsTotal}/${dailyConnectionLimit}). Skipping invite for ${prospect.name}`);
+      // ── Node 1: VISIT PROFILE ───────────────────────────────────────────
+      if (nodeType === 'visit_profile') {
+        const pubId = extractPublicId(prospect.linkedin_url);
+        console.log(`[Cloud Engine] Visiting profile for ${prospect.name || prospect.id}...`);
+        const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(pubId)}?account_id=${accountId}`);
+        
+        todayActionsTotal += 1;
+        const providerId = (ok && data) ? (data.provider_id || data.id) : prospect.provider_id;
+        const nowIso = new Date().toISOString();
+
+        cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'visit_profile', executed_at: nowIso, status: 'success' }];
+        if (nextEdge) cv.current_node_id = nextEdge.target;
+
+        await supabase.from('prospects').update({
+          provider_id: providerId,
+          custom_variables: cv
+        }).eq('id', prospect.id);
+
+        continue;
+      }
+
+      // ── Node 2: WAIT / DELAY ────────────────────────────────────────────
+      if (nodeType === 'wait') {
+        const days = Number(nodeConfig.days || 0);
+        const nextScheduledStr = cv.next_scheduled_at;
+        const nowMs = Date.now();
+
+        if (days > 0 && nextScheduledStr) {
+          if (nowMs < new Date(nextScheduledStr).getTime()) {
+            // Still waiting for delay window
+            continue;
+          }
+        } else if (days > 0 && !nextScheduledStr) {
+          // Initialize delay window
+          const nextScheduledAt = new Date(nowMs + days * 24 * 60 * 60 * 1000).toISOString();
+          cv.next_scheduled_at = nextScheduledAt;
+          await supabase.from('prospects').update({ custom_variables: cv }).eq('id', prospect.id);
           continue;
         }
 
-        if (prospect.status !== 'Connection Request Sent' && prospect.connection_status !== 'invitation_sent' && prospect.connection_status !== 'connected') {
-          const recipientId = getLinkedinId(prospect);
-          const { data: profs } = await supabase.from('profiles').select('unipile_account_id').eq('profile_key', campaign.profile_key || 'profile_1');
-          const accountId = profs?.[0]?.unipile_account_id;
+        // Delay elapsed (or 0 days): advance to next node
+        if (nextEdge) {
+          cv.current_node_id = nextEdge.target;
+          cv.next_scheduled_at = null;
+          await supabase.from('prospects').update({ custom_variables: cv }).eq('id', prospect.id);
+        }
+        continue;
+      }
 
-          if (!accountId || !recipientId) {
-            console.log(`Missing accountId or recipientId for ${prospect.name}`);
-            continue;
-          }
+      // ── Node 3: SEND INVITATION ─────────────────────────────────────────
+      if (nodeType === 'send_invitation') {
+        if (todayConnectionsTotal >= dailyConnectionLimit) {
+          console.log(`Daily connection limit reached (${todayConnectionsTotal}/${dailyConnectionLimit}). Skipping invite.`);
+          continue;
+        }
 
-          const hasNoteToggle = nodeConfig.add_note || nodeConfig.include_note || nodeConfig.send_note;
-          const noteText = hasNoteToggle ? (nodeConfig.note || '').replace(/\{\{\s*first_name\s*\}\}/gi, prospect.first_name || '') : '';
-
-          console.log(`[Cloud Engine] Sending connection invitation to ${prospect.name}...`);
-          const res = await unipileFetch('/users/invite', {
-            method: 'POST',
-            body: JSON.stringify({ account_id: accountId, provider_id: recipientId, message: noteText })
-          });
-
-          todayActionsTotal += 1;
-          todayConnectionsTotal += 1;
-
-          if (res.ok) {
-            console.log(`[Cloud Engine] ✅ Connection invite sent to ${prospect.name}`);
-            const cv = prospect.custom_variables || {};
-            cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', executed_at: new Date().toISOString(), status: 'success' }];
-            cv.invitation_sent_at = new Date().toISOString();
-            await supabase.from('prospects').update({
-              status: 'Connection Request Sent',
-              connection_status: 'invitation_sent',
-              connection_sent_date: new Date().toISOString(),
-              custom_variables: cv
-            }).eq('id', prospect.id);
-          } else {
-            console.warn(`[Cloud Engine] ⚠️ Failed to send invite to ${prospect.name}:`, res.data?.detail || res.status);
-            const errStr = String(res.data?.detail || res.status);
-            const cv = prospect.custom_variables || {};
-            cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', executed_at: new Date().toISOString(), status: 'failed', error: errStr }];
+        if (prospect.status === 'Connection Request Sent' || prospect.connection_status === 'invitation_sent') {
+          if (nextEdge) {
+            cv.current_node_id = nextEdge.target;
             await supabase.from('prospects').update({ custom_variables: cv }).eq('id', prospect.id);
-
-            if (errStr.toLowerCase().includes('provider limit') || errStr.toLowerCase().includes('rate limit') || errStr.includes('429')) {
-              console.warn('[CIRCUIT BREAKER] LinkedIn rate limit triggered. Halting cloud execution loop.');
-              return;
-            }
           }
+          continue;
+        }
+
+        let providerId = prospect.provider_id;
+        if (!providerId) {
+          const pubId = extractPublicId(prospect.linkedin_url);
+          const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(pubId)}?account_id=${accountId}`);
+          if (ok && data) providerId = data.provider_id || data.id;
+        }
+
+        if (!providerId) continue;
+
+        const hasNoteToggle = nodeConfig.add_note || nodeConfig.include_note || nodeConfig.send_note;
+        const noteText = hasNoteToggle ? (nodeConfig.note || '').replace(/\{\{\s*first_name\s*\}\}/gi, prospect.first_name || '') : '';
+
+        console.log(`[Cloud Engine] Sending connection invite to ${prospect.name || prospect.id}...`);
+        const res = await unipileFetch('/users/invite', {
+          method: 'POST',
+          body: JSON.stringify({ account_id: accountId, provider_id: providerId, message: noteText })
+        });
+
+        todayActionsTotal += 1;
+        todayConnectionsTotal += 1;
+        const nowIso = new Date().toISOString();
+
+        if (res.ok) {
+          console.log(`[Cloud Engine] ✅ Invite sent to ${prospect.name}`);
+          cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', executed_at: nowIso, status: 'success' }];
+          cv.invitation_sent_at = nowIso;
+          if (nextEdge) cv.current_node_id = nextEdge.target;
+
+          await supabase.from('prospects').update({
+            status: 'Connection Request Sent',
+            connection_status: 'invitation_sent',
+            connection_sent_date: nowIso,
+            provider_id: providerId,
+            custom_variables: cv
+          }).eq('id', prospect.id);
+        } else {
+          console.warn(`[Cloud Engine] ⚠️ Invite failed for ${prospect.name}:`, res.data?.detail || res.status);
+          const errStr = String(res.data?.detail || res.status);
+          cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', executed_at: nowIso, status: 'failed', error: errStr }];
+          await supabase.from('prospects').update({ custom_variables: cv }).eq('id', prospect.id);
+
+          if (errStr.toLowerCase().includes('provider limit') || errStr.toLowerCase().includes('rate limit') || errStr.includes('429')) {
+            console.warn('[CIRCUIT BREAKER] Halting execution due to rate limit.');
+            return;
+          }
+        }
+        continue;
+      }
+
+      // ── Node 4: COMPLETED ───────────────────────────────────────────────
+      if (nodeType === 'completed') {
+        if (prospect.status !== 'Completed') {
+          await supabase.from('prospects').update({ status: 'Completed' }).eq('id', prospect.id);
         }
       }
     }
   }
+
   console.log(`[${new Date().toISOString()}] Cloud Flow Runner cycle complete.`);
 }
 
