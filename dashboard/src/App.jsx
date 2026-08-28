@@ -62,6 +62,7 @@ import MessageTemplates from './pages/MessageTemplates';
 import Queue          from './pages/Queue';
 import Prospects      from './pages/Prospects';
 import NeedsPersonalization from './pages/NeedsPersonalization';
+import ActivityLog from './pages/ActivityLog';
 import Inbox          from './pages/Inbox';
 import Replies        from './pages/Replies';
 import Profiles       from './pages/Profiles';
@@ -130,6 +131,8 @@ export default function App() {
                       <Route path="/queue"          element={<Queue />} />
                       <Route path="/message-templates" element={<MessageTemplates />} />
                       <Route path="/prospects"      element={<Prospects />} />
+                      <Route path="/activity font"   element={<Navigate to="/activity" replace />} />
+                      <Route path="/activity"       element={<ActivityLog />} />
                       <Route path="/needs-personalization" element={<NeedsPersonalization />} />
                       <Route path="/inbox"          element={<Inbox />} />
                       <Route path="/replies font"   element={<Navigate to="/replies" replace />} />

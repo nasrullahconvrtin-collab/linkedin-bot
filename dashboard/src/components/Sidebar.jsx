@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   ChevronDown, ChevronLeft, ChevronRight, FileText, LayoutDashboard,
-  ListChecks, Megaphone, Users, MessageSquare, Settings, Zap, UserCheck, Briefcase, MessageCircle
+  ListChecks, Megaphone, Users, MessageSquare, Settings, Zap, UserCheck, Briefcase, MessageCircle, Activity
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 const NAV = [
   { to: '/',          label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/prospects', label: 'Prospects', icon: Users },
+  { to: '/activity',  label: 'Activity Log', icon: Activity },
 ];
 
 const CAMPAIGN_NAV = [

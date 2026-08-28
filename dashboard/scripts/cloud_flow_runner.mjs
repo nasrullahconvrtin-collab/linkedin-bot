@@ -30,10 +30,10 @@ function extractPublicId(url) {
 }
 
 async function runCloudFlow() {
-  console.log(`[${new Date().toISOString()}] Starting 24/7 Cloud Flow Runner cycle...`);
+  console.log(`[${new Date().toISOString()}] Starting Goal-Oriented Cloud Flow Runner cycle...`);
 
   const globalDailyLimit = 40;
-  const dailyConnectionLimit = 25;
+  const dailyConnectionLimit = 15;
   const todayDateStr = new Date().toISOString().split('T')[0];
 
   let todayActionsTotal = 0;
@@ -52,8 +52,8 @@ async function runCloudFlow() {
     });
   } catch (e) {}
 
-  if (todayActionsTotal >= globalDailyLimit) {
-    console.log(`Global daily safety limit reached (${todayActionsTotal}/${globalDailyLimit}). Cycle complete.`);
+  if (todayConnectionsTotal >= dailyConnectionLimit) {
+    console.log(`Daily connection target already reached for today (${todayConnectionsTotal}/${dailyConnectionLimit}). Cycle complete.`);
     return;
   }
 
@@ -64,6 +64,8 @@ async function runCloudFlow() {
   }
 
   for (const campaign of campaigns) {
+    if (todayConnectionsTotal >= dailyConnectionLimit) break;
+
     const flowSequence = campaign.sequence_config?.flow_sequence;
     if (!flowSequence || !Array.isArray(flowSequence.nodes) || flowSequence.nodes.length === 0) continue;
 
@@ -85,9 +87,14 @@ async function runCloudFlow() {
     const { data: prospects } = await supabase.from('prospects').select('*').eq('campaign_id', campaign.id);
     if (!prospects || prospects.length === 0) continue;
 
+    // Process prospects one-by-one focusing directly on today's connection request goal
     for (const prospect of prospects) {
-      if (todayActionsTotal >= globalDailyLimit) break;
-      if (['Completed', 'Failed', 'Replied'].includes(prospect.status)) continue;
+      if (todayConnectionsTotal >= dailyConnectionLimit) {
+        console.log(`🎯 Goal Reached: Sent daily target of ${todayConnectionsTotal}/${dailyConnectionLimit} connection requests today!`);
+        break;
+      }
+      if (['Completed', 'Failed', 'Replied', 'Connection Request Sent'].includes(prospect.status)) continue;
+      if (prospect.connection_status === 'invitation_sent' || prospect.connection_status === 'connected') continue;
 
       const cv = prospect.custom_variables || {};
       let currentNodeId = cv.current_node_id || startNode.id;
@@ -99,33 +106,41 @@ async function runCloudFlow() {
         if (!currentNode) continue;
       }
 
-      const nodeType = currentNode.data?.nodeType || currentNode.type;
-      const nodeConfig = currentNode.data?.config || {};
-      const edges = sourceEdgesMap.get(currentNode.id) || [];
-      const nextEdge = edges.find(e => !e.data?.condition || e.data.condition === 'default') || edges[0];
+      let nodeType = currentNode.data?.nodeType || currentNode.type;
+      let nodeConfig = currentNode.data?.config || {};
+      let edges = sourceEdgesMap.get(currentNode.id) || [];
+      let nextEdge = edges.find(e => !e.data?.condition || e.data.condition === 'default') || edges[0];
 
-      // ── Node 1: VISIT PROFILE ───────────────────────────────────────────
+      // ── Step 1: VISIT PROFILE (if current node is visit_profile) ────────
       if (nodeType === 'visit_profile') {
         const pubId = extractPublicId(prospect.linkedin_url);
-        console.log(`[Cloud Engine] Visiting profile for ${prospect.name || prospect.id}...`);
+        console.log(`[Goal Engine] Visiting profile for ${prospect.name || prospect.id}...`);
         const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(pubId)}?account_id=${accountId}`);
-        
+
         todayActionsTotal += 1;
         const providerId = (ok && data) ? (data.provider_id || data.id) : prospect.provider_id;
         const nowIso = new Date().toISOString();
 
-        cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'visit_profile', executed_at: nowIso, status: 'success' }];
-        if (nextEdge) cv.current_node_id = nextEdge.target;
+        cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'visit_profile', node_label: 'Visit Profile', executed_at: nowIso, status: 'success' }];
+        prospect.provider_id = providerId || prospect.provider_id;
+
+        if (nextEdge) {
+          currentNodeId = nextEdge.target;
+          currentNode = nodesMap.get(currentNodeId);
+          nodeType = currentNode?.data?.nodeType || currentNode?.type;
+          nodeConfig = currentNode?.data?.config || {};
+          edges = sourceEdgesMap.get(currentNode?.id) || [];
+          nextEdge = edges.find(e => !e.data?.condition || e.data.condition === 'default') || edges[0];
+          cv.current_node_id = currentNodeId;
+        }
 
         await supabase.from('prospects').update({
-          provider_id: providerId,
+          provider_id: prospect.provider_id,
           custom_variables: cv
         }).eq('id', prospect.id);
-
-        continue;
       }
 
-      // ── Node 2: WAIT / DELAY ────────────────────────────────────────────
+      // ── Step 2: CHECK WAIT / DELAY ──────────────────────────────────────
       if (nodeType === 'wait') {
         const days = Number(nodeConfig.days || 0);
         const nextScheduledStr = cv.next_scheduled_at;
@@ -133,7 +148,7 @@ async function runCloudFlow() {
 
         if (days > 0 && nextScheduledStr) {
           if (nowMs < new Date(nextScheduledStr).getTime()) {
-            // Still waiting for delay window
+            // Still in delay window for this prospect
             continue;
           }
         } else if (days > 0 && !nextScheduledStr) {
@@ -146,28 +161,20 @@ async function runCloudFlow() {
 
         // Delay elapsed (or 0 days): advance to next node
         if (nextEdge) {
-          cv.current_node_id = nextEdge.target;
+          currentNodeId = nextEdge.target;
+          currentNode = nodesMap.get(currentNodeId);
+          nodeType = currentNode?.data?.nodeType || currentNode?.type;
+          nodeConfig = currentNode?.data?.config || {};
+          edges = sourceEdgesMap.get(currentNode?.id) || [];
+          nextEdge = edges.find(e => !e.data?.condition || e.data.condition === 'default') || edges[0];
+          cv.current_node_id = currentNodeId;
           cv.next_scheduled_at = null;
           await supabase.from('prospects').update({ custom_variables: cv }).eq('id', prospect.id);
         }
-        continue;
       }
 
-      // ── Node 3: SEND INVITATION ─────────────────────────────────────────
+      // ── Step 3: SEND INVITATION (Achieving Today's Goal Immediately) ─────
       if (nodeType === 'send_invitation') {
-        if (todayConnectionsTotal >= dailyConnectionLimit) {
-          console.log(`Daily connection limit reached (${todayConnectionsTotal}/${dailyConnectionLimit}). Skipping invite.`);
-          continue;
-        }
-
-        if (prospect.status === 'Connection Request Sent' || prospect.connection_status === 'invitation_sent') {
-          if (nextEdge) {
-            cv.current_node_id = nextEdge.target;
-            await supabase.from('prospects').update({ custom_variables: cv }).eq('id', prospect.id);
-          }
-          continue;
-        }
-
         let providerId = prospect.provider_id;
         if (!providerId) {
           const pubId = extractPublicId(prospect.linkedin_url);
@@ -180,7 +187,7 @@ async function runCloudFlow() {
         const hasNoteToggle = nodeConfig.add_note || nodeConfig.include_note || nodeConfig.send_note;
         const noteText = hasNoteToggle ? (nodeConfig.note || '').replace(/\{\{\s*first_name\s*\}\}/gi, prospect.first_name || '') : '';
 
-        console.log(`[Cloud Engine] Sending connection invite to ${prospect.name || prospect.id}...`);
+        console.log(`[Goal Engine] Dispatched Connection Invite #${todayConnectionsTotal + 1} to ${prospect.name || prospect.id}...`);
         const res = await unipileFetch('/users/invite', {
           method: 'POST',
           body: JSON.stringify({ account_id: accountId, provider_id: providerId, message: noteText })
@@ -191,8 +198,8 @@ async function runCloudFlow() {
         const nowIso = new Date().toISOString();
 
         if (res.ok) {
-          console.log(`[Cloud Engine] ✅ Invite sent to ${prospect.name}`);
-          cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', executed_at: nowIso, status: 'success' }];
+          console.log(`[Goal Engine] ✅ Connection Invite #${todayConnectionsTotal} SENT to ${prospect.name}`);
+          cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', node_label: 'Connection Request Sent', executed_at: nowIso, status: 'success' }];
           cv.invitation_sent_at = nowIso;
           if (nextEdge) cv.current_node_id = nextEdge.target;
 
@@ -204,9 +211,9 @@ async function runCloudFlow() {
             custom_variables: cv
           }).eq('id', prospect.id);
         } else {
-          console.warn(`[Cloud Engine] ⚠️ Invite failed for ${prospect.name}:`, res.data?.detail || res.status);
+          console.warn(`[Goal Engine] ⚠️ Invite failed for ${prospect.name}:`, res.data?.detail || res.status);
           const errStr = String(res.data?.detail || res.status);
-          cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', executed_at: nowIso, status: 'failed', error: errStr }];
+          cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', node_label: 'Connection Request Failed', executed_at: nowIso, status: 'failed', error: errStr }];
           await supabase.from('prospects').update({ custom_variables: cv }).eq('id', prospect.id);
 
           if (errStr.toLowerCase().includes('provider limit') || errStr.toLowerCase().includes('rate limit') || errStr.includes('429')) {
@@ -214,19 +221,11 @@ async function runCloudFlow() {
             return;
           }
         }
-        continue;
-      }
-
-      // ── Node 4: COMPLETED ───────────────────────────────────────────────
-      if (nodeType === 'completed') {
-        if (prospect.status !== 'Completed') {
-          await supabase.from('prospects').update({ status: 'Completed' }).eq('id', prospect.id);
-        }
       }
     }
   }
 
-  console.log(`[${new Date().toISOString()}] Cloud Flow Runner cycle complete.`);
+  console.log(`[${new Date().toISOString()}] Goal-Oriented Flow Runner cycle complete. Total invites sent today: ${todayConnectionsTotal}/${dailyConnectionLimit}`);
 }
 
 runCloudFlow();
