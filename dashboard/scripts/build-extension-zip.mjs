@@ -131,9 +131,13 @@ const eocd = Buffer.concat([
 ]);
 
 const ws = createWriteStream(outZip);
-for (const c of [...chunks, cdBuf, eocd]) ws.write(c);
-ws.end();
-ws.on('finish', () => {
-  const kb = (statSync(outZip).size / 1024).toFixed(1);
-  console.log(`✅ Built LinkedFlow-Chrome-Extension.zip (${kb} KB)`);
+await new Promise((resolve, reject) => {
+  ws.on('finish', () => {
+    const kb = (statSync(outZip).size / 1024).toFixed(1);
+    console.log(`✅ Built LinkedFlow-Chrome-Extension.zip (${kb} KB)`);
+    resolve();
+  });
+  ws.on('error', reject);
+  for (const c of [...chunks, cdBuf, eocd]) ws.write(c);
+  ws.end();
 });
