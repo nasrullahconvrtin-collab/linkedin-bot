@@ -3,6 +3,6 @@
   "private": true,
   "scripts": {
     "postinstall": "cd dashboard && npm install",
-    "build": "cd dashboard && npm install --include=dev && npm run build"
+    "build": "cd dashboard && npm run build"
   }
 }
