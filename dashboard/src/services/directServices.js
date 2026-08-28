@@ -1496,8 +1496,10 @@ export const DEFAULT_APP_SETTINGS = {
 };
 
 export const directGetAppSettings = async () => {
+  const userProfiles = await directGetProfiles();
+  const activeProfileKey = userProfiles[0]?.profile_key || 'profile_1';
   try {
-    const { data } = await supabaseDirect.from('profiles').select('settings').eq('profile_key', 'profile_1');
+    const { data } = await supabaseDirect.from('profiles').select('settings').eq('profile_key', activeProfileKey);
     if (data && data[0] && data[0].settings && Object.keys(data[0].settings).length > 0) {
       return { ...DEFAULT_APP_SETTINGS, ...data[0].settings };
     }
@@ -1513,11 +1515,13 @@ export const directGetAppSettings = async () => {
 
 export const directSaveAppSettings = async (newSettings) => {
   const merged = { ...DEFAULT_APP_SETTINGS, ...newSettings };
+  const userProfiles = await directGetProfiles();
+  const activeProfileKey = userProfiles[0]?.profile_key || 'profile_1';
   try {
     localStorage.setItem('lf_app_settings', JSON.stringify(merged));
   } catch {}
   try {
-    await supabaseDirect.from('profiles').update({ settings: merged }).eq('profile_key', 'profile_1');
+    await supabaseDirect.from('profiles').update({ settings: merged }).eq('profile_key', activeProfileKey);
     await supabaseDirect.from('account_safety_settings').upsert([{
       max_daily_invites: Number(merged.daily_connection_limit || 25),
       max_daily_messages: Number(merged.daily_message_limit || 50),
