@@ -1,6 +1,12 @@
 {
   "buildCommand": "cd dashboard && npm run build",
   "outputDirectory": "dashboard/dist",
+  "crons": [
+    {
+      "path": "/api/cron",
+      "schedule": "*/10 * * * *"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",
@@ -10,6 +16,7 @@
     }
   ],
   "rewrites": [
+    { "source": "/api/cron", "destination": "/api/cron.js" },
     { "source": "/api/unipile/(.*)", "destination": "https://api20.unipile.com:15032/api/v1/$1" },
     { "source": "/downloads/(.*)", "destination": "/downloads/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
