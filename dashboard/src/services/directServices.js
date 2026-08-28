@@ -110,7 +110,6 @@ export const getActiveOrganizationId = () => {
 let activeAccountId = null;
 
 export const directGetProfiles = async () => {
-  const isSuper = isSuperAdminUser();
   const orgId = getActiveOrganizationId();
   const userAcc = getActiveUserAccount();
   const userEmail = userAcc?.email ? userAcc.email.toLowerCase() : null;
@@ -126,13 +125,7 @@ export const directGetProfiles = async () => {
         const pOrgId = p.organization_id || p.settings?.organization_id || p.settings?.orgId;
         const pEmail = (p.user_email || p.settings?.user_email || p.settings?.email || '').toLowerCase();
 
-        // If super admin, ONLY return superadmin profile (Muhammad Nasrullah)
-        if (isSuper) {
-          if (pOrgId === '00000000-0000-0000-0000-000000000001' || pEmail === 'nasrullah.freelancer@gmail.com') return true;
-          return false;
-        }
-
-        // For member users, STRICTLY match their orgId or userEmail
+        // STRICTLY match user's orgId or userEmail
         if (orgId && pOrgId && pOrgId === orgId) return true;
         if (userEmail && pEmail && pEmail === userEmail) return true;
         return false;
@@ -384,13 +377,13 @@ export const directGetCampaigns = async () => {
 
   try {
     let campaignQuery = supabaseDirect.from('campaigns').select('*').order('created_at', { ascending: false });
-    if (!isSuper && orgId) campaignQuery = campaignQuery.eq('organization_id', orgId);
+    if (orgId) campaignQuery = campaignQuery.eq('organization_id', orgId);
     const { data: rawCampaigns, error } = await campaignQuery;
     if (!error && rawCampaigns) {
       const campaigns = rawCampaigns;
 
       let prospectQuery = supabaseDirect.from('prospects').select('id, campaign_id, status, connection_status, connection_sent_date, message_sent_date, custom_variables');
-      if (!isSuper && orgId) prospectQuery = prospectQuery.eq('organization_id', orgId);
+      if (orgId) prospectQuery = prospectQuery.eq('organization_id', orgId);
       const { data: prospects } = await prospectQuery;
       const prospectMap = new Map();
       (prospects || []).forEach(p => {
@@ -510,7 +503,7 @@ export const directGetCampaign = async (id) => {
   try {
     const { data: campaign, error } = await supabaseDirect.from('campaigns').select('*').eq('id', id).single();
     if (!error && campaign) {
-      if (!isSuper && orgId && campaign.organization_id && campaign.organization_id !== orgId) {
+      if (orgId && campaign.organization_id && campaign.organization_id !== orgId) {
         console.warn(`[Data Isolation] Access denied to campaign ${id} for organization ${orgId}`);
         return { campaign: null, total: 0 };
       }
@@ -619,8 +612,8 @@ export const directGetProspects = async (params = {}) => {
   try {
     let query = supabaseDirect.from('prospects').select('*', { count: 'exact' });
 
-    // Data isolation: scope to user's organization
-    if (!isSuper && orgId) query = query.eq('organization_id', orgId);
+    // Strict Data Isolation: ONLY return prospects for the logged-in user's organization
+    if (orgId) query = query.eq('organization_id', orgId);
 
     if (params.campaign_id) query = query.eq('campaign_id', params.campaign_id);
     if (params.status) query = query.eq('status', params.status);
@@ -686,7 +679,7 @@ export const directGetProspect = async (id) => {
 
   try {
     let query = supabaseDirect.from('prospects').select('*').eq('id', id);
-    if (!isSuper && orgId) query = query.eq('organization_id', orgId);
+    if (orgId) query = query.eq('organization_id', orgId);
     const { data, error } = await query.single();
     if (!error && data) return { prospect: data, campaign_enrollments: [] };
   } catch (e) {
@@ -1077,7 +1070,7 @@ export const directGetProspectLists = async () => {
 
   try {
     let query = supabaseDirect.from('prospect_lists').select('*').order('created_at', { ascending: false });
-    if (!isSuper && orgId) query = query.eq('organization_id', orgId);
+    if (orgId) query = query.eq('organization_id', orgId);
     const { data: rawLists, error } = await query;
     if (!error && rawLists) {
       return { lists: rawLists };

@@ -549,7 +549,9 @@ export default function CampaignDetail() {
         reader.onerror = reject;
         reader.readAsText(csvFile);
       });
-      const res = await bulkImportProspects(mappedFile, id, importMode);
+      const res = await bulkImportProspects(mappedFile, null, importMode, null, id);
+      loadProspects();
+      refreshCampaign();
       setImportResult(res);
       // Persist new custom field keys as campaign variables so they appear in message editors
       const newKeys = customFieldMappings.map(m => m.key.trim().toLowerCase().replace(/\s+/g, '_')).filter(Boolean);
