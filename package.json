@@ -1,8 +1,25 @@
 {
   "name": "linkedin-bot",
   "private": true,
+  "type": "module",
   "scripts": {
     "postinstall": "cd dashboard && npm install",
     "build": "cd dashboard && npm run build"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.112.2",
+    "@tailwindcss/vite": "^4.3.0",
+    "axios": "^1.16.1",
+    "lucide-react": "^1.16.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "react-hot-toast": "^2.6.0",
+    "react-is": "^19.2.8",
+    "react-router-dom": "^7.15.1",
+    "reactflow": "^11.11.4",
+    "recharts": "^3.8.1",
+    "tailwindcss": "^4.3.0",
+    "vite": "^8.0.12",
+    "@vitejs/plugin-react": "^6.0.1"
   }
 }
