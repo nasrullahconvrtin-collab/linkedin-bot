@@ -167,6 +167,16 @@ export default function CampaignDetail() {
   const [activityFilter, setActivityFilter] = useState('all');
   const [activitySearch, setActivitySearch] = useState('');
 
+  const [prospects, setProspects] = useState([]);
+  const [loadingProspects, setLoadingProspects] = useState(false);
+
+  const loadProspects = () => {
+    setLoadingProspects(true);
+    getProspects({ campaign_id: id, limit: 2000 }).then(d => {
+      setProspects(d.prospects || []);
+    }).catch(() => {}).finally(() => setLoadingProspects(false));
+  };
+
   const loadConnectedProspects = () => {
     setLoadingConnected(true);
     getProspects({ campaign_id: id, limit: 2000 }).then(d => {
@@ -253,6 +263,7 @@ export default function CampaignDetail() {
   };
 
   useEffect(() => {
+    if (tab === 'prospects') loadProspects();
     if (tab === 'connected' || tab === 'accepted') loadConnectedProspects();
     if (tab === 'activity') loadActivityLogs();
   }, [tab, id]);
@@ -652,6 +663,12 @@ export default function CampaignDetail() {
       </div>
 
       {/* Tab content */}
+      {tab === 'prospects' && (
+        <div className="space-y-4">
+          <ProspectTable campaignId={id} />
+        </div>
+      )}
+
       {(tab === 'connected' || tab === 'accepted') && (
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] p-4">

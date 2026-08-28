@@ -383,11 +383,15 @@ export const directGetCampaigns = async () => {
   const isSuper = isSuperAdminUser();
 
   try {
-    const { data: rawCampaigns, error } = await supabaseDirect.from('campaigns').select('*').order('created_at', { ascending: false });
+    let campaignQuery = supabaseDirect.from('campaigns').select('*').order('created_at', { ascending: false });
+    if (!isSuper && orgId) campaignQuery = campaignQuery.eq('organization_id', orgId);
+    const { data: rawCampaigns, error } = await campaignQuery;
     if (!error && rawCampaigns) {
       const campaigns = rawCampaigns;
 
-      const { data: prospects } = await supabaseDirect.from('prospects').select('id, campaign_id, status, connection_status, connection_sent_date, message_sent_date, custom_variables');
+      let prospectQuery = supabaseDirect.from('prospects').select('id, campaign_id, status, connection_status, connection_sent_date, message_sent_date, custom_variables');
+      if (!isSuper && orgId) prospectQuery = prospectQuery.eq('organization_id', orgId);
+      const { data: prospects } = await prospectQuery;
       const prospectMap = new Map();
       (prospects || []).forEach(p => {
         if (!p.campaign_id) return;
@@ -500,9 +504,17 @@ export const directCreateCampaign = async (data) => {
 };
 
 export const directGetCampaign = async (id) => {
+  const isSuper = isSuperAdminUser();
+  const orgId = getActiveOrganizationId();
+
   try {
     const { data: campaign, error } = await supabaseDirect.from('campaigns').select('*').eq('id', id).single();
     if (!error && campaign) {
+      if (!isSuper && orgId && campaign.organization_id && campaign.organization_id !== orgId) {
+        console.warn(`[Data Isolation] Access denied to campaign ${id} for organization ${orgId}`);
+        return { campaign: null, total: 0 };
+      }
+
       const { data: prospects } = await supabaseDirect
         .from('prospects')
         .select('id, campaign_id, status, connection_status, connection_sent_date, message_sent_date, custom_variables')
@@ -597,8 +609,14 @@ export const directLaunchCampaign = async (id, data = {}) => {
 // ── Prospects Direct Operations ──────────────────────────────────
 
 export const directGetProspects = async (params = {}) => {
+  const isSuper = isSuperAdminUser();
+  const orgId = getActiveOrganizationId();
+
   try {
     let query = supabaseDirect.from('prospects').select('*', { count: 'exact' });
+
+    // Data isolation: scope to user's organization
+    if (!isSuper && orgId && !params.campaign_id) query = query.eq('organization_id', orgId);
 
     if (params.campaign_id) query = query.eq('campaign_id', params.campaign_id);
     if (params.status) query = query.eq('status', params.status);
@@ -1049,7 +1067,9 @@ export const directGetProspectLists = async () => {
   const userEmail = userAcc?.email ? userAcc.email.toLowerCase() : null;
 
   try {
-    const { data: rawLists, error } = await supabaseDirect.from('prospect_lists').select('*').order('created_at', { ascending: false });
+    let query = supabaseDirect.from('prospect_lists').select('*').order('created_at', { ascending: false });
+    if (!isSuper && orgId) query = query.eq('organization_id', orgId);
+    const { data: rawLists, error } = await query;
     if (!error && rawLists) {
       return { lists: rawLists };
     }
