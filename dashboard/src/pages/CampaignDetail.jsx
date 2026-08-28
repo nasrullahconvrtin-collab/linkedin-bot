@@ -201,9 +201,9 @@ export default function CampaignDetail() {
         const history = cv.history || [];
 
         if (Array.isArray(history) && history.length > 0) {
-          history.forEach(h => {
+          history.forEach((h, idx) => {
             events.push({
-              id: `${p.id}-${h.executed_at || Math.random()}`,
+              id: `${p.id}-hist-${idx}`,
               prospect_name: pName,
               prospect_id: p.id,
               linkedin_url: p.linkedin_url,
@@ -216,18 +216,31 @@ export default function CampaignDetail() {
               details: h.reply_text || h.message || h.error || '',
             });
           });
-        } else {
-          if (p.created_at) {
-            events.push({ id: `${p.id}-created`, prospect_name: pName, prospect_id: p.id, linkedin_url: p.linkedin_url, company: p.company, job_title: p.job_title, node_type: 'enrolled', node_label: 'Added to Campaign', status: 'success', executed_at: p.created_at, details: '' });
-          }
-          if (p.connection_sent_date) {
-            events.push({ id: `${p.id}-invite`, prospect_name: pName, prospect_id: p.id, linkedin_url: p.linkedin_url, company: p.company, job_title: p.job_title, node_type: 'send_invitation', node_label: 'Connection Invite Sent', status: 'success', executed_at: p.connection_sent_date, details: '' });
-          }
-          if (p.accepted_at) {
-            events.push({ id: `${p.id}-accepted`, prospect_name: pName, prospect_id: p.id, linkedin_url: p.linkedin_url, company: p.company, job_title: p.job_title, node_type: 'connection_accepted', node_label: 'Connection Accepted', status: 'success', executed_at: p.accepted_at, details: '' });
-          }
-          if (p.message_sent_date) {
-            events.push({ id: `${p.id}-message`, prospect_name: pName, prospect_id: p.id, linkedin_url: p.linkedin_url, company: p.company, job_title: p.job_title, node_type: 'send_message', node_label: 'Initial Message Sent', status: 'success', executed_at: p.message_sent_date, details: '' });
+        }
+
+        // Guarantee explicit Connection Accepted event renders for every prospect who accepted
+        const isAccepted = (p.status || '').toLowerCase() === 'connection accepted' ||
+                           (p.connection_status || '').toLowerCase() === 'connected' ||
+                           Boolean(p.accepted_at) ||
+                           Boolean(cv.accepted_at);
+
+        if (isAccepted) {
+          const acceptedTs = p.accepted_at || cv.accepted_at || p.updated_at || p.created_at || new Date().toISOString();
+          const alreadyHasAcceptedInHistory = history.some(h => (h.node_type || h.type || '').toLowerCase().includes('accept'));
+          if (!alreadyHasAcceptedInHistory) {
+            events.push({
+              id: `${p.id}-accepted-event`,
+              prospect_name: pName,
+              prospect_id: p.id,
+              linkedin_url: p.linkedin_url,
+              company: p.company,
+              job_title: p.job_title,
+              node_type: 'connection_accepted',
+              node_label: 'Connection Accepted',
+              status: 'success',
+              executed_at: acceptedTs,
+              details: `${pName} accepted your LinkedIn connection request!`,
+            });
           }
         }
       });
