@@ -18,11 +18,8 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install Dependencies
+      - name: Install Dependencies & Execute Flow Runner
         run: |
           cd dashboard
           npm install @supabase/supabase-js
-
-      - name: Execute 24/7 Cloud Flow Runner
-        run: |
-          node dashboard/scripts/cloud_flow_runner.mjs
+          node scripts/cloud_flow_runner.mjs
