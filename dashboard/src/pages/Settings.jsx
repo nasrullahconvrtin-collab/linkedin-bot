@@ -22,6 +22,7 @@ import {
   connectUnipileDirect,
   createProfile,
   submitUnipile2FA,
+  runFlow,
 } from '../services/api';
 
 const TIMEZONE_OPTIONS = [
@@ -102,6 +103,7 @@ export default function Settings() {
     try {
       await directSaveAppSettings(settings);
       toast.success('Settings saved and synced to database successfully!');
+      runFlow().catch(err => console.warn('Immediate runFlow trigger error:', err));
     } catch (err) {
       toast.error('Failed to save settings');
     } finally {
