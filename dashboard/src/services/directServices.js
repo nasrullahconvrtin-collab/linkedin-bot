@@ -1598,13 +1598,17 @@ export const directRunFlow = async () => {
   const dailyConnectionLimit = Number(appSettings.daily_connection_limit || 15);
   const dailyMessageLimit = Number(appSettings.daily_message_limit || 40);
 
-  // Calculate today's executed actions count across all prospects
+  // Calculate today's executed actions count across all prospects for this org
   const todayDateStr = new Date().toISOString().split('T')[0];
   let todayActionsTotal = 0;
   let todayConnectionsTotal = 0;
   let todayMessagesTotal = 0;
   try {
-    const { data: allProspects } = await supabaseDirect.from('prospects').select('custom_variables');
+    const orgId = getActiveOrganizationId();
+    let prospectHistoryQuery = supabaseDirect.from('prospects').select('custom_variables');
+    if (orgId) prospectHistoryQuery = prospectHistoryQuery.eq('organization_id', orgId);
+    const { data: allProspects } = await prospectHistoryQuery;
+
     (allProspects || []).forEach(p => {
       const history = p.custom_variables?.history || [];
       history.forEach(h => {
@@ -1619,10 +1623,12 @@ export const directRunFlow = async () => {
     console.warn('Error counting daily executed actions:', e);
   }
 
-  let remainingGlobalQuota = Math.max(0, globalDailyLimit - todayActionsTotal);
-  if (remainingGlobalQuota <= 0) {
-    console.log(`Global account safety quota reached for today (${todayActionsTotal}/${globalDailyLimit}). Pausing execution.`);
-    return { success: true, totalExecuted: 0, message: `Global daily safety limit reached (${todayActionsTotal}/${globalDailyLimit})` };
+  const remainingConnectionsQuota = Math.max(0, dailyConnectionLimit - todayConnectionsTotal);
+  let remainingGlobalQuota = Math.max(remainingConnectionsQuota, globalDailyLimit - todayActionsTotal);
+
+  if (remainingConnectionsQuota <= 0 && remainingGlobalQuota <= 0) {
+    console.log(`Daily targets reached for today (${todayConnectionsTotal}/${dailyConnectionLimit} connections, ${todayActionsTotal}/${globalDailyLimit} total). Pausing execution.`);
+    return { success: true, totalExecuted: 0, message: `Daily connection target reached (${todayConnectionsTotal}/${dailyConnectionLimit})` };
   }
 
   const isProviderLimitError = (err) => {
@@ -1632,7 +1638,7 @@ export const directRunFlow = async () => {
   };
 
   // Divide remaining quota equally across running campaigns (Round-Robin)
-  const quotaPerCampaign = Math.max(1, Math.floor(remainingGlobalQuota / campaigns.length));
+  const quotaPerCampaign = Math.max(1, Math.floor(Math.max(remainingConnectionsQuota, remainingGlobalQuota) / campaigns.length));
 
   let totalExecuted = 0;
   let totalConnections = 0;
