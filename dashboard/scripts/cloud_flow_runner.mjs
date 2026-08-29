@@ -32,30 +32,7 @@ function extractPublicId(url) {
 async function runCloudFlow() {
   console.log(`[${new Date().toISOString()}] Starting Goal-Oriented Cloud Flow Runner cycle...`);
 
-  const globalDailyLimit = 40;
-  const dailyConnectionLimit = 15;
   const todayDateStr = new Date().toISOString().split('T')[0];
-
-  let todayActionsTotal = 0;
-  let todayConnectionsTotal = 0;
-
-  try {
-    const { data: allProspects } = await supabase.from('prospects').select('custom_variables');
-    (allProspects || []).forEach(p => {
-      const history = p.custom_variables?.history || [];
-      history.forEach(h => {
-        if (h.executed_at && h.executed_at.startsWith(todayDateStr)) {
-          todayActionsTotal += 1;
-          if (h.node_type === 'send_invitation') todayConnectionsTotal += 1;
-        }
-      });
-    });
-  } catch (e) {}
-
-  if (todayConnectionsTotal >= dailyConnectionLimit) {
-    console.log(`Daily connection target already reached for today (${todayConnectionsTotal}/${dailyConnectionLimit}). Cycle complete.`);
-    return;
-  }
 
   const { data: campaigns } = await supabase.from('campaigns').select('*').eq('status', 'running');
   if (!campaigns || campaigns.length === 0) {
@@ -64,7 +41,43 @@ async function runCloudFlow() {
   }
 
   for (const campaign of campaigns) {
-    if (todayConnectionsTotal >= dailyConnectionLimit) break;
+    const orgId = campaign.organization_id;
+    const { data: profs } = await supabase.from('profiles').select('settings, unipile_account_id').eq('profile_key', campaign.profile_key || 'profile_1');
+    const profile = profs?.[0];
+    const accountId = profile?.unipile_account_id;
+    if (!accountId) continue;
+
+    const settings = profile?.settings || {};
+    const dailyConnectionLimit = Number(settings.daily_connection_limit || 20);
+    const globalDailyLimit = Number(settings.global_daily_limit || 40);
+
+    // Calculate today's executed actions count across all prospects for this organization
+    let todayActionsTotal = 0;
+    let todayConnectionsTotal = 0;
+    try {
+      let query = supabase.from('prospects').select('custom_variables');
+      if (orgId) query = query.eq('organization_id', orgId);
+      const { data: allProspects } = await query;
+      (allProspects || []).forEach(p => {
+        const history = p.custom_variables?.history || [];
+        history.forEach(h => {
+          if (h.executed_at && h.executed_at.startsWith(todayDateStr)) {
+            todayActionsTotal += 1;
+            if (h.node_type === 'send_invitation') todayConnectionsTotal += 1;
+          }
+        });
+      });
+    } catch (e) {}
+
+    if (todayConnectionsTotal >= dailyConnectionLimit) {
+      console.log(`[Campaign: ${campaign.name}] Daily connection limit reached (${todayConnectionsTotal}/${dailyConnectionLimit}). Skipping.`);
+      continue;
+    }
+
+    if (todayActionsTotal >= globalDailyLimit) {
+      console.log(`[Campaign: ${campaign.name}] Global daily actions limit reached (${todayActionsTotal}/${globalDailyLimit}). Skipping.`);
+      continue;
+    }
 
     const flowSequence = campaign.sequence_config?.flow_sequence;
     if (!flowSequence || !Array.isArray(flowSequence.nodes) || flowSequence.nodes.length === 0) continue;
@@ -80,17 +93,13 @@ async function runCloudFlow() {
     const startNode = flowSequence.nodes.find(n => !incomingTargets.has(n.id)) || flowSequence.nodes[0];
     if (!startNode) continue;
 
-    const { data: profs } = await supabase.from('profiles').select('unipile_account_id').eq('profile_key', campaign.profile_key || 'profile_1');
-    const accountId = profs?.[0]?.unipile_account_id;
-    if (!accountId) continue;
-
     const { data: prospects } = await supabase.from('prospects').select('*').eq('campaign_id', campaign.id);
     if (!prospects || prospects.length === 0) continue;
 
     // Process prospects one-by-one focusing directly on today's connection request goal
     for (const prospect of prospects) {
       if (todayConnectionsTotal >= dailyConnectionLimit) {
-        console.log(`🎯 Goal Reached: Sent daily target of ${todayConnectionsTotal}/${dailyConnectionLimit} connection requests today!`);
+        console.log(`🎯 Goal Reached: Sent daily target of ${todayConnectionsTotal}/${dailyConnectionLimit} connection requests today for ${campaign.name}!`);
         break;
       }
       if (['Completed', 'Failed', 'Replied', 'Connection Request Sent'].includes(prospect.status)) continue;
@@ -225,7 +234,7 @@ async function runCloudFlow() {
     }
   }
 
-  console.log(`[${new Date().toISOString()}] Goal-Oriented Flow Runner cycle complete. Total invites sent today: ${todayConnectionsTotal}/${dailyConnectionLimit}`);
+  console.log(`[${new Date().toISOString()}] Goal-Oriented Flow Runner cycle complete.`);
 }
 
 runCloudFlow();
