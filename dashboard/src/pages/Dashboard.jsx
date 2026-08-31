@@ -38,39 +38,60 @@ const TIMELINE_PRESETS = [
 
 
 function getEventDate(prospect, eventType) {
+  const cv = prospect.custom_variables || {};
+  const hist = Array.isArray(cv.history) ? cv.history : [];
+
   if (eventType === 'invitation') {
     if (prospect.connection_sent_date) return new Date(prospect.connection_sent_date);
-    const hist = prospect.custom_variables?.history || [];
-    const item = hist.find(h => h.node_type === 'send_invitation' && h.status === 'success');
+    if (cv.invitation_sent_at) return new Date(cv.invitation_sent_at);
+
+    const item = hist.find(h => h.node_type === 'send_invitation' && (h.status === 'success' || String(h.node_label || '').includes('Sent')));
     if (item?.executed_at) return new Date(item.executed_at);
-    if (['Connection Requested', 'Sent'].includes(prospect.status)) return prospect.updated_at ? new Date(prospect.updated_at) : null;
+
+    const st = String(prospect.status || '').toLowerCase();
+    const connSt = String(prospect.connection_status || '').toLowerCase();
+    if (st.includes('sent') || st.includes('request') || connSt.includes('sent') || connSt.includes('invitation')) {
+      return prospect.updated_at ? new Date(prospect.updated_at) : (prospect.created_at ? new Date(prospect.created_at) : null);
+    }
   }
+
   if (eventType === 'acceptance') {
-    if (prospect.accepted_at) return new Date(prospect.accepted_at);
-    const hist = prospect.custom_variables?.history || [];
-    const item = hist.find(h => (h.node_type === 'check_acceptance' || h.node_type === 'connection_accepted') && h.status === 'success');
+    if (prospect.accepted_at || cv.accepted_at) return new Date(prospect.accepted_at || cv.accepted_at);
+    const item = hist.find(h => (h.node_type === 'check_acceptance' || h.node_type === 'connection_accepted' || String(h.node_label || '').includes('Accept')) && h.status === 'success');
     if (item?.executed_at) return new Date(item.executed_at);
-    if (['Connection Accepted', 'CONNECTED'].includes(prospect.status)) return prospect.updated_at ? new Date(prospect.updated_at) : null;
+
+    const st = String(prospect.status || '').toLowerCase();
+    const connSt = String(prospect.connection_status || '').toLowerCase();
+    if (st.includes('accept') || st.includes('connect') || connSt.includes('connect')) {
+      return prospect.updated_at ? new Date(prospect.updated_at) : (prospect.created_at ? new Date(prospect.created_at) : null);
+    }
   }
+
   if (eventType === 'message') {
-    if (prospect.message_sent_date) return new Date(prospect.message_sent_date);
-    const hist = prospect.custom_variables?.history || [];
+    if (prospect.message_sent_date || cv.message_sent_at) return new Date(prospect.message_sent_date || cv.message_sent_at);
     const item = hist.find(h => h.node_type === 'send_message' && h.status === 'success');
     if (item?.executed_at) return new Date(item.executed_at);
-    if (['Initial Message Sent', 'Message Sent'].includes(prospect.status)) return prospect.updated_at ? new Date(prospect.updated_at) : null;
+    if (String(prospect.status || '').toLowerCase().includes('message')) {
+      return prospect.updated_at ? new Date(prospect.updated_at) : null;
+    }
   }
+
   if (eventType === 'reply') {
-    const hist = prospect.custom_variables?.history || [];
     const item = hist.find(h => (h.node_type === 'check_reply' || h.node_type === 'replied') && (h.status === 'replied' || h.status === 'success'));
     if (item?.executed_at) return new Date(item.executed_at);
-    if (['Replied', 'replied'].includes(prospect.status)) return prospect.updated_at ? new Date(prospect.updated_at) : null;
+    if (String(prospect.status || '').toLowerCase().includes('repli') || prospect.reply_date) {
+      return prospect.reply_date ? new Date(prospect.reply_date) : (prospect.updated_at ? new Date(prospect.updated_at) : null);
+    }
   }
+
   if (eventType === 'visit') {
-    const hist = prospect.custom_variables?.history || [];
     const item = hist.find(h => h.node_type === 'visit_profile' && h.status === 'success');
     if (item?.executed_at) return new Date(item.executed_at);
-    if (['Visited', 'visited'].includes(prospect.status)) return prospect.updated_at ? new Date(prospect.updated_at) : null;
+    if (String(prospect.status || '').toLowerCase().includes('visit')) {
+      return prospect.updated_at ? new Date(prospect.updated_at) : null;
+    }
   }
+
   return null;
 }
 
@@ -85,8 +106,8 @@ export default function Dashboard() {
 
   // Timeline Filtering State
   const [timeRange, setTimeRange] = useState('month');
-  const [customStartDate, setCustomStartDate] = useState(new Date().toISOString().slice(0, 10));
-  const [customEndDate, setCustomEndDate] = useState(new Date().toISOString().slice(0, 10));
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
 
   const loadDashboardData = async () => {
     setLoading(true);
@@ -129,17 +150,37 @@ export default function Dashboard() {
     } else if (timeRange === 'week') {
       start.setDate(now.getDate() - 7);
       start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
     } else if (timeRange === 'month') {
-      start = new Date(now.getFullYear(), now.getMonth(), 1);
+      // 30 days rolling window so activity is never zeroed when month turns over
+      start.setDate(now.getDate() - 30);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
     } else if (timeRange === 'year') {
       start = new Date(now.getFullYear(), 0, 1);
+      end.setHours(23, 59, 59, 999);
     } else if (timeRange === 'custom') {
-      start = customStartDate ? new Date(customStartDate) : new Date(0);
+      start = customStartDate ? new Date(customStartDate + 'T00:00:00') : new Date(0);
       end = customEndDate ? new Date(customEndDate + 'T23:59:59') : new Date();
     }
 
     return { start, end };
   }, [timeRange, customStartDate, customEndDate]);
+
+  // Keep customStartDate and customEndDate visually in sync with active preset
+  useEffect(() => {
+    if (timeRange !== 'custom') {
+      const { start, end } = dateBounds;
+      const formatYMD = (d) => {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+      setCustomStartDate(formatYMD(start));
+      setCustomEndDate(formatYMD(end));
+    }
+  }, [timeRange, dateBounds]);
 
   // Filter Prospects by Selected Timeline
   const filteredProspects = useMemo(() => {
