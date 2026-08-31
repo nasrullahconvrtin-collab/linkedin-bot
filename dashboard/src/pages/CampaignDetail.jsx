@@ -737,7 +737,7 @@ export default function CampaignDetail() {
                       <th className="px-4 py-3">Account</th>
                       <th className="px-4 py-3">Status</th>
                       <th className="px-4 py-3">Connected Date</th>
-                      <th className="px-4 py-3 text-right">LinkedIn</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#2a2a2a]/60">
@@ -761,16 +761,24 @@ export default function CampaignDetail() {
                             {p.accepted_at || p.custom_variables?.accepted_at ? new Date(p.accepted_at || p.custom_variables?.accepted_at).toLocaleString() : (p.connection_sent_date ? new Date(p.connection_sent_date).toLocaleDateString() : 'Connected')}
                           </td>
                           <td className="px-4 py-3 text-right">
-                            {p.linkedin_url ? (
-                              <a
-                                href={p.linkedin_url.startsWith('http') ? p.linkedin_url : `https://${p.linkedin_url}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#6366f1]/10 text-[#818cf8] hover:bg-[#6366f1]/20 text-[11px] font-medium"
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => navigate('/inbox', { state: { selectProspect: p } })}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#6366f1] hover:bg-[#4f46e5] text-white text-xs font-semibold shadow-md shadow-indigo-500/20 transition-all cursor-pointer"
                               >
-                                Profile <ExternalLink size={12} />
-                              </a>
-                            ) : '—'}
+                                <MessageSquare size={13} /> Send Message
+                              </button>
+                              {p.linkedin_url && (
+                                <a
+                                  href={p.linkedin_url.startsWith('http') ? p.linkedin_url : `https://${p.linkedin_url}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#111111] text-[#818cf8] hover:text-white text-xs font-medium border border-[#2a2a2a]"
+                                >
+                                  Profile <ExternalLink size={12} />
+                                </a>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}

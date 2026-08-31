@@ -2258,3 +2258,52 @@ export const directGetCampaignSequence = async (campaignId) => {
   }
   return { template: null, enrollments: [] };
 };
+
+export const directStartUnipileChat = async (prospect, initialText = '') => {
+  try {
+    const profiles = await directGetProfiles();
+    const accountId = profiles[0]?.unipile_account_id;
+    if (!accountId) return { success: false, error: 'No connected Unipile account found' };
+
+    let providerId = prospect?.provider_id;
+    if (!providerId && prospect?.linkedin_url) {
+      const match = prospect.linkedin_url.match(/linkedin\.com\/in\/([^/?#]+)/i);
+      const pubId = match ? match[1] : prospect.linkedin_url.replace(/^https?:\/\//, '').replace('www.linkedin.com/in/', '').replace(/\/$/, '').trim();
+      if (pubId) {
+        const uRes = await directUnipileFetch(`/users/${encodeURIComponent(pubId)}?account_id=${accountId}`);
+        if (uRes.ok && uRes.data) providerId = uRes.data.provider_id || uRes.data.id;
+      }
+    }
+
+    if (!providerId) {
+      return { success: false, error: 'Could not resolve LinkedIn provider ID for attendee' };
+    }
+
+    const payload = {
+      account_id: accountId,
+      attendees_ids: [providerId],
+    };
+    if (initialText) payload.text = initialText;
+
+    const res = await directUnipileFetch('/chats', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+
+    if (res.ok && res.data) {
+      return {
+        success: true,
+        chatId: res.data.chat_id,
+        messageId: res.data.message_id,
+        data: res.data
+      };
+    } else {
+      return {
+        success: false,
+        error: res.data?.detail || res.data?.title || `Unipile API status ${res.status}`
+      };
+    }
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+};
