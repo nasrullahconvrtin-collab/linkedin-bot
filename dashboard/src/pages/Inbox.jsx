@@ -4,13 +4,14 @@ import {
   MessageSquare, ExternalLink, Search, Filter, Loader2, Send,
   Paperclip, FileText, Trash2, Archive, Check, Sparkles, User,
   Building, MapPin, Briefcase, Mail, RefreshCw, ThumbsUp, HelpCircle, PlayCircle,
-  Phone, Globe, Users as UsersIcon
+  Phone, Globe, Users as UsersIcon, Download, Eye, X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
 import {
   supabaseDirect,
   directSendUnipileChatMessage,
+  directSendUnipileChatMessageWithAttachments,
   directGetUnipileChats,
   directGetChatMessages,
   directGetUnipileUserProfile
@@ -360,19 +361,44 @@ export default function Inbox() {
     return () => clearInterval(timer);
   }, [selectedChat, fetchThreadAndProfile]);
 
-  // 5. Live Message Sending & Permanent Local Storage Persistence
+  const [attachedFiles, setAttachedFiles] = useState([]);
+  const fileInputRef = useRef(null);
+
+  const handleFileSelect = (e) => {
+    const selected = Array.from(e.target.files || []);
+    if (selected.length === 0) return;
+    setAttachedFiles(prev => [...prev, ...selected]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const removeAttachedFile = (index) => {
+    setAttachedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // 5. Live Message Sending with File Attachments & LocalStorage Persistence
   const handleSendMessage = async (e) => {
     if (e) e.preventDefault();
-    if (!inputText.trim() || !selectedChat) return;
+    if ((!inputText.trim() && attachedFiles.length === 0) || !selectedChat) return;
 
     const messageText = inputText.trim();
+    const filesToSend = [...attachedFiles];
     const chatId = selectedChat.id;
+
     setInputText('');
+    setAttachedFiles([]);
     setSending(true);
+
+    const localAttachments = filesToSend.map(f => ({
+      name: f.name,
+      size: (f.size / 1024).toFixed(1) + ' KB',
+      type: f.type,
+      url: f.type.startsWith('image/') ? URL.createObjectURL(f) : null
+    }));
 
     const newMsg = {
       id: `sent_${Date.now()}`,
       text: messageText,
+      attachments: localAttachments,
       sender: 'me',
       timestamp: new Date().toISOString(),
     };
@@ -385,18 +411,11 @@ export default function Inbox() {
     saveLocalSentMessage(chatId, newMsg);
 
     try {
-      const prospectTarget = selectedChat.prospect_ref || {
-        id: chatId,
-        provider_id: selectedChat.attendee_provider_id,
-        linkedin_url: selectedChat.attendee_provider_id,
-        name: selectedChat.name,
-      };
-
-      const res = await directSendUnipileChatMessage(prospectTarget, messageText);
+      const res = await directSendUnipileChatMessageWithAttachments(chatId, messageText, filesToSend);
       if (res.success) {
-        toast.success('Message sent to LinkedIn!');
+        toast.success(filesToSend.length > 0 ? `Message sent with ${filesToSend.length} file(s)!` : 'Message sent to LinkedIn!');
         // Update last message in chat list
-        setChats(prev => prev.map(c => c.id === chatId ? { ...c, last_message_text: messageText, timestamp: new Date().toISOString() } : c));
+        setChats(prev => prev.map(c => c.id === chatId ? { ...c, last_message_text: messageText || `📎 Sent ${filesToSend.length} file(s)`, timestamp: new Date().toISOString() } : c));
       } else {
         toast.error(res.error || 'Failed to send message via Unipile');
       }
@@ -674,6 +693,34 @@ export default function Inbox() {
                             }`}
                           >
                             {m.text}
+
+                            {Array.isArray(m.attachments) && m.attachments.length > 0 && (
+                              <div className="mt-2.5 space-y-2 border-t border-white/10 pt-2">
+                                {m.attachments.map((att, idx) => {
+                                  const isImg = att.type?.startsWith('image/') || att.url?.match(/\.(png|jpg|jpeg|gif|webp)/i);
+                                  return (
+                                    <div key={idx} className="rounded-xl overflow-hidden border border-white/20 bg-black/20 p-2">
+                                      {isImg && att.url ? (
+                                        <img src={att.url} alt={att.name || 'Image Attachment'} className="max-w-xs rounded-lg max-h-48 object-cover mb-1" />
+                                      ) : (
+                                        <div className="flex items-center justify-between gap-2 text-xs">
+                                          <div className="flex items-center gap-1.5 min-w-0">
+                                            <FileText size={14} className="text-indigo-300 shrink-0" />
+                                            <span className="truncate font-mono text-[11px] text-white">{att.name || att.filename || 'Document'}</span>
+                                            {att.size && <span className="text-[10px] text-gray-400">({att.size})</span>}
+                                          </div>
+                                          {att.url && (
+                                            <a href={att.url} download target="_blank" rel="noreferrer" className="text-[10px] underline text-indigo-300 hover:text-white shrink-0 flex items-center gap-0.5">
+                                              <Download size={11} /> Download
+                                            </a>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                           <p className={`text-[10px] text-[#6b7280] mt-1 ${isMe ? 'text-right' : 'text-left'}`}>
                             {m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
@@ -685,6 +732,23 @@ export default function Inbox() {
                 )}
                 <div ref={messagesEndRef} />
               </div>
+
+              {/* Attached Files Preview Bar */}
+              {attachedFiles.length > 0 && (
+                <div className="px-4 py-2 bg-[#141414] border-t border-[#2a2a2a] flex flex-wrap gap-2 items-center">
+                  <span className="text-[11px] text-[#9ca3af] font-medium">Attached files ({attachedFiles.length}):</span>
+                  {attachedFiles.map((file, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5 bg-[#222222] border border-[#2a2a2a] rounded-lg px-2.5 py-1 text-xs text-white">
+                      {file.type.startsWith('image/') ? <Eye size={12} className="text-blue-400" /> : <FileText size={12} className="text-indigo-400" />}
+                      <span className="max-w-[140px] truncate text-[11px] font-mono">{file.name}</span>
+                      <span className="text-[10px] text-[#6b7280]">({(file.size / 1024).toFixed(0)}KB)</span>
+                      <button type="button" onClick={() => removeAttachedFile(idx)} className="text-[#6b7280] hover:text-red-400 ml-1">
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* Quick Smart Replies Bar */}
               <div className="px-4 py-2 bg-[#111111] border-t border-[#2a2a2a] flex items-center gap-2 overflow-x-auto">
@@ -729,19 +793,33 @@ export default function Inbox() {
                       handleSendMessage();
                     }
                   }}
-                  placeholder="Write a message..."
+                  placeholder="Write a message or attach a file..."
                   className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-xs text-white placeholder-[#6b7280] focus:outline-none focus:border-[#6366f1] resize-none h-16"
+                />
+
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileSelect}
+                  multiple
+                  className="hidden"
+                  accept="image/*,.pdf,.doc,.docx,.txt,.csv,.zip"
                 />
 
                 <div className="flex items-center justify-between mt-2">
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => toast.success('Attachment feature ready')}
-                      className="p-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white transition-all"
-                      title="Attach file"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="p-2 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white transition-all relative"
+                      title="Attach files (Documents, PDF, Images)"
                     >
                       <Paperclip size={14} />
+                      {attachedFiles.length > 0 && (
+                        <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#6366f1] text-white text-[9px] font-bold flex items-center justify-center">
+                          {attachedFiles.length}
+                        </span>
+                      )}
                     </button>
                     <button
                       type="button"
@@ -755,11 +833,10 @@ export default function Inbox() {
 
                   <button
                     type="submit"
-                    disabled={sending || !inputText.trim()}
+                    disabled={sending || (!inputText.trim() && attachedFiles.length === 0)}
                     className="flex items-center gap-2 px-5 py-2 rounded-xl bg-[#6366f1] hover:bg-[#4f46e5] text-white text-xs font-bold transition-all shadow-md disabled:opacity-50"
                   >
-                    {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-                    <span>Send</span>
+                    {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} Send
                   </button>
                 </div>
               </form>

@@ -43,6 +43,33 @@ export const unipileFetch = async (endpoint, options = {}) => {
   }
 };
 
+export const unipileFormFetch = async (endpoint, formData, options = {}) => {
+  const headers = {
+    'X-API-KEY': UNIPILE_API_KEY,
+    ...(options.headers || {}),
+  };
+  delete headers['Content-Type'];
+  try {
+    const primaryUrl = `${getUnipileBaseUrl()}${endpoint}`;
+    let res = await fetch(primaryUrl, { method: 'POST', body: formData, headers, ...options });
+    if (!res.ok && primaryUrl.startsWith('/api/unipile')) {
+      const fallbackUrl = `${UNIPILE_BASE_URL}${endpoint}`;
+      res = await fetch(fallbackUrl, { method: 'POST', body: formData, headers, ...options });
+    }
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  } catch (err) {
+    try {
+      const fallbackUrl = `${UNIPILE_BASE_URL}${endpoint}`;
+      const res = await fetch(fallbackUrl, { method: 'POST', body: formData, headers, ...options });
+      const data = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, data };
+    } catch (e) {
+      return { ok: false, status: 500, data: null };
+    }
+  }
+};
+
 export const getStoredDisconnectedFlag = () => {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
@@ -1349,6 +1376,37 @@ export const directSendUnipileChatMessage = async (prospect, text = '') => {
     return { success: true, data };
   }
   return { success: false, error: data?.detail || 'Unipile chat message failed' };
+};
+
+export const directSendUnipileChatMessageWithAttachments = async (chatId, text = '', files = []) => {
+  try {
+    const userProfiles = await directGetProfiles();
+    const accountId = userProfiles?.[0]?.unipile_account_id;
+    if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
+
+    if (!files || files.length === 0) {
+      const { ok, data } = await unipileFetch(`/chats/${encodeURIComponent(chatId)}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({
+          account_id: accountId,
+          text: text,
+        }),
+      });
+      return { success: ok, data };
+    }
+
+    const formData = new FormData();
+    formData.append('account_id', accountId);
+    if (text) formData.append('text', text);
+    files.forEach((file) => {
+      formData.append('attachments', file);
+    });
+
+    const { ok, data } = await unipileFormFetch(`/chats/${encodeURIComponent(chatId)}/messages`, formData);
+    return { success: ok, data };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 };
 
 export const directSendUnipileInMail = async (prospect, subject = '', text = '') => {
