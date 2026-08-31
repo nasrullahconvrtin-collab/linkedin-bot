@@ -763,7 +763,7 @@ export default function CampaignDetail() {
                           <td className="px-4 py-3 text-right">
                             <div className="flex items-center justify-end gap-2">
                               <button
-                                onClick={() => navigate('/inbox', { state: { selectProspect: p } })}
+                                onClick={() => nav('/inbox', { state: { selectProspect: p } })}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#6366f1] hover:bg-[#4f46e5] text-white text-xs font-semibold shadow-md shadow-indigo-500/20 transition-all cursor-pointer"
                               >
                                 <MessageSquare size={13} /> Send Message
