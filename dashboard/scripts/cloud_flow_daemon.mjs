@@ -32,9 +32,18 @@ function extractPublicId(url) {
   return String(url).replace(/^https?:\/\//, '').replace('www.linkedin.com/in/', '').replace(/\/$/, '').trim();
 }
 
-async function runCloudFlow() {
-  const todayDateStr = new Date().toISOString().split('T')[0];
+function getProfileDateStr(dateOrIso, timezone) {
+  const tz = timezone || 'UTC';
+  try {
+    const d = dateOrIso ? new Date(dateOrIso) : new Date();
+    const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+    return formatter.format(d);
+  } catch (e) {
+    return (dateOrIso ? new Date(dateOrIso) : new Date()).toISOString().split('T')[0];
+  }
+}
 
+async function runCloudFlow() {
   const { data: campaigns, error: campErr } = await supabase.from('campaigns').select('*').eq('status', 'running');
   if (campErr) {
     console.error(`[${new Date().toISOString()}] Error fetching running campaigns:`, campErr.message);
@@ -53,17 +62,41 @@ async function runCloudFlow() {
     if (!accountId) continue;
 
     const settings = profile?.settings || {};
+    const profileTz = settings.timezone || 'UTC';
+    const profileTodayStr = getProfileDateStr(null, profileTz);
 
+    // 1. LinkedIn Provider Cooldown Check
     if (settings.provider_limit_cooldown_until && Date.now() < settings.provider_limit_cooldown_until) {
       const hoursLeft = Math.ceil((settings.provider_limit_cooldown_until - Date.now()) / (1000 * 60 * 60));
       console.log(`[Railway 24/7 Daemon] ⏸️ Skipping campaign "${campaign.name}" - LinkedIn provider limit cooldown active (${hoursLeft}h remaining).`);
       continue;
     }
 
+    // 2. Profile Timezone Working Hours & Weekend Check
+    if (settings.enable_working_hours) {
+      const nowInTz = new Date(new Date().toLocaleString('en-US', { timeZone: profileTz }));
+      const dayOfWeek = nowInTz.getDay(); // 0 = Sun, 6 = Sat
+      if (settings.skip_weekends && (dayOfWeek === 0 || dayOfWeek === 6)) {
+        console.log(`[Railway 24/7 Daemon] ⏸️ Skipping campaign "${campaign.name}" - Weekend in profile timezone (${profileTz}).`);
+        continue;
+      }
+
+      const startParts = (settings.start_time || '09:00').split(':');
+      const endParts = (settings.end_time || '18:00').split(':');
+      const startMin = parseInt(startParts[0], 10) * 60 + parseInt(startParts[1] || '0', 10);
+      const endMin = parseInt(endParts[0], 10) * 60 + parseInt(endParts[1] || '0', 10);
+      const currentMin = nowInTz.getHours() * 60 + nowInTz.getMinutes();
+
+      if (currentMin < startMin || currentMin >= endMin) {
+        console.log(`[Railway 24/7 Daemon] ⏸️ Skipping campaign "${campaign.name}" - Outside working hours (${settings.start_time} - ${settings.end_time}) in ${profileTz}.`);
+        continue;
+      }
+    }
+
     const dailyConnectionLimit = Number(settings.daily_connection_limit || 20);
     const globalDailyLimit = Number(settings.global_daily_limit || 40);
 
-    // Calculate today's executed actions count across all prospects for this organization
+    // Calculate today's executed actions count in profile timezone
     let todayActionsTotal = 0;
     let todayConnectionsTotal = 0;
     try {
@@ -73,19 +106,21 @@ async function runCloudFlow() {
       (allProspects || []).forEach(p => {
         const history = p.custom_variables?.history || [];
         history.forEach(h => {
-          if (h.executed_at && h.executed_at.startsWith(todayDateStr)) {
+          if (h.executed_at && getProfileDateStr(h.executed_at, profileTz) === profileTodayStr) {
             todayActionsTotal += 1;
-            if (h.node_type === 'send_invitation') todayConnectionsTotal += 1;
+            if (h.node_type === 'send_invitation' && h.status === 'success') todayConnectionsTotal += 1;
           }
         });
       });
     } catch (e) {}
 
     if (todayConnectionsTotal >= dailyConnectionLimit) {
+      console.log(`[Railway 24/7 Daemon] 🎯 Goal Reached: Sent target ${todayConnectionsTotal}/${dailyConnectionLimit} connections for profile today in ${profileTz}.`);
       continue;
     }
 
     if (todayActionsTotal >= globalDailyLimit) {
+      console.log(`[Railway 24/7 Daemon] 🎯 Global Limit Reached: Executed ${todayActionsTotal}/${globalDailyLimit} actions for profile today in ${profileTz}.`);
       continue;
     }
 

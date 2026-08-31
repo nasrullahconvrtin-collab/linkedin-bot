@@ -132,6 +132,10 @@ export default function ActivityLog() {
     toast.success(`Exported ${logs.length} activity items`);
   };
 
+  const [dateFilter, setDateFilter] = useState('all');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
+
   const filteredLogs = logs.filter(log => {
     const act = (log.node_type || log.node_label || '').toLowerCase();
     if (filterType === 'invite' && !act.includes('invite')) return false;
@@ -142,8 +146,36 @@ export default function ActivityLog() {
 
     if (search) {
       const q = search.toLowerCase();
-      return [log.prospect_name, log.company, log.campaign_name, log.details].join(' ').toLowerCase().includes(q);
+      if (![log.prospect_name, log.company, log.campaign_name, log.details].join(' ').toLowerCase().includes(q)) return false;
     }
+
+    if (dateFilter !== 'all' && log.executed_at) {
+      const logDate = new Date(log.executed_at);
+      const now = new Date();
+
+      if (dateFilter === 'today') {
+        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+        const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        if (logDate < start || logDate > end) return false;
+      } else if (dateFilter === 'yesterday') {
+        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0);
+        const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999);
+        if (logDate < start || logDate > end) return false;
+      } else if (dateFilter === 'week') {
+        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7, 0, 0, 0);
+        if (logDate < start) return false;
+      } else if (dateFilter === 'month') {
+        const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+        if (logDate < start) return false;
+      } else if (dateFilter === 'year') {
+        const start = new Date(now.getFullYear(), 0, 1, 0, 0, 0);
+        if (logDate < start) return false;
+      } else if (dateFilter === 'custom') {
+        if (customStart && logDate < new Date(customStart + 'T00:00:00')) return false;
+        if (customEnd && logDate > new Date(customEnd + 'T23:59:59')) return false;
+      }
+    }
+
     return true;
   });
 
@@ -162,10 +194,10 @@ export default function ActivityLog() {
         <div className="flex gap-2">
           <button
             onClick={exportCSV}
-            disabled={logs.length === 0}
+            disabled={filteredLogs.length === 0}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#6366f1] hover:bg-[#4f46e5] disabled:opacity-40 text-white text-xs font-semibold shadow-lg shadow-indigo-500/20 transition-all"
           >
-            <Download size={14} /> Export CSV
+            <Download size={14} /> Export CSV ({filteredLogs.length})
           </button>
           <button
             onClick={loadData}
@@ -177,28 +209,63 @@ export default function ActivityLog() {
       </div>
 
       {/* Filter Controls */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-6">
-        <div className="relative flex-1">
-          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#6b7280]" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Filter activity by prospect, company, or campaign..."
-            className="w-full bg-[#141414] border border-[#2a2a2a] rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-[#6b7280] focus:outline-none focus:border-[#6366f1]"
-          />
+      <div className="flex flex-col gap-3 mb-6">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#6b7280]" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Filter activity by prospect, company, or campaign..."
+              className="w-full bg-[#141414] border border-[#2a2a2a] rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-[#6b7280] focus:outline-none focus:border-[#6366f1]"
+            />
+          </div>
+          <select
+            value={filterType}
+            onChange={e => setFilterType(e.target.value)}
+            className="bg-[#141414] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#6366f1]"
+          >
+            <option value="all">All Action Types ({logs.length})</option>
+            <option value="invite">Connection Invites</option>
+            <option value="accepted">Connection Acceptances 🎉</option>
+            <option value="visit">Profile Visits</option>
+            <option value="message">Messages & Follow-ups</option>
+            <option value="reply">Replies Received</option>
+          </select>
+
+          <select
+            value={dateFilter}
+            onChange={e => setDateFilter(e.target.value)}
+            className="bg-[#141414] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#6366f1]"
+          >
+            <option value="all">All Dates</option>
+            <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="week">This Week</option>
+            <option value="month">This Month</option>
+            <option value="year">This Year</option>
+            <option value="custom">Custom Date Range</option>
+          </select>
         </div>
-        <select
-          value={filterType}
-          onChange={e => setFilterType(e.target.value)}
-          className="bg-[#141414] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#6366f1]"
-        >
-          <option value="all">All Action Types ({logs.length})</option>
-          <option value="invite">Connection Invites</option>
-          <option value="accepted">Connection Acceptances 🎉</option>
-          <option value="visit">Profile Visits</option>
-          <option value="message">Messages & Follow-ups</option>
-          <option value="reply">Replies Received</option>
-        </select>
+
+        {dateFilter === 'custom' && (
+          <div className="flex items-center gap-3 bg-[#141414] border border-[#2a2a2a] p-3 rounded-xl text-xs text-white">
+            <span className="text-[#9ca3af]">From:</span>
+            <input
+              type="date"
+              value={customStart}
+              onChange={e => setCustomStart(e.target.value)}
+              className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-1.5 text-white focus:outline-none focus:border-[#6366f1]"
+            />
+            <span className="text-[#9ca3af]">To:</span>
+            <input
+              type="date"
+              value={customEnd}
+              onChange={e => setCustomEnd(e.target.value)}
+              className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-1.5 text-white focus:outline-none focus:border-[#6366f1]"
+            />
+          </div>
+        )}
       </div>
 
       {/* Activity Table */}
