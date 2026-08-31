@@ -53,6 +53,13 @@ async function runCloudFlow() {
     if (!accountId) continue;
 
     const settings = profile?.settings || {};
+
+    if (settings.provider_limit_cooldown_until && Date.now() < settings.provider_limit_cooldown_until) {
+      const hoursLeft = Math.ceil((settings.provider_limit_cooldown_until - Date.now()) / (1000 * 60 * 60));
+      console.log(`[Railway 24/7 Daemon] ⏸️ Skipping campaign "${campaign.name}" - LinkedIn provider limit cooldown active (${hoursLeft}h remaining).`);
+      continue;
+    }
+
     const dailyConnectionLimit = Number(settings.daily_connection_limit || 20);
     const globalDailyLimit = Number(settings.global_daily_limit || 40);
 
@@ -240,7 +247,10 @@ async function runCloudFlow() {
             await supabase.from('prospects').update({ custom_variables: cv }).eq('id', prospect.id);
 
             if (errStr.toLowerCase().includes('provider limit') || errStr.toLowerCase().includes('rate limit') || errStr.includes('429')) {
-              console.warn('[Railway 24/7 Daemon] Rate limit hit. Halting campaign for this cycle.');
+              console.warn(`[Railway 24/7 Daemon] 🛑 LinkedIn Provider/Rate Limit hit for "${campaign.name}". Entering 12-hour cooldown.`);
+              const cooldownUntil = Date.now() + 12 * 60 * 60 * 1000;
+              const updatedSettings = { ...settings, provider_limit_cooldown_until: cooldownUntil };
+              await supabase.from('profiles').update({ settings: updatedSettings }).eq('profile_key', campaign.profile_key);
               break;
             }
           }
