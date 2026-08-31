@@ -5,7 +5,10 @@ const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI
 const UNIPILE_API_KEY = process.env.UNIPILE_API_KEY || '6SlhX8Ii.R7wP5y2dLTREmrXKCTpnoEg3clwHKT9wZtIc++MRAkg=';
 const UNIPILE_BASE_URL = process.env.UNIPILE_BASE_URL || 'https://api20.unipile.com:15032/api/v1';
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false },
+  realtime: { disabled: true }
+});
 
 async function unipileFetch(endpoint, options = {}) {
   const headers = {
