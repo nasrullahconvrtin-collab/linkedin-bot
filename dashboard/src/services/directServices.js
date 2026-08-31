@@ -1884,22 +1884,47 @@ export const directRunFlow = async () => {
             }
           } else {
             console.warn(`Failed to send connection invite: ${res.error}`);
-            prospect.custom_variables.history = [
-              ...(prospect.custom_variables.history || []),
-              { node_id: currentNode.id, node_type: 'send_invitation', executed_at: new Date().toISOString(), status: 'failed', error: res.error }
-            ];
-            try {
-              await supabaseDirect.from('prospects').update({
-                custom_variables: prospect.custom_variables
-              }).eq('id', prospect.id);
-            } catch (e) {
-              console.warn(e);
-            }
+            const errStr = String(res.error || '');
+            const isAlreadyInvited = errStr.toLowerCase().includes('already') || errStr.toLowerCase().includes('recently');
 
-            // CIRCUIT BREAKER: If LinkedIn hit a rate/provider limit, IMMEDIATELY halt further campaign attempts
-            if (isProviderLimitError(res.error)) {
-              console.warn(`[CIRCUIT BREAKER ACTIVATED] LinkedIn provider limit reached (${res.error}). Halting remaining prospect processing for campaign.`);
-              break;
+            if (isAlreadyInvited) {
+              console.log(`Prospect ${prospect.name} was already invited recently. Marking Connection Request Sent.`);
+              totalConnections += 1;
+              prospect.status = 'Connection Request Sent';
+              prospect.connection_status = 'invitation_sent';
+              prospect.custom_variables.invitation_sent_at = new Date().toISOString();
+              prospect.custom_variables.history = [
+                ...(prospect.custom_variables.history || []),
+                { node_id: currentNode.id, node_type: 'send_invitation', executed_at: new Date().toISOString(), status: 'success' }
+              ];
+              try {
+                await supabaseDirect.from('prospects').update({
+                  status: 'Connection Request Sent',
+                  connection_status: 'invitation_sent',
+                  connection_sent_date: new Date().toISOString(),
+                  custom_variables: prospect.custom_variables
+                }).eq('id', prospect.id);
+              } catch (e) {
+                console.warn(e);
+              }
+            } else {
+              prospect.custom_variables.history = [
+                ...(prospect.custom_variables.history || []),
+                { node_id: currentNode.id, node_type: 'send_invitation', executed_at: new Date().toISOString(), status: 'failed', error: res.error }
+              ];
+              try {
+                await supabaseDirect.from('prospects').update({
+                  custom_variables: prospect.custom_variables
+                }).eq('id', prospect.id);
+              } catch (e) {
+                console.warn(e);
+              }
+
+              // CIRCUIT BREAKER: If LinkedIn hit a rate/provider limit, IMMEDIATELY halt further campaign attempts
+              if (isProviderLimitError(res.error)) {
+                console.warn(`[CIRCUIT BREAKER ACTIVATED] LinkedIn provider limit reached (${res.error}). Halting remaining prospect processing for campaign.`);
+                break;
+              }
             }
           }
           continue;

@@ -184,23 +184,28 @@ async function runCloudFlow() {
           if (ok && data) providerId = data.provider_id || data.id;
         }
 
-        if (!providerId) continue;
+        if (!providerId) {
+          console.warn(`[Railway 24/7 Daemon] Could not resolve providerId for ${prospect.first_name || ''} ${prospect.last_name || ''}. Marking Needs Attention.`);
+          cv.provider_resolution_failed = true;
+          await supabase.from('prospects').update({ status: 'Needs Attention', custom_variables: cv }).eq('id', prospect.id);
+          continue;
+        }
 
         const hasNoteToggle = nodeConfig.add_note || nodeConfig.include_note || nodeConfig.send_note;
         const noteText = hasNoteToggle ? (nodeConfig.note || '').replace(/\{\{\s*first_name\s*\}\}/gi, prospect.first_name || '') : '';
 
-        console.log(`[Railway 24/7 Daemon] Dispatched Connection Invite #${todayConnectionsTotal + 1} to ${prospect.name || prospect.id}...`);
+        console.log(`[Railway 24/7 Daemon] Dispatched Connection Invite #${todayConnectionsTotal + 1} to ${prospect.first_name || ''} ${prospect.last_name || ''}...`);
         const res = await unipileFetch('/users/invite', {
           method: 'POST',
           body: JSON.stringify({ account_id: accountId, provider_id: providerId, message: noteText })
         });
 
-        todayActionsTotal += 1;
-        todayConnectionsTotal += 1;
         const nowIso = new Date().toISOString();
 
         if (res.ok) {
-          console.log(`[Railway 24/7 Daemon] ✅ Connection Invite #${todayConnectionsTotal} SENT to ${prospect.name || prospect.id}`);
+          todayActionsTotal += 1;
+          todayConnectionsTotal += 1;
+          console.log(`[Railway 24/7 Daemon] ✅ Connection Invite #${todayConnectionsTotal} SENT to ${prospect.first_name || ''} ${prospect.last_name || ''}`);
           cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', node_label: 'Connection Request Sent', executed_at: nowIso, status: 'success' }];
           cv.invitation_sent_at = nowIso;
           if (nextEdge) cv.current_node_id = nextEdge.target;
@@ -213,14 +218,31 @@ async function runCloudFlow() {
             custom_variables: cv
           }).eq('id', prospect.id);
         } else {
-          console.warn(`[Railway 24/7 Daemon] ⚠️ Invite failed for ${prospect.name || prospect.id}:`, res.data?.detail || res.status);
-          const errStr = String(res.data?.detail || res.status);
-          cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', node_label: 'Connection Request Failed', executed_at: nowIso, status: 'failed', error: errStr }];
-          await supabase.from('prospects').update({ custom_variables: cv }).eq('id', prospect.id);
+          console.warn(`[Railway 24/7 Daemon] ⚠️ Invite failed for ${prospect.first_name || ''} ${prospect.last_name || ''}:`, res.data?.detail || res.data?.title || res.status);
+          const errStr = String(res.data?.detail || res.data?.title || res.status);
+          const isAlreadyInvited = errStr.toLowerCase().includes('already') || errStr.toLowerCase().includes('recently') || res.data?.type === 'errors/already_invited_recently';
 
-          if (errStr.toLowerCase().includes('provider limit') || errStr.toLowerCase().includes('rate limit') || errStr.includes('429')) {
-            console.warn('[Railway 24/7 Daemon] Rate limit hit. Halting campaign for this cycle.');
-            break;
+          if (isAlreadyInvited) {
+            console.log(`[Railway 24/7 Daemon] Prospect ${prospect.first_name || ''} ${prospect.last_name || ''} was already invited recently. Marking Connection Request Sent.`);
+            todayConnectionsTotal += 1;
+            cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', node_label: 'Connection Request Sent (Existing)', executed_at: nowIso, status: 'success' }];
+            if (nextEdge) cv.current_node_id = nextEdge.target;
+
+            await supabase.from('prospects').update({
+              status: 'Connection Request Sent',
+              connection_status: 'invitation_sent',
+              connection_sent_date: nowIso,
+              provider_id: providerId,
+              custom_variables: cv
+            }).eq('id', prospect.id);
+          } else {
+            cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', node_label: 'Connection Request Failed', executed_at: nowIso, status: 'failed', error: errStr }];
+            await supabase.from('prospects').update({ custom_variables: cv }).eq('id', prospect.id);
+
+            if (errStr.toLowerCase().includes('provider limit') || errStr.toLowerCase().includes('rate limit') || errStr.includes('429')) {
+              console.warn('[Railway 24/7 Daemon] Rate limit hit. Halting campaign for this cycle.');
+              break;
+            }
           }
         }
       }
