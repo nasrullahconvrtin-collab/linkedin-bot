@@ -136,6 +136,8 @@ export default function ActivityLog() {
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
 
+  const [statusFilter, setStatusFilter] = useState('all');
+
   const filteredLogs = logs.filter(log => {
     const act = (log.node_type || log.node_label || '').toLowerCase();
     if (filterType === 'invite' && !act.includes('invite')) return false;
@@ -143,6 +145,10 @@ export default function ActivityLog() {
     if (filterType === 'visit' && !act.includes('visit')) return false;
     if (filterType === 'message' && !act.includes('message') && !act.includes('followup')) return false;
     if (filterType === 'reply' && !act.includes('reply')) return false;
+
+    const logStatus = String(log.status || '').toLowerCase();
+    if (statusFilter === 'success' && logStatus !== 'success') return false;
+    if (statusFilter === 'failed' && logStatus !== 'failed' && logStatus !== 'error') return false;
 
     if (search) {
       const q = search.toLowerCase();
@@ -231,6 +237,16 @@ export default function ActivityLog() {
             <option value="visit">Profile Visits</option>
             <option value="message">Messages & Follow-ups</option>
             <option value="reply">Replies Received</option>
+          </select>
+
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+            className="bg-[#141414] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#6366f1]"
+          >
+            <option value="all">All Execution Statuses</option>
+            <option value="success">Success Only</option>
+            <option value="failed">Failed / Errors Only ⚠️</option>
           </select>
 
           <select
