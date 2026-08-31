@@ -1,12 +1,17 @@
-FROM python:3.11-slim
+FROM node:20-alpine
 
-WORKDIR /app/backend
+WORKDIR /app
 
-COPY backend/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy dashboard package dependencies
+COPY dashboard/package*.json ./dashboard/
 
-COPY backend/ ./
+# Install dependencies inside dashboard directory
+RUN cd dashboard && npm install
 
-EXPOSE 8000
+# Copy all dashboard code & scripts
+COPY dashboard ./dashboard
 
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+WORKDIR /app/dashboard
+
+# Run the 24/7 Cloud Flow Daemon Worker
+CMD ["node", "scripts/cloud_flow_daemon.mjs"]
