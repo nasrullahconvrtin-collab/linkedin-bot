@@ -6,7 +6,7 @@ providers = ["node"]
 nixPkgs = ["nodejs_20"]
 
 [phases.install]
-cmds = ["cd dashboard && npm install"]
+cmds = ["npm install"]
 
 [deploy]
-startCommand = "cd dashboard && npm run worker"
+startCommand = "npm run worker"
