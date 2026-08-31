@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "node scripts/build-extension-zip.mjs && vite build --minify false",
+    "worker": "node scripts/cloud_flow_daemon.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },
