@@ -138,7 +138,17 @@ async function runCloudFlow() {
     const startNode = flowSequence.nodes.find(n => !incomingTargets.has(n.id)) || flowSequence.nodes[0];
     if (!startNode) continue;
 
-    const { data: prospects } = await supabase.from('prospects').select('*').eq('campaign_id', campaign.id);
+    // Fetch prospects enrolled in this campaign via campaign_enrollments or campaign_id
+    const { data: enrollments } = await supabase.from('campaign_enrollments').select('prospect_id').eq('campaign_id', campaign.id);
+    const enrolledIds = (enrollments || []).map(e => e.prospect_id).filter(Boolean);
+
+    let prospectQuery = supabase.from('prospects').select('*');
+    if (enrolledIds.length > 0) {
+      prospectQuery = prospectQuery.or(`campaign_id.eq.${campaign.id},id.in.(${enrolledIds.join(',')})`);
+    } else {
+      prospectQuery = prospectQuery.eq('campaign_id', campaign.id);
+    }
+    const { data: prospects } = await prospectQuery;
     if (!prospects || prospects.length === 0) continue;
 
     for (const prospect of prospects) {

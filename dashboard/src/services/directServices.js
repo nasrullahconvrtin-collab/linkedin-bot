@@ -535,10 +535,24 @@ export const directGetCampaign = async (id) => {
         return { campaign: null, total: 0 };
       }
 
+      // Fetch enrolled prospect IDs from campaign_enrollments table
+      const { data: enrollments } = await supabaseDirect
+        .from('campaign_enrollments')
+        .select('prospect_id')
+        .eq('campaign_id', id);
+
+      const enrolledIds = (enrollments || []).map(e => e.prospect_id).filter(Boolean);
+
       let prospectQuery = supabaseDirect
         .from('prospects')
-        .select('id, campaign_id, status, connection_status, connection_sent_date, message_sent_date, custom_variables')
-        .eq('campaign_id', id);
+        .select('id, campaign_id, status, connection_status, connection_sent_date, message_sent_date, custom_variables');
+
+      if (enrolledIds.length > 0) {
+        prospectQuery = prospectQuery.or(`campaign_id.eq.${id},id.in.(${enrolledIds.join(',')})`);
+      } else {
+        prospectQuery = prospectQuery.eq('campaign_id', id);
+      }
+
       if (!isSuper && orgId) {
         prospectQuery = prospectQuery.eq('organization_id', orgId);
       }
