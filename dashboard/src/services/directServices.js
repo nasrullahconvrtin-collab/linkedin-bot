@@ -832,279 +832,180 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
           return resolve({ success: false, error: 'CSV file is empty', imported_count: 0 });
         }
 
-        // 1. Fetch existing prospects to build duplicate & custom variable maps
-        const { data: existingList, error: fetchErr } = await supabaseDirect
-          .from('prospects')
-          .select('id, linkedin_url, email, status, custom_variables');
-
-        if (fetchErr) {
-          console.error('directBulkImportProspects: Failed to fetch existing prospects:', fetchErr.message);
-        }
-
-        const linkedinMap = new Map();
-        const emailMap = new Map();
-        const existingMap = new Map();
-
-        if (existingList) {
-          existingList.forEach(p => {
-            existingMap.set(p.id, p);
-            if (p.linkedin_url) {
-              const cleaned = cleanLinkedinUrl(p.linkedin_url);
-              if (cleaned) linkedinMap.set(cleaned, p.id);
-            }
-            if (p.email) {
-              const cleaned = p.email.trim().toLowerCase();
-              if (cleaned) emailMap.set(cleaned, p.id);
-            }
-          });
-        }
-
-        const validColumns = new Set([
-          'id', 'first_name', 'last_name', 'name', 'company', 'job_title',
-          'email', 'linkedin_url', 'location', 'public_identifier', 'member_id', 'provider_id',
-          'status', 'connection_status', 'connection_sent_date', 'accepted_at', 'message_sent_date',
-          'custom_variables', 'campaign_id', 'list_id', 'organization_id', 'user_email',
-          'created_at', 'updated_at'
-        ]);
-
-        const rawHeaders = parsedData[0].map(h => h.trim().replace(/^["']|["']$/g, ''));
-        const prospectsToInsert = [];
-
         const orgId = getActiveOrganizationId();
         const userAcc = getActiveUserAccount();
         const userEmail = userAcc?.email ? userAcc.email.toLowerCase() : null;
 
-        console.log(`[Import] Starting import: ${parsedData.length - 1} rows, mode=${importMode}, campaignId=${campaignId}`);
+        const rawHeaders = parsedData[0].map(h => h.trim().replace(/^["']|["']$/g, ''));
+        console.log(`[Import] Headers: ${rawHeaders.join(', ')}`);
+        console.log(`[Import] Rows: ${parsedData.length - 1}, mode: ${importMode}, campaign: ${campaignId}`);
 
-        for (let i = 1; i < parsedData.length; i += 1) {
+        // Build existing prospect lookup by linkedin_url and email
+        const { data: existingList } = await supabaseDirect
+          .from('prospects')
+          .select('id, linkedin_url, email, status, custom_variables, name, first_name, last_name, company, job_title, location');
+
+        const linkedinMap = new Map();
+        const emailMap = new Map();
+        const existingById = new Map();
+
+        (existingList || []).forEach(p => {
+          existingById.set(p.id, p);
+          if (p.linkedin_url) {
+            const c = cleanLinkedinUrl(p.linkedin_url);
+            if (c) linkedinMap.set(c, p.id);
+          }
+          if (p.email) emailMap.set(p.email.trim().toLowerCase(), p.id);
+        });
+
+        const toCreate = [];
+        const toUpdate = [];
+
+        for (let i = 1; i < parsedData.length; i++) {
           const cols = parsedData[i];
-          if (!cols || cols.length === 0 || (cols.length === 1 && !cols[0])) continue;
+          if (!cols || (cols.length === 1 && !cols[0])) continue;
 
           const rowData = {};
           const customVars = {};
 
-          rawHeaders.forEach((rawH, idx) => {
+          rawHeaders.forEach((h, idx) => {
             const val = (cols[idx] || '').trim();
-            const mappedTarget = columnMapping?.[rawH] || autoGuessHeader(rawH);
-            if (mappedTarget === 'skip') return;
-            if (mappedTarget === 'custom_var') {
-              const keyName = rawH.toLowerCase().replace(/[^a-z0-9]/g, '_');
-              customVars[rawH] = val;
-              if (keyName) customVars[keyName] = val;
+            const target = columnMapping?.[h] || autoGuessHeader(h);
+            if (target === 'skip') return;
+            if (target === 'custom_var') {
+              const key = h.toLowerCase().replace(/[^a-z0-9]/g, '_');
+              customVars[h] = val;
+              if (key) customVars[key] = val;
             } else {
-              rowData[mappedTarget] = val;
+              rowData[target] = val;
             }
           });
 
-          let rawLinkedin = rowData.linkedin_url || '';
-          let cleanedUrl = cleanLinkedinUrl(rawLinkedin);
-          let emailVal = (rowData.email || '').trim().toLowerCase();
-
+          const rawUrl = rowData.linkedin_url || '';
+          const cleanUrl = cleanLinkedinUrl(rawUrl);
+          const emailVal = (rowData.email || '').trim().toLowerCase();
           let firstName = (rowData.first_name || rowData.name?.split(' ')[0] || '').trim();
           let lastName = (rowData.last_name || rowData.name?.split(' ').slice(1).join(' ') || '').trim();
 
-          // Skip rows with no identifiable data
-          if (!firstName && !lastName && !cleanedUrl && !emailVal) continue;
+          if (!firstName && !lastName && !cleanUrl && !emailVal) continue;
 
-          let existingId = null;
-          if (cleanedUrl) existingId = linkedinMap.get(cleanedUrl);
+          // Find existing prospect
+          let existingId = cleanUrl ? linkedinMap.get(cleanUrl) : null;
           if (!existingId && emailVal) existingId = emailMap.get(emailVal);
 
-          // Mode: skip duplicates — skip rows that already exist
-          if ((importMode === 'skip_duplicates' || importMode === 'create') && existingId) {
-            // Still enroll them in the campaign even if skipping the prospect upsert
-            if (campaignId && existingId) {
-              prospectsToInsert.push({ __enrollOnly: true, id: existingId });
-            }
-            continue;
-          }
-          // Mode: update only — skip rows that DON'T exist
+          if (importMode === 'create' && existingId) continue;
           if (importMode === 'update' && !existingId) continue;
 
-          const existingObj = existingId ? existingMap.get(existingId) : null;
-          const mergedCustomVars = {
-            ...(existingObj?.custom_variables || {}),
-            ...customVars,
-            organization_id: orgId || userAcc?.organization_id || null,
-            user_email: userEmail,
-          };
+          const existing = existingId ? existingById.get(existingId) : null;
 
           if (!firstName && !lastName) {
-            firstName = cleanedUrl
-              ? (cleanedUrl.split('/in/')[1] || '').split('/')[0].replace(/[-_]/g, ' ') || 'Prospect'
-              : (existingObj?.first_name || 'Prospect');
+            firstName = cleanUrl
+              ? (cleanUrl.split('/in/')[1] || '').split('/')[0].replace(/[-_]/g, ' ') || 'Prospect'
+              : (existing?.first_name || 'Prospect');
           }
 
-          const prospectObj = {
-            first_name: firstName || existingObj?.first_name || 'Lead',
-            last_name: lastName || existingObj?.last_name || '',
-            name: rowData.name || (firstName ? `${firstName} ${lastName}`.trim() : (existingObj?.name || 'Prospect')),
-            company: rowData.company || existingObj?.company || '',
-            job_title: rowData.job_title || rowData.headline || existingObj?.job_title || '',
-            email: emailVal || existingObj?.email || '',
-            linkedin_url: cleanedUrl || rawLinkedin || existingObj?.linkedin_url || '',
-            location: rowData.location || existingObj?.location || '',
-            organization_id: orgId || userAcc?.organization_id || null,
+          const mergedCustomVars = {
+            ...(existing?.custom_variables || {}),
+            ...customVars,
+            organization_id: orgId || null,
             user_email: userEmail,
-            custom_variables: mergedCustomVars,
           };
 
-          // Always set campaign_id on prospects table so legacy query still works
-          if (campaignId && !existingId) prospectObj.campaign_id = campaignId;
-          if (listId) prospectObj.list_id = listId;
+          const prospectRow = {
+            first_name: firstName || existing?.first_name || 'Lead',
+            last_name: lastName || existing?.last_name || '',
+            name: rowData.name || `${firstName} ${lastName}`.trim() || existing?.name || 'Prospect',
+            company: rowData.company || existing?.company || '',
+            job_title: rowData.job_title || rowData.headline || existing?.job_title || '',
+            email: emailVal || existing?.email || '',
+            linkedin_url: cleanUrl || rawUrl || existing?.linkedin_url || '',
+            location: rowData.location || existing?.location || '',
+            organization_id: orgId || null,
+            user_email: userEmail,
+            custom_variables: mergedCustomVars,
+            // ALWAYS set campaign_id so the prospect shows up in the campaign
+            campaign_id: campaignId || null,
+            list_id: listId || null,
+            status: (existing?.status && existing.status !== 'Not Contacted') ? existing.status : 'Not Contacted',
+            updated_at: new Date().toISOString(),
+          };
 
           if (existingId) {
-            prospectObj.id = existingId;
-            // Preserve existing status (don't overwrite 'Connection Accepted' etc)
-            if (existingObj?.status && existingObj.status !== 'Not Contacted') {
-              prospectObj.status = existingObj.status;
-            } else {
-              prospectObj.status = 'Not Contacted';
-            }
-            prospectObj.updated_at = new Date().toISOString();
+            prospectRow.id = existingId;
+            toUpdate.push(prospectRow);
           } else {
-            prospectObj.status = 'Not Contacted';
-            prospectObj.created_at = new Date().toISOString();
+            prospectRow.created_at = new Date().toISOString();
+            toCreate.push(prospectRow);
           }
-
-          // Clean: move any non-column fields into custom_variables
-          const cleanedObj = {};
-          Object.keys(prospectObj).forEach(key => {
-            if (validColumns.has(key)) {
-              cleanedObj[key] = prospectObj[key];
-            } else {
-              cleanedObj.custom_variables = cleanedObj.custom_variables || {};
-              cleanedObj.custom_variables[key] = prospectObj[key];
-            }
-          });
-
-          prospectsToInsert.push(cleanedObj);
         }
 
-        console.log(`[Import] Rows to process: ${prospectsToInsert.length}`);
-
-        if (prospectsToInsert.length === 0) {
-          return resolve({ success: true, created_count: 0, updated_count: 0, imported_count: 0, message: 'No prospects matched import criteria' });
-        }
+        console.log(`[Import] To create: ${toCreate.length}, to update: ${toUpdate.length}`);
 
         let createdCount = 0;
         let updatedCount = 0;
-        const enrolledProspectIds = [];
-        const chunkSize = 50;
+        const importedIds = [];
 
-        // Separate enroll-only rows from full upsert rows
-        const enrollOnlyRows = prospectsToInsert.filter(p => p.__enrollOnly);
-        const upsertRows = prospectsToInsert.filter(p => !p.__enrollOnly);
+        // INSERT new prospects
+        for (let i = 0; i < toCreate.length; i += 50) {
+          const chunk = toCreate.slice(i, i + 50);
+          const { data, error } = await supabaseDirect.from('prospects').insert(chunk).select('id');
+          if (error) {
+            console.error('[Import] Insert error:', error.message);
+            // Try row by row
+            for (const row of chunk) {
+              const { data: d, error: e } = await supabaseDirect.from('prospects').insert([row]).select('id');
+              if (!e && d?.[0]) { createdCount++; importedIds.push(d[0].id); }
+              else console.error('[Import] Row insert error:', e?.message, row.linkedin_url);
+            }
+          } else if (data) {
+            createdCount += data.length;
+            data.forEach(p => importedIds.push(p.id));
+          }
+        }
 
-        // Collect enroll-only IDs
-        enrollOnlyRows.forEach(p => {
-          if (p.id) enrolledProspectIds.push(p.id);
-          updatedCount++;
-        });
-
-        // Upsert actual prospect rows in chunks
-        for (let i = 0; i < upsertRows.length; i += chunkSize) {
-          const chunk = upsertRows.slice(i, i + chunkSize);
-          console.log(`[Import] Upserting chunk ${Math.floor(i / chunkSize) + 1}, size=${chunk.length}`);
-
-          const { data: insertedData, error: chunkErr } = await supabaseDirect
+        // UPDATE existing prospects — use individual updates to guarantee success
+        for (const row of toUpdate) {
+          const { id, ...fields } = row;
+          const { data, error } = await supabaseDirect
             .from('prospects')
-            .upsert(chunk, { onConflict: 'id' })
-            .select();
-
-          if (chunkErr) {
-            console.warn(`[Import] Chunk upsert failed: ${chunkErr.message}. Retrying row-by-row...`);
-
-            for (const singleProspect of chunk) {
-              const isUpdate = !!singleProspect.id;
-              let rowResult;
-
-              if (isUpdate) {
-                const { data: d, error: e } = await supabaseDirect
-                  .from('prospects')
-                  .update(singleProspect)
-                  .eq('id', singleProspect.id)
-                  .select();
-                rowResult = { data: d, error: e };
-              } else {
-                const { data: d, error: e } = await supabaseDirect
-                  .from('prospects')
-                  .insert([singleProspect])
-                  .select();
-                rowResult = { data: d, error: e };
-              }
-
-              if (!rowResult.error && rowResult.data && rowResult.data[0]) {
-                if (isUpdate) updatedCount++;
-                else createdCount++;
-                enrolledProspectIds.push(rowResult.data[0].id);
-              } else if (rowResult.error) {
-                console.error('[Import] Row error:', rowResult.error.message, singleProspect.linkedin_url || singleProspect.email);
-              }
-            }
-          } else if (insertedData && insertedData.length > 0) {
-            insertedData.forEach(p => {
-              const orig = chunk.find(x => x.id === p.id || (x.linkedin_url && x.linkedin_url === p.linkedin_url) || (x.email && x.email === p.email));
-              if (orig && orig.id) updatedCount++;
-              else createdCount++;
-              enrolledProspectIds.push(p.id);
-            });
-          } else {
-            // insertedData is empty but no error — this can happen with upsert when row already exists with same data
-            // Collect IDs from chunk directly (they already exist)
-            chunk.forEach(p => {
-              if (p.id) {
-                updatedCount++;
-                enrolledProspectIds.push(p.id);
-              }
-            });
+            .update(fields)
+            .eq('id', id)
+            .select('id');
+          if (!error && data?.[0]) {
+            updatedCount++;
+            importedIds.push(data[0].id);
+          } else if (error) {
+            console.error('[Import] Update error:', error.message, row.linkedin_url);
           }
         }
 
-        // Enroll ALL imported prospects into the campaign (if campaignId provided)
-        if (campaignId && enrolledProspectIds.length > 0) {
-          const uniqueIds = [...new Set(enrolledProspectIds)];
-          console.log(`[Import] Enrolling ${uniqueIds.length} prospects into campaign ${campaignId}`);
+        console.log(`[Import] Done — created: ${createdCount}, updated: ${updatedCount}`);
 
-          const enrollments = uniqueIds.map(pid => ({
-            campaign_id: campaignId,
-            prospect_id: pid,
-            status: 'active',
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          }));
-
-          // Try upsert with conflict resolution; if campaign_enrollments doesn't exist, fallback gracefully
-          const { error: enrollErr } = await supabaseDirect
-            .from('campaign_enrollments')
-            .upsert(enrollments, { onConflict: 'campaign_id,prospect_id' });
-
-          if (enrollErr) {
-            console.warn(`[Import] campaign_enrollments upsert failed: ${enrollErr.message}. Falling back to direct update.`);
-            // Fallback: update prospects.campaign_id directly so they still show in campaign
-            const updateIds = uniqueIds;
-            for (let i = 0; i < updateIds.length; i += 100) {
-              const batch = updateIds.slice(i, i + 100);
-              await supabaseDirect
-                .from('prospects')
-                .update({ campaign_id: campaignId, updated_at: new Date().toISOString() })
-                .in('id', batch)
-                .catch(e => console.warn('[Import] Fallback update error:', e.message));
-            }
-          }
+        // Also try to enroll in campaign_enrollments if table exists (best-effort, non-blocking)
+        if (campaignId && importedIds.length > 0) {
+          const uniqueIds = [...new Set(importedIds)];
+          supabaseDirect.from('campaign_enrollments').upsert(
+            uniqueIds.map(pid => ({
+              campaign_id: campaignId,
+              prospect_id: pid,
+              status: 'active',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })),
+            { onConflict: 'campaign_id,prospect_id' }
+          ).then(({ error }) => {
+            if (error) console.warn('[Import] campaign_enrollments skipped (table may not exist):', error.message);
+          });
         }
 
-        const total = createdCount + updatedCount;
-        console.log(`[Import] Done: created=${createdCount}, updated=${updatedCount}, total=${total}`);
         resolve({
           success: true,
           created_count: createdCount,
           updated_count: updatedCount,
-          imported_count: total,
-          total_processed: prospectsToInsert.length
+          imported_count: createdCount + updatedCount,
         });
       } catch (err) {
-        console.error('directBulkImportProspects critical error:', err);
+        console.error('[Import] Critical error:', err);
         resolve({ success: false, error: err.message, imported_count: 0 });
       }
     };
