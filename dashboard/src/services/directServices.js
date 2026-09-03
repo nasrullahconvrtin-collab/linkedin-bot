@@ -805,16 +805,18 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
           return resolve({ success: false, error: 'CSV file is empty', imported_count: 0 });
         }
 
-        // 1. Fetch existing prospects to build duplicate maps
+        // 1. Fetch existing prospects to build duplicate & custom variable maps
         const { data: existingList } = await supabaseDirect
           .from('prospects')
-          .select('id, linkedin_url, email');
+          .select('id, linkedin_url, email, status, custom_variables');
 
         const linkedinMap = new Map();
         const emailMap = new Map();
+        const existingMap = new Map();
 
         if (existingList) {
           existingList.forEach(p => {
+            existingMap.set(p.id, p);
             if (p.linkedin_url) {
               const cleaned = cleanLinkedinUrl(p.linkedin_url);
               if (cleaned) linkedinMap.set(cleaned, p.id);
@@ -863,9 +865,6 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             }
           });
 
-          customVars.organization_id = orgId || userAcc?.organization_id || null;
-          customVars.user_email = userEmail;
-
           let rawLinkedin = rowData.linkedin_url || '';
           let cleanedUrl = cleanLinkedinUrl(rawLinkedin);
           let emailVal = (rowData.email || '').trim().toLowerCase();
@@ -873,43 +872,55 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
           let firstName = (rowData.first_name || rowData.name?.split(' ')[0] || '').trim();
           let lastName = (rowData.last_name || rowData.name?.split(' ').slice(1).join(' ') || '').trim();
 
-          if (!firstName && !lastName && !cleanedUrl && !emailVal) {
-            continue;
-          }
-          if (!firstName && !lastName) {
-            firstName = cleanedUrl ? (cleanedUrl.split('/in/')[1] || '').split('/')[0].replace(/[-_]/g, ' ') || 'Prospect' : 'Prospect';
-          }
-
           let existingId = null;
           if (cleanedUrl) existingId = linkedinMap.get(cleanedUrl);
           if (!existingId && emailVal) existingId = emailMap.get(emailVal);
 
-          if (importMode === 'create' && existingId) continue;
+          if ((importMode === 'skip_duplicates' || importMode === 'create') && existingId) continue;
           if (importMode === 'update' && !existingId) continue;
 
-          const prospectObj = {
-            first_name: firstName || 'Lead',
-            last_name: lastName || '',
-            name: rowData.name || `${firstName} ${lastName}`.trim(),
-            company: rowData.company || '',
-            job_title: rowData.job_title || rowData.headline || '',
-            email: emailVal || '',
-            linkedin_url: cleanedUrl || rawLinkedin || '',
-            location: rowData.location || '',
-            status: 'Not Contacted',
-            campaign_id: campaignId || null,
-            list_id: listId || null,
+          const existingObj = existingId ? existingMap.get(existingId) : null;
+          const mergedCustomVars = {
+            ...(existingObj?.custom_variables || {}),
+            ...customVars,
             organization_id: orgId || userAcc?.organization_id || null,
             user_email: userEmail,
-            custom_variables: customVars,
+          };
+
+          if (!firstName && !lastName && !cleanedUrl && !emailVal) {
+            continue;
+          }
+          if (!firstName && !lastName) {
+            firstName = cleanedUrl ? (cleanedUrl.split('/in/')[1] || '').split('/')[0].replace(/[-_]/g, ' ') || 'Prospect' : (existingObj?.first_name || 'Prospect');
+          }
+
+          const prospectObj = {
+            first_name: firstName || existingObj?.first_name || 'Lead',
+            last_name: lastName || existingObj?.last_name || '',
+            name: rowData.name || (firstName && lastName ? `${firstName} ${lastName}`.trim() : (existingObj?.name || 'Prospect')),
+            company: rowData.company || existingObj?.company || '',
+            job_title: rowData.job_title || rowData.headline || existingObj?.job_title || '',
+            email: emailVal || existingObj?.email || '',
+            linkedin_url: cleanedUrl || rawLinkedin || existingObj?.linkedin_url || '',
+            location: rowData.location || existingObj?.location || '',
+            organization_id: orgId || userAcc?.organization_id || null,
+            user_email: userEmail,
+            custom_variables: mergedCustomVars,
             created_at: new Date().toISOString(),
           };
 
+          if (campaignId) prospectObj.campaign_id = campaignId;
+          if (listId) prospectObj.list_id = listId;
+
           if (existingId) {
             prospectObj.id = existingId;
-            delete prospectObj.status;
             delete prospectObj.created_at;
+            if (existingObj?.status && existingObj.status !== 'Not Contacted') {
+              prospectObj.status = existingObj.status;
+            }
             prospectObj.updated_at = new Date().toISOString();
+          } else {
+            prospectObj.status = 'Not Contacted';
           }
 
           // Clean fields to strictly send columns that exist on the table
@@ -927,7 +938,7 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
         }
 
         if (prospectsToInsert.length === 0) {
-          return resolve({ success: true, created_count: 0, updated_count: 0, imported_count: 0, message: 'No new prospects to import' });
+          return resolve({ success: true, created_count: 0, updated_count: 0, imported_count: 0, message: 'No prospects to import' });
         }
 
         // Process in chunks of 50 for max database stability & fast performance
@@ -941,12 +952,21 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
 
           if (chunkErr) {
             console.warn(`Chunk ${i / chunkSize + 1} upsert failed, retrying row-by-row...`, chunkErr.message);
-            // Fallback row-by-row retry to ensure valid rows are never lost due to one bad row
             for (const singleProspect of chunk) {
               const { data: singleData, error: sErr } = await supabaseDirect.from('prospects').upsert([singleProspect]).select();
               if (!sErr && singleData && singleData[0]) {
                 if (singleProspect.id) updatedCount++;
                 else createdCount++;
+
+                if (campaignId) {
+                  await supabaseDirect.from('campaign_enrollments').upsert([{
+                    campaign_id: campaignId,
+                    prospect_id: singleData[0].id,
+                    status: 'active',
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                  }], { onConflict: 'campaign_id,prospect_id' });
+                }
               } else if (sErr) {
                 console.error('Row import error:', sErr.message, singleProspect);
               }
@@ -957,6 +977,17 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
               if (orig && orig.id) updatedCount++;
               else createdCount++;
             });
+
+            if (campaignId) {
+              const enrollments = insertedData.map(p => ({
+                campaign_id: campaignId,
+                prospect_id: p.id,
+                status: 'active',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              }));
+              await supabaseDirect.from('campaign_enrollments').upsert(enrollments, { onConflict: 'campaign_id,prospect_id' }).catch(() => {});
+            }
           }
         }
 
