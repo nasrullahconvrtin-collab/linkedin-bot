@@ -656,7 +656,20 @@ export const directGetProspects = async (params = {}) => {
     // Strict Data Isolation: ONLY return prospects for the logged-in user's organization
     if (orgId) query = query.eq('organization_id', orgId);
 
-    if (params.campaign_id) query = query.eq('campaign_id', params.campaign_id);
+    if (params.campaign_id) {
+      const { data: enrollments } = await supabaseDirect
+        .from('campaign_enrollments')
+        .select('prospect_id')
+        .eq('campaign_id', params.campaign_id);
+
+      const enrolledIds = (enrollments || []).map(e => e.prospect_id).filter(Boolean);
+
+      if (enrolledIds.length > 0) {
+        query = query.or(`campaign_id.eq.${params.campaign_id},id.in.(${enrolledIds.join(',')})`);
+      } else {
+        query = query.eq('campaign_id', params.campaign_id);
+      }
+    }
     if (params.status) query = query.eq('status', params.status);
     if (params.list_id) query = query.eq('list_id', params.list_id);
     query = query.order('created_at', { ascending: false });

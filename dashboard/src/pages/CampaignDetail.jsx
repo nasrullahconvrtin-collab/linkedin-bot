@@ -1398,6 +1398,7 @@ export default function CampaignDetail() {
           const res = await bulkImportProspects(file, columnMapping, importMode, targetListId || null, id);
           toast.success(`Imported ${res.imported_count || res.created_count || 0} prospects into campaign`);
           loadProspects();
+          loadConnectedProspects();
           refreshCampaign();
         }}
         targetCampaignId={id}
