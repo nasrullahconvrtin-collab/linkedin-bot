@@ -72,7 +72,18 @@ export default async function handler(req, res) {
       const startNode = flowSequence.nodes.find(n => !incomingTargets.has(n.id)) || flowSequence.nodes[0];
       if (!startNode) continue;
 
-      const prospects = await sbFetch(`prospects?campaign_id=eq.${c.id}`);
+      let prospects = [];
+      try {
+        const enrollments = await sbFetch(`campaign_enrollments?campaign_id=eq.${c.id}&select=prospect_id`);
+        const enrolledIds = (enrollments || []).map(e => e.prospect_id).filter(Boolean);
+        if (enrolledIds.length > 0) {
+          prospects = await sbFetch(`prospects?or=(campaign_id.eq.${c.id},id.in.(${enrolledIds.join(',')}))`);
+        } else {
+          prospects = await sbFetch(`prospects?campaign_id=eq.${c.id}`);
+        }
+      } catch (e) {
+        prospects = await sbFetch(`prospects?campaign_id=eq.${c.id}`);
+      }
 
       for (const p of prospects || []) {
         if (totalSentToday >= dailyConnectionLimit) break;

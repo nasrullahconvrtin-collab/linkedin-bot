@@ -6,6 +6,8 @@ const UNIPILE_API_KEY = '6SlhX8Ii.R7wP5y2dLTREmrXKCTpnoEg3clwHKT9wZtIc++MRAkg=';
 const UNIPILE_BASE_URL = 'https://api20.unipile.com:15032/api/v1';
 
 export const supabaseDirect = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+export const isValidUuid = (val) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 const getUnipileBaseUrl = () => {
   if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
     return '/api/unipile';
@@ -553,7 +555,7 @@ export const directGetCampaign = async (id) => {
         prospectQuery = prospectQuery.eq('campaign_id', id);
       }
 
-      if (!isSuper && orgId) {
+      if (!isSuper && isValidUuid(orgId)) {
         prospectQuery = prospectQuery.eq('organization_id', orgId);
       }
       const { data: prospects } = await prospectQuery;
@@ -654,12 +656,22 @@ export const directGetProspects = async (params = {}) => {
     let query = supabaseDirect.from('prospects').select('*', { count: 'exact' });
 
     if (params.campaign_id) {
-      // When filtering by campaign, use campaign_id directly — don't apply org filter
-      // because organization_id on prospects may differ from the session's derived org_id
-      query = query.eq('campaign_id', params.campaign_id);
+      // Fetch enrolled prospect IDs from campaign_enrollments table
+      const { data: enrollments } = await supabaseDirect
+        .from('campaign_enrollments')
+        .select('prospect_id, status, custom_variables')
+        .eq('campaign_id', params.campaign_id);
+
+      const enrolledIds = (enrollments || []).map(e => e.prospect_id).filter(Boolean);
+
+      if (enrolledIds.length > 0) {
+        query = query.or(`campaign_id.eq.${params.campaign_id},id.in.(${enrolledIds.join(',')})`);
+      } else {
+        query = query.eq('campaign_id', params.campaign_id);
+      }
     } else {
       // Strict Data Isolation: ONLY return prospects for the logged-in user's organization
-      if (orgId) query = query.eq('organization_id', orgId);
+      if (isValidUuid(orgId)) query = query.eq('organization_id', orgId);
     }
 
     if (params.status) query = query.eq('status', params.status);
@@ -854,10 +866,19 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
           .from('prospects')
           .select('id, linkedin_url, email, status, connection_status, member_id, provider_id, custom_variables, name, first_name, last_name, company, job_title, location, campaign_id, organization_id');
 
-        // Map for prospects ALREADY IN THIS SPECIFIC CAMPAIGN
-        const thisCampaignMap = new Map();
-        // Global map for prospects across ANY campaign (to copy profile data if re-enrolling)
-        const globalAnywhereMap = new Map();
+        // Fetch prospects already enrolled in THIS campaign via campaign_enrollments
+        const enrolledInCampaignSet = new Set();
+        if (campaignId) {
+          const { data: cEnrollments } = await supabaseDirect
+            .from('campaign_enrollments')
+            .select('prospect_id')
+            .eq('campaign_id', campaignId);
+          (cEnrollments || []).forEach(e => enrolledInCampaignSet.add(e.prospect_id));
+        }
+
+        // Global map across ANY campaign to prevent duplicate rows in prospects table
+        const globalUrlMap = new Map();
+        const globalEmailMap = new Map();
         const existingById = new Map();
 
         (existingList || []).forEach(p => {
@@ -866,16 +887,16 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
           const cEmail = p.email ? p.email.trim().toLowerCase() : null;
 
           if (campaignId && p.campaign_id === campaignId) {
-            if (cUrl) thisCampaignMap.set(cUrl, p.id);
-            if (cEmail) thisCampaignMap.set(cEmail, p.id);
+            enrolledInCampaignSet.add(p.id);
           }
 
-          if (cUrl && !globalAnywhereMap.has(cUrl)) globalAnywhereMap.set(cUrl, p);
-          if (cEmail && !globalAnywhereMap.has(cEmail)) globalAnywhereMap.set(cEmail, p);
+          if (cUrl && !globalUrlMap.has(cUrl)) globalUrlMap.set(cUrl, p);
+          if (cEmail && !globalEmailMap.has(cEmail)) globalEmailMap.set(cEmail, p);
         });
 
         const toCreate = [];
         const toUpdate = [];
+        const enrolledIdsToEnsure = [];
 
         for (let i = 1; i < parsedData.length; i++) {
           const cols = parsedData[i];
@@ -905,61 +926,56 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
 
           if (!firstName && !lastName && !cleanUrl && !emailVal) continue;
 
-          // Check if already in THIS specific campaign
-          let existingInThisCampaignId = cleanUrl ? thisCampaignMap.get(cleanUrl) : null;
-          if (!existingInThisCampaignId && emailVal) existingInThisCampaignId = thisCampaignMap.get(emailVal);
-
-          // Check if exists anywhere in system (e.g. in another campaign)
-          const globalExisting = (cleanUrl ? globalAnywhereMap.get(cleanUrl) : null) || (emailVal ? globalAnywhereMap.get(emailVal) : null);
-          const existingInThisCampaign = existingInThisCampaignId ? existingById.get(existingInThisCampaignId) : null;
+          // Check if prospect exists anywhere in the master prospects table
+          const existingProspect = (cleanUrl ? globalUrlMap.get(cleanUrl) : null) || (emailVal ? globalEmailMap.get(emailVal) : null);
+          const isAlreadyInThisCampaign = existingProspect ? enrolledInCampaignSet.has(existingProspect.id) : false;
 
           // Duplicate handling:
-          if ((importMode === 'skip_duplicates' || importMode === 'create') && existingInThisCampaignId) continue;
-          if (importMode === 'update' && !existingInThisCampaignId) continue;
-
-          const referenceExisting = existingInThisCampaign || globalExisting;
+          if ((importMode === 'skip_duplicates' || importMode === 'create') && isAlreadyInThisCampaign) continue;
+          if (importMode === 'update' && !isAlreadyInThisCampaign) continue;
 
           if (!firstName && !lastName) {
             firstName = cleanUrl
               ? (cleanUrl.split('/in/')[1] || '').split('/')[0].replace(/[-_]/g, ' ') || 'Prospect'
-              : (referenceExisting?.first_name || 'Prospect');
+              : (existingProspect?.first_name || 'Prospect');
           }
 
           const mergedCustomVars = {
-            ...(referenceExisting?.custom_variables || {}),
+            ...(existingProspect?.custom_variables || {}),
             ...customVars,
             user_email: userEmail,
           };
           if (effectiveOrgId) mergedCustomVars.organization_id = effectiveOrgId;
 
           const prospectRow = {
-            first_name: firstName || referenceExisting?.first_name || 'Lead',
-            last_name: lastName || referenceExisting?.last_name || '',
-            name: rowData.name || `${firstName} ${lastName}`.trim() || referenceExisting?.name || 'Prospect',
-            company: rowData.company || referenceExisting?.company || '',
-            job_title: rowData.job_title || rowData.headline || referenceExisting?.job_title || '',
-            email: emailVal || referenceExisting?.email || '',
-            linkedin_url: cleanUrl || rawUrl || referenceExisting?.linkedin_url || '',
-            location: rowData.location || referenceExisting?.location || '',
-            organization_id: effectiveOrgId || referenceExisting?.organization_id || null,
-            user_email: userEmail || referenceExisting?.user_email || null,
+            first_name: firstName || existingProspect?.first_name || 'Lead',
+            last_name: lastName || existingProspect?.last_name || '',
+            name: rowData.name || `${firstName} ${lastName}`.trim() || existingProspect?.name || 'Prospect',
+            company: rowData.company || existingProspect?.company || '',
+            job_title: rowData.job_title || rowData.headline || existingProspect?.job_title || '',
+            email: emailVal || existingProspect?.email || '',
+            linkedin_url: cleanUrl || rawUrl || existingProspect?.linkedin_url || '',
+            location: rowData.location || existingProspect?.location || '',
+            organization_id: effectiveOrgId || existingProspect?.organization_id || null,
+            user_email: userEmail || existingProspect?.user_email || null,
             custom_variables: mergedCustomVars,
-            campaign_id: campaignId || null,
             list_id: listId || null,
-            // Carry over member/provider IDs & connection status if already connected elsewhere
-            member_id: referenceExisting?.member_id || null,
-            provider_id: referenceExisting?.provider_id || null,
-            connection_status: referenceExisting?.connection_status || null,
-            status: (referenceExisting?.status && referenceExisting.status !== 'Not Contacted') ? referenceExisting.status : 'Not Contacted',
+            member_id: existingProspect?.member_id || null,
+            provider_id: existingProspect?.provider_id || null,
+            connection_status: existingProspect?.connection_status || null,
+            status: (existingProspect?.status && existingProspect.status !== 'Not Contacted') ? existingProspect.status : 'Not Contacted',
             updated_at: new Date().toISOString(),
           };
 
-          if (existingInThisCampaignId) {
-            // Already in this campaign -> update this row
-            prospectRow.id = existingInThisCampaignId;
+          if (existingProspect) {
+            // Already in master prospects table -> update record & ensure enrolled in this campaign
+            prospectRow.id = existingProspect.id;
+            prospectRow.campaign_id = existingProspect.campaign_id || campaignId || null;
             toUpdate.push(prospectRow);
+            enrolledIdsToEnsure.push(existingProspect.id);
           } else {
-            // New to this campaign -> create fresh row for this campaign!
+            // Brand new prospect -> create single master record
+            prospectRow.campaign_id = campaignId || null;
             prospectRow.created_at = new Date().toISOString();
             toCreate.push(prospectRow);
           }
@@ -971,7 +987,7 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
         let updatedCount = 0;
         const importedIds = [];
 
-        // INSERT new prospects for this campaign
+        // INSERT new prospects into master table
         for (let i = 0; i < toCreate.length; i += 50) {
           const chunk = toCreate.slice(i, i + 50);
           const { data, error } = await supabaseDirect.from('prospects').insert(chunk).select('id');
@@ -980,16 +996,24 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             // Try row by row fallback
             for (const row of chunk) {
               const { data: d, error: e } = await supabaseDirect.from('prospects').insert([row]).select('id');
-              if (!e && d?.[0]) { createdCount++; importedIds.push(d[0].id); }
-              else console.error('[Import] Row insert error:', e?.message, row.linkedin_url);
+              if (!e && d?.[0]) {
+                createdCount++;
+                importedIds.push(d[0].id);
+                enrolledIdsToEnsure.push(d[0].id);
+              } else {
+                console.error('[Import] Row insert error:', e?.message, row.linkedin_url);
+              }
             }
           } else if (data) {
             createdCount += data.length;
-            data.forEach(p => importedIds.push(p.id));
+            data.forEach(p => {
+              importedIds.push(p.id);
+              enrolledIdsToEnsure.push(p.id);
+            });
           }
         }
 
-        // UPDATE prospects already in this campaign
+        // UPDATE existing prospects in master table
         for (const row of toUpdate) {
           const { id, ...fields } = row;
           const { data, error } = await supabaseDirect
@@ -1007,21 +1031,20 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
 
         console.log(`[Import] Done — created: ${createdCount}, updated: ${updatedCount}`);
 
-        // Also try to enroll in campaign_enrollments if table exists (best-effort, non-blocking)
-        if (campaignId && importedIds.length > 0) {
-          const uniqueIds = [...new Set(importedIds)];
-          supabaseDirect.from('campaign_enrollments').upsert(
-            uniqueIds.map(pid => ({
-              campaign_id: campaignId,
-              prospect_id: pid,
-              status: 'active',
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            })),
-            { onConflict: 'campaign_id,prospect_id' }
-          ).then(({ error }) => {
-            if (error) console.warn('[Import] campaign_enrollments skipped (table may not exist):', error.message);
-          });
+        // Guarantee enrollment in campaign_enrollments table
+        if (campaignId && enrolledIdsToEnsure.length > 0) {
+          const uniqueIds = [...new Set(enrolledIdsToEnsure)];
+          const enrollRows = uniqueIds.map(pid => ({
+            campaign_id: campaignId,
+            prospect_id: pid,
+            status: 'active',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }));
+          const { error: ceErr } = await supabaseDirect
+            .from('campaign_enrollments')
+            .upsert(enrollRows, { onConflict: 'campaign_id,prospect_id' });
+          if (ceErr) console.warn('[Import] campaign_enrollments upsert warning:', ceErr.message);
         }
 
         resolve({
@@ -1790,7 +1813,20 @@ export const directRunFlow = async () => {
 
     let prospects = [];
     try {
-      const { data } = await supabaseDirect.from('prospects').select('*').eq('campaign_id', campaign.id);
+      const { data: enrollments } = await supabaseDirect
+        .from('campaign_enrollments')
+        .select('prospect_id')
+        .eq('campaign_id', campaign.id);
+
+      const enrolledIds = (enrollments || []).map(e => e.prospect_id).filter(Boolean);
+
+      let pQuery = supabaseDirect.from('prospects').select('*');
+      if (enrolledIds.length > 0) {
+        pQuery = pQuery.or(`campaign_id.eq.${campaign.id},id.in.(${enrolledIds.join(',')})`);
+      } else {
+        pQuery = pQuery.eq('campaign_id', campaign.id);
+      }
+      const { data } = await pQuery;
       prospects = data || [];
     } catch (err) {
       console.error(`Error fetching prospects for campaign ${campaign.id}:`, err);
