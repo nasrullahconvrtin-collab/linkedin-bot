@@ -18,7 +18,8 @@ export function AuthProvider({ children }) {
         if (userAccStr) {
           const userAcc = JSON.parse(userAccStr);
           setUser({ id: userAcc.id || userAcc.email, email: userAcc.email });
-          const uniqueOrgId = userAcc.organization_id || `org_${userAcc.email.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+          const isValidUuid = (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+          const uniqueOrgId = isValidUuid(userAcc.organization_id) ? userAcc.organization_id : '00000000-0000-0000-0000-000000000002';
           setOrganization({ id: uniqueOrgId, name: userAcc.workspace_name || userAcc.organizations?.name || 'My Workspace' });
           setRole(userAcc.role || 'member');
         } else if (session && session.user) {
@@ -26,7 +27,7 @@ export function AuthProvider({ children }) {
           await loadOrganization(session.user.id);
         } else if (localStorage.getItem('lf_auth') === '1') {
           const isSuper = localStorage.getItem('lf_is_superadmin') === '1';
-          const orgId = isSuper ? 'org_superadmin_master' : `org_user_${Date.now()}`;
+          const orgId = isSuper ? '00000000-0000-0000-0000-000000000001' : '00000000-0000-0000-0000-000000000002';
           const email = isSuper ? 'nasrullah.freelancer@gmail.com' : 'user@linkedflow.com';
           const userObj = {
             id: isSuper ? 'usr_superadmin' : `usr_${Date.now()}`,

@@ -125,12 +125,35 @@ export const isSuperAdminUser = () => {
   return false;
 };
 
+const KNOWN_USER_ORGS = {
+  'nasrullah.muhammad410@gmail.com': '9aa9913b-5d18-48ce-ad3c-ec1b3a9c844f',
+  'nasrullah.freelancer@gmail.com': '00000000-0000-0000-0000-000000000001',
+  'nasrullah.freelancer@gmail.con': '00000000-0000-0000-0000-000000000001',
+  'superuser@gmail.com': '00000000-0000-0000-0000-000000000001',
+  'maryamansar.freelancer@gmail.com': '2efbcfe1-3f3e-4a8d-876e-def4c1c97aab',
+  'nasrullah.moreleadsco@gmail.com': '350f58b9-8a2f-4f81-af1f-669831799e19',
+  'sana.moreleadsco@gmail.com': '6bdf2297-00cf-4244-a7bf-5a75f1838385',
+  'superddd@gmail.com': '13155801-65c9-49af-91bc-ab7f3c4462c4',
+};
+
 export const getActiveOrganizationId = () => {
   try {
     const userAcc = getActiveUserAccount();
     if (userAcc) {
-      if (userAcc.organization_id) return userAcc.organization_id;
-      if (userAcc.email) return `org_${userAcc.email.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+      if (isValidUuid(userAcc.organization_id)) return userAcc.organization_id;
+
+      const email = (userAcc.email || '').toLowerCase().trim();
+      if (KNOWN_USER_ORGS[email]) {
+        userAcc.organization_id = KNOWN_USER_ORGS[email];
+        try { localStorage.setItem('lf_user_account', JSON.stringify(userAcc)); } catch (e) {}
+        return userAcc.organization_id;
+      }
+
+      if (isSuperAdminUser()) {
+        return '00000000-0000-0000-0000-000000000001';
+      }
+
+      return '00000000-0000-0000-0000-000000000002';
     }
   } catch (e) {}
   return null;
@@ -406,13 +429,13 @@ export const directGetCampaigns = async () => {
 
   try {
     let campaignQuery = supabaseDirect.from('campaigns').select('*').order('created_at', { ascending: false });
-    if (orgId) campaignQuery = campaignQuery.eq('organization_id', orgId);
+    if (isValidUuid(orgId)) campaignQuery = campaignQuery.eq('organization_id', orgId);
     const { data: rawCampaigns, error } = await campaignQuery;
     if (!error && rawCampaigns) {
       const campaigns = rawCampaigns;
 
       let prospectQuery = supabaseDirect.from('prospects').select('id, campaign_id, status, connection_status, connection_sent_date, message_sent_date, custom_variables');
-      if (orgId) prospectQuery = prospectQuery.eq('organization_id', orgId);
+      if (isValidUuid(orgId)) prospectQuery = prospectQuery.eq('organization_id', orgId);
       const { data: prospects } = await prospectQuery;
       const prospectMap = new Map();
       (prospects || []).forEach(p => {
@@ -532,7 +555,7 @@ export const directGetCampaign = async (id) => {
   try {
     const { data: campaign, error } = await supabaseDirect.from('campaigns').select('*').eq('id', id).single();
     if (!error && campaign) {
-      if (orgId && campaign.organization_id && campaign.organization_id !== orgId) {
+      if (!isSuper && isValidUuid(orgId) && isValidUuid(campaign.organization_id) && campaign.organization_id !== orgId) {
         console.warn(`[Data Isolation] Access denied to campaign ${id} for organization ${orgId}`);
         return { campaign: null, total: 0 };
       }

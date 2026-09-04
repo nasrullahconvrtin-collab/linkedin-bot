@@ -57,7 +57,7 @@ function autoGuessMapping(header) {
   return 'custom_var';
 }
 
-export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete, prospectLists = [], campaigns = [], defaultListId = '', initialFile = null }) {
+export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete, prospectLists = [], campaigns = [], defaultListId = '', targetCampaignId: initialCampaignId = '', initialFile = null }) {
   const [step, setStep] = useState(1); // 1: Upload, 2: Map Columns, 3: Import Settings
   const [file, setFile] = useState(null);
   const [csvHeaders, setCsvHeaders] = useState([]);
@@ -66,7 +66,7 @@ export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete
   const [columnMapping, setColumnMapping] = useState({});
   const [importMode, setImportMode] = useState('create_or_update'); // create_or_update | skip_duplicates | import_all
   const [targetListId, setTargetListId] = useState(defaultListId || '');
-  const [targetCampaignId, setTargetCampaignId] = useState('');
+  const [targetCampaignId, setTargetCampaignId] = useState(initialCampaignId || '');
   const [loading, setLoading] = useState(false);
 
   // Parse CSV text cleanly handling quotes and newlines
@@ -140,12 +140,15 @@ export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete
   }, []);
 
   React.useEffect(() => {
-    if (isOpen && initialFile) {
-      processFile(initialFile);
-    } else if (isOpen && !file) {
-      setStep(1);
+    if (isOpen) {
+      if (initialCampaignId) setTargetCampaignId(initialCampaignId);
+      if (initialFile) {
+        processFile(initialFile);
+      } else if (!file) {
+        setStep(1);
+      }
     }
-  }, [isOpen, initialFile, processFile]);
+  }, [isOpen, initialFile, initialCampaignId, processFile]);
 
   const handleFileSelect = (e) => {
     const selectedFile = e.target.files?.[0];
