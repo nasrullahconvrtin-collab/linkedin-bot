@@ -21,6 +21,9 @@ import {
   directGetProspectListMembers,
   directGetProspectLists,
   directGetProspects,
+  directGetStats,
+  directGetCampaignStats,
+  directGetActivityLog,
   directGetUnipileAccountInfo,
   directLaunchCampaign,
   directRunConnections,
@@ -135,10 +138,10 @@ export const createProspect    = (data)     => directCreateProspect(data);
 export const getProspect       = (id)       => directGetProspect(id);
 export const updateProspect    = (id, data) => directUpdateProspect(id, data);
 export const deleteProspect    = (id)       => directDeleteProspect(id);
-export const getNeedsPersonalization = (params) => Promise.resolve({ prospects: [] });
-export const getInmailReady = (params) => Promise.resolve({ prospects: [] });
-export const getMessageReady = (params) => Promise.resolve({ prospects: [] });
-export const getReadyForMessage = (params) => Promise.resolve({ prospects: [] });
+export const getNeedsPersonalization = (params) => directGetProspects({ ...params, status: 'Needs Personalization' });
+export const getInmailReady = (params) => directGetProspects({ ...params, status: 'inmail_available' });
+export const getMessageReady = (params) => directGetProspects({ ...params, status: 'message_ready' });
+export const getReadyForMessage = (params) => directGetProspects({ ...params, status: 'Connection Accepted' });
 
 export const bulkImportProspects = (file, columnMapping = null, mode = 'create_or_update', listId = null, campaignId = null) => {
   return directBulkImportProspects(file, columnMapping, mode, listId, campaignId);
@@ -148,7 +151,7 @@ export { downloadSampleCSVTemplate } from './directServices';
 
 
 // ── Activity Log ─────────────────────────────────────────────
-export const getActivityLog    = (params)   => Promise.resolve({ logs: [] });
+export const getActivityLog    = (params)   => directGetActivityLog(params);
 export const logActivity       = (data)     => Promise.resolve({ success: true });
 
 // ── Profiles (With Direct Fallback for Vercel Standalone) ──
@@ -165,8 +168,8 @@ export const getExtensionPendingJobs = (profile_key, limit = 5) =>
   Promise.resolve({ jobs: [] });
 
 // ── Stats ────────────────────────────────────────────────────
-export const getStats          = ()         => Promise.resolve({ total_campaigns: 0, active_campaigns: 0, total_prospects: 0, total_sent: 0 });
-export const getCampaignStats  = (id)       => Promise.resolve({ sent: 0, accepted: 0, replied: 0 });
+export const getStats          = ()         => directGetStats();
+export const getCampaignStats  = (id)       => directGetCampaignStats(id);
 
 // ── Jobs ─────────────────────────────────────────────────────
 export const getJobs           = (params)   => api.get('/jobs', { params }).catch(() => ({ jobs: [] }));
@@ -187,32 +190,117 @@ export const runFlow           = () => api.post('/scheduler/run-flow').catch(() 
 
 export const getSchedules      = ()         => api.get('/schedules').catch(() => []);
 export const updateSchedules   = (rows)     => api.put('/schedules', rows).catch(() => rows);
-export const getMessages       = (params)   => api.get('/messages', { params }).catch(() => ({ messages: [], templates: [] }));
-export const getMessage        = (id)       => api.get(`/messages/${id}`).catch(() => null);
-export const saveMessage       = (data)     => api.post('/messages', data).catch(() => data);
-export const updateMessageTemplate = (id, data) => api.put(`/messages/${id}`, data).catch(() => data);
-export const duplicateMessage  = (id)       => api.post(`/messages/${id}/duplicate`).catch(() => ({ success: true }));
-export const archiveMessage    = (id)       => api.post(`/messages/${id}/archive`).catch(() => ({ success: true }));
-export const deleteMessage     = (id)       => api.delete(`/messages/${id}`).catch(() => ({ success: true }));
+
+const getStoredTemplates = () => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const stored = localStorage.getItem('lf_message_templates');
+      let customTemplates = stored ? JSON.parse(stored) : [];
+      if (!Array.isArray(customTemplates) || customTemplates.length === 0) {
+        customTemplates = [
+          { id: 'tpl_1', name: 'Standard Connection Request', type: 'connection_request', body: 'Hi {{first_name}}, I noticed your work at {{company}} and would love to connect.', category: 'Outreach', tags: ['connect'] },
+          { id: 'tpl_2', name: 'Post-Connection Welcome', type: 'first_message', body: 'Hi {{first_name}}, thanks for connecting! Looking forward to following your journey at {{company}}.', category: 'Welcome', tags: ['first_message'] },
+          { id: 'tpl_3', name: 'Value Proposition Follow-Up', type: 'follow_up', body: 'Hi {{first_name}}, thought this insight might be valuable for {{company}}. Would you be open to a quick chat this week?', category: 'Follow-up', tags: ['follow_up'] },
+        ];
+        localStorage.setItem('lf_message_templates', JSON.stringify(customTemplates));
+      }
+      return customTemplates;
+    }
+  } catch (e) {}
+  return [];
+};
+
+export const getMessages = (params) =>
+  api.get('/messages', { params }).catch(() => {
+    const list = getStoredTemplates();
+    return { messages: list, templates: list };
+  });
+
+export const getMessage = (id) =>
+  api.get(`/messages/${id}`).catch(() => {
+    const list = getStoredTemplates();
+    return list.find(t => t.id === id) || null;
+  });
+
+export const saveMessage = (data) =>
+  api.post('/messages', data).catch(() => {
+    try {
+      const list = getStoredTemplates();
+      const item = {
+        id: data.id || `tpl_${Date.now()}`,
+        name: data.name || 'Untitled Template',
+        type: data.type || data.message_type || 'first_message',
+        body: data.body || data.text || '',
+        category: data.category || 'Custom',
+        tags: data.tags || [],
+        created_at: data.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      const idx = list.findIndex(t => t.id === item.id);
+      if (idx >= 0) list[idx] = item;
+      else list.push(item);
+      localStorage.setItem('lf_message_templates', JSON.stringify(list));
+      return item;
+    } catch (e) {
+      return data;
+    }
+  });
+
+export const updateMessageTemplate = (id, data) => saveMessage({ ...data, id });
+
+export const duplicateMessage = (id) => {
+  try {
+    const list = getStoredTemplates();
+    const item = list.find(t => t.id === id);
+    if (item) {
+      const copy = { ...item, id: `tpl_${Date.now()}`, name: `${item.name} (Copy)` };
+      list.push(copy);
+      localStorage.setItem('lf_message_templates', JSON.stringify(list));
+      return Promise.resolve({ success: true, template: copy });
+    }
+  } catch (e) {}
+  return Promise.resolve({ success: true });
+};
+
+export const archiveMessage = (id) => {
+  try {
+    const list = getStoredTemplates();
+    const item = list.find(t => t.id === id);
+    if (item) {
+      item.archived = true;
+      localStorage.setItem('lf_message_templates', JSON.stringify(list));
+    }
+  } catch (e) {}
+  return Promise.resolve({ success: true });
+};
+
+export const deleteMessage = (id) => {
+  try {
+    const list = getStoredTemplates();
+    const filtered = list.filter(t => t.id !== id);
+    localStorage.setItem('lf_message_templates', JSON.stringify(filtered));
+  } catch (e) {}
+  return Promise.resolve({ success: true });
+};
 
 // ── HubSpot ──────────────────────────────────────────────────
 export const syncHubSpot       = (id, data) => api.post(`/hubspot/sync/${id}`, data).catch(() => ({ success: true }));
 
 // ── Networking & Unipile Auth (Direct Calls) ────────────────
-export const getNetworkingConnections = async (params) => {
-  return directGetNetworkingConnections();
+export const getNetworkingConnections = async (accountId = null) => {
+  return directGetNetworkingConnections(accountId);
 };
 
-export const getNetworkingInvitations = async (params) => {
-  return directGetNetworkingInvitations();
+export const getNetworkingInvitations = async (accountId = null) => {
+  return directGetNetworkingInvitations(accountId);
 };
 
-export const cancelNetworkingInvitation = async (invitation_id) => {
-  return directCancelNetworkingInvitation(invitation_id);
+export const cancelNetworkingInvitation = async (invitation_id, accountId = null) => {
+  return directCancelNetworkingInvitation(invitation_id, accountId);
 };
 
-export const withdrawOldInvitations = async (max_age_days = 90) => {
-  return directWithdrawOldInvitations(max_age_days);
+export const withdrawOldInvitations = async (max_age_days = 90, accountId = null) => {
+  return directWithdrawOldInvitations(max_age_days, accountId);
 };
 
 export const getUnipileAccountInfo = async (account_id) => {

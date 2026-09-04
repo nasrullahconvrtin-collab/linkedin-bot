@@ -174,31 +174,65 @@ export const directGetProfiles = async () => {
   const orgId = getActiveOrganizationId();
   const userAcc = getActiveUserAccount();
   const userEmail = userAcc?.email ? userAcc.email.toLowerCase() : null;
+  const isSuper = isSuperAdminUser();
 
   try {
     const { data, error } = await supabaseDirect.from('profiles').select('*');
     if (!error && data && data.length > 0) {
       // Only real LinkedIn profiles with unipile_account_id
-      const realProfiles = data.filter(p => {
+      let realProfiles = data.filter(p => {
         if (p.profile_key?.startsWith('user_')) return false;
-        if (!p.unipile_account_id) return false;
+        if (!p.unipile_account_id || p.unipile_account_id.includes('@')) return false;
+
+        // Super admins have global access to all connected profiles
+        if (isSuper) return true;
 
         const pOrgId = p.organization_id || p.settings?.organization_id || p.settings?.orgId;
         const pEmail = (p.user_email || p.settings?.user_email || p.settings?.email || '').toLowerCase();
 
-        // STRICTLY match user's orgId or userEmail
+        // Match user's orgId or userEmail
         if (orgId && pOrgId && pOrgId === orgId) return true;
         if (userEmail && pEmail && pEmail === userEmail) return true;
         return false;
       });
 
+      // If user has no directly matched profile, check active profile key or selection in localStorage
+      if (realProfiles.length === 0) {
+        const storedAccId = typeof window !== 'undefined' ? (localStorage.getItem('lf_selected_account_id') || localStorage.getItem('lf_active_account_id')) : null;
+        if (storedAccId) {
+          const match = data.find(p => p.unipile_account_id === storedAccId && !p.profile_key?.startsWith('user_') && !p.unipile_account_id.includes('@'));
+          if (match) realProfiles.push(match);
+        }
+      }
+
+      // Standalone/Single-tenant fallback: if still empty, use any valid real profile from Supabase
+      if (realProfiles.length === 0) {
+        const validProfiles = data.filter(p => !p.profile_key?.startsWith('user_') && p.unipile_account_id && !p.unipile_account_id.includes('@'));
+        if (validProfiles.length > 0) {
+          realProfiles = validProfiles;
+        }
+      }
+
+      // Prioritize selected account if one is stored
+      const preferredAccId = typeof window !== 'undefined' ? (localStorage.getItem('lf_selected_account_id') || localStorage.getItem('lf_active_account_id')) : null;
+      if (preferredAccId) {
+        realProfiles.sort((a, b) => {
+          if (a.unipile_account_id === preferredAccId) return -1;
+          if (b.unipile_account_id === preferredAccId) return 1;
+          return 0;
+        });
+      }
+
       return realProfiles.map(p => ({
+        id: p.id,
         profile_key: p.profile_key || p.id || `prof_${p.id}`,
         display_name: p.display_name || 'LinkedIn Profile',
         unipile_account_id: p.unipile_account_id || null,
         session_active: p.session_active ?? p.settings?.session_active ?? true,
         enabled: p.enabled ?? p.settings?.enabled ?? true,
         daily_sent: p.daily_sent || p.settings?.daily_sent || 0,
+        organization_id: p.organization_id,
+        user_email: p.user_email,
       }));
     }
   } catch (e) {
@@ -363,9 +397,12 @@ export const directGetNetworkingConnections = async (overrideAccountId = null) =
   };
 };
 
-export const directGetNetworkingInvitations = async () => {
-  const userProfiles = await directGetProfiles();
-  const targetAccId = userProfiles[0]?.unipile_account_id;
+export const directGetNetworkingInvitations = async (overrideAccountId = null) => {
+  let targetAccId = overrideAccountId;
+  if (!targetAccId) {
+    const userProfiles = await directGetProfiles();
+    targetAccId = userProfiles[0]?.unipile_account_id;
+  }
   if (!targetAccId) {
     return { success: true, invitations: [], total: 0 };
   }
@@ -400,9 +437,12 @@ export const directGetNetworkingInvitations = async () => {
   };
 };
 
-export const directCancelNetworkingInvitation = async (invitationId) => {
-  const userProfiles = await directGetProfiles();
-  const targetAccId = userProfiles[0]?.unipile_account_id;
+export const directCancelNetworkingInvitation = async (invitationId, overrideAccountId = null) => {
+  let targetAccId = overrideAccountId;
+  if (!targetAccId) {
+    const userProfiles = await directGetProfiles();
+    targetAccId = userProfiles[0]?.unipile_account_id;
+  }
   if (!targetAccId) return { success: false };
 
   const { ok } = await unipileFetch(`/users/invite/sent/${invitationId}?account_id=${targetAccId}`, {
@@ -411,8 +451,8 @@ export const directCancelNetworkingInvitation = async (invitationId) => {
   return { success: ok };
 };
 
-export const directWithdrawOldInvitations = async (maxAgeDays = 90) => {
-  const { invitations } = await directGetNetworkingInvitations();
+export const directWithdrawOldInvitations = async (maxAgeDays = 90, overrideAccountId = null) => {
+  const { invitations } = await directGetNetworkingInvitations(overrideAccountId);
   const cutoffMs = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
   let count = 0;
   
@@ -423,7 +463,7 @@ export const directWithdrawOldInvitations = async (maxAgeDays = 90) => {
     if (invMs > 0 && invMs <= cutoffMs) {
       const invId = inv.id || inv.invitation_id;
       if (invId) {
-        const { success } = await directCancelNetworkingInvitation(invId);
+        const { success } = await directCancelNetworkingInvitation(invId, overrideAccountId);
         if (success) count += 1;
       }
     }
@@ -1334,21 +1374,46 @@ export const getAccountForProspect = async (prospect) => {
   const pEmail = (prospect?.user_email || prospect?.custom_variables?.user_email || '').toLowerCase();
 
   try {
-    const { data: allProfiles } = await supabaseDirect.from('profiles').select('id, user_email, organization_id, unipile_account_id');
+    const { data: allProfiles } = await supabaseDirect.from('profiles').select('id, profile_key, user_email, organization_id, unipile_account_id');
     if (allProfiles && allProfiles.length > 0) {
-      const match = allProfiles.find(p => {
-        if (!p.unipile_account_id) return false;
+      // Must only match REAL profiles (not synthetic 'user_' records)
+      const realProfiles = allProfiles.filter(p => !p.profile_key?.startsWith('user_') && p.unipile_account_id && !p.unipile_account_id.includes('@'));
+
+      // 1. If prospect belongs to a campaign, prioritize the campaign's assigned profile
+      if (prospect.campaign_id) {
+        try {
+          const { data: camp } = await supabaseDirect.from('campaigns').select('profile_key').eq('id', prospect.campaign_id).maybeSingle();
+          if (camp?.profile_key) {
+            const campProf = realProfiles.find(p => p.profile_key === camp.profile_key);
+            if (campProf?.unipile_account_id) return campProf.unipile_account_id;
+          }
+        } catch (e) {}
+      }
+
+      // 2. If prospect has assigned_account
+      if (prospect.assigned_account) {
+        const assignedProf = realProfiles.find(p => p.profile_key === prospect.assigned_account || p.id === prospect.assigned_account);
+        if (assignedProf?.unipile_account_id) return assignedProf.unipile_account_id;
+      }
+
+      // 3. Match by orgId or userEmail
+      const match = realProfiles.find(p => {
         if (pOrgId && p.organization_id === pOrgId) return true;
         if (pEmail && p.user_email && p.user_email.toLowerCase() === pEmail) return true;
         return false;
       });
       if (match?.unipile_account_id) return match.unipile_account_id;
+
+      // 4. Fallback if single real profile in organization
+      const orgProfiles = realProfiles.filter(p => pOrgId && p.organization_id === pOrgId);
+      if (orgProfiles.length === 1 && orgProfiles[0].unipile_account_id) {
+        return orgProfiles[0].unipile_account_id;
+      }
     }
   } catch (e) {
     console.warn('getAccountForProspect error:', e);
   }
 
-  // STRICT ISOLATION: Never default to userProfiles[0]. If no matching profile belongs to this prospect, return null.
   return null;
 };
 
@@ -1499,10 +1564,13 @@ export const directSendUnipileChatMessage = async (prospect, text = '') => {
   return { success: false, error: data?.detail || 'Unipile chat message failed' };
 };
 
-export const directSendUnipileChatMessageWithAttachments = async (chatId, text = '', files = []) => {
+export const directSendUnipileChatMessageWithAttachments = async (chatId, text = '', files = [], overrideAccountId = null) => {
   try {
-    const userProfiles = await directGetProfiles();
-    const accountId = userProfiles?.[0]?.unipile_account_id;
+    let accountId = overrideAccountId;
+    if (!accountId) {
+      const userProfiles = await directGetProfiles();
+      accountId = userProfiles?.[0]?.unipile_account_id;
+    }
     if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
 
     if (!files || files.length === 0) {
@@ -1530,10 +1598,13 @@ export const directSendUnipileChatMessageWithAttachments = async (chatId, text =
   }
 };
 
-export const directSendUnipileInMail = async (prospect, subject = '', text = '') => {
+export const directSendUnipileInMail = async (prospect, subject = '', text = '', overrideAccountId = null) => {
   const recipientId = getLinkedinId(prospect);
-  const userProfiles = await directGetProfiles();
-  const accountId = userProfiles?.[0]?.unipile_account_id;
+  let accountId = overrideAccountId;
+  if (!accountId) {
+    const userProfiles = await directGetProfiles();
+    accountId = userProfiles?.[0]?.unipile_account_id;
+  }
   if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
 
   const payload = {
@@ -1550,9 +1621,12 @@ export const directSendUnipileInMail = async (prospect, subject = '', text = '')
   return { success: ok, data };
 };
 
-export const directGetUnipileChats = async (limit = 50) => {
-  const userProfiles = await directGetProfiles();
-  const accountId = userProfiles?.[0]?.unipile_account_id;
+export const directGetUnipileChats = async (limit = 50, overrideAccountId = null) => {
+  let accountId = overrideAccountId;
+  if (!accountId) {
+    const userProfiles = await directGetProfiles();
+    accountId = userProfiles?.[0]?.unipile_account_id;
+  }
   if (!accountId) {
     return { success: false, chats: [], error: 'NO_CONNECTED_ACCOUNT' };
   }
@@ -1563,10 +1637,13 @@ export const directGetUnipileChats = async (limit = 50) => {
   return { success: false, chats: [] };
 };
 
-export const directGetChatMessages = async (chatId, limit = 50) => {
+export const directGetChatMessages = async (chatId, limit = 50, overrideAccountId = null) => {
   if (!chatId) return { success: false, messages: [] };
-  const userProfiles = await directGetProfiles();
-  const accountId = userProfiles?.[0]?.unipile_account_id;
+  let accountId = overrideAccountId;
+  if (!accountId) {
+    const userProfiles = await directGetProfiles();
+    accountId = userProfiles?.[0]?.unipile_account_id;
+  }
   if (!accountId) return { success: false, messages: [], error: 'NO_CONNECTED_ACCOUNT' };
   const { ok, data } = await unipileFetch(`/chats/${encodeURIComponent(chatId)}/messages?account_id=${accountId}&limit=${limit}`);
   if (ok && data) {
@@ -1575,11 +1652,14 @@ export const directGetChatMessages = async (chatId, limit = 50) => {
   return { success: false, messages: [] };
 };
 
-export const directGetUnipileUserProfile = async (identifier) => {
+export const directGetUnipileUserProfile = async (identifier, overrideAccountId = null) => {
   if (!identifier) return { success: false, profile: null };
   const cleanId = String(identifier).trim().replace(/^https?:\/\/(www\.)?linkedin\.com\/in\//i, '').replace(/\/$/, '');
-  const userProfiles = await directGetProfiles();
-  const accountId = userProfiles?.[0]?.unipile_account_id;
+  let accountId = overrideAccountId;
+  if (!accountId) {
+    const userProfiles = await directGetProfiles();
+    accountId = userProfiles?.[0]?.unipile_account_id;
+  }
   if (!accountId) return { success: false, profile: null };
   const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(cleanId)}?account_id=${accountId}`);
   if (ok && data) {
@@ -2289,6 +2369,7 @@ export const directRunFlow = async () => {
         prospect.status = 'Completed';
         try {
           await supabaseDirect.from('prospects').update({ status: 'Completed' }).eq('id', prospect.id);
+          await supabaseDirect.from('campaign_enrollments').update({ status: 'Completed', updated_at: new Date().toISOString() }).eq('prospect_id', prospect.id);
         } catch (e) {
           console.warn(e);
         }
@@ -2299,6 +2380,7 @@ export const directRunFlow = async () => {
         prospect.status = 'Failed';
         try {
           await supabaseDirect.from('prospects').update({ status: 'Failed' }).eq('id', prospect.id);
+          await supabaseDirect.from('campaign_enrollments').update({ status: 'Failed', updated_at: new Date().toISOString() }).eq('prospect_id', prospect.id);
         } catch (e) {
           console.warn(e);
         }
@@ -2648,5 +2730,163 @@ export const directStartUnipileChat = async (prospect, initialText = '') => {
     }
   } catch (err) {
     return { success: false, error: err.message };
+  }
+};
+
+export const directGetStats = async () => {
+  const orgId = getActiveOrganizationId();
+  try {
+    let campQuery = supabaseDirect.from('campaigns').select('id, status');
+    let prospQuery = supabaseDirect.from('prospects').select('id, status, connection_status, accepted_at, connection_sent_date');
+    if (orgId) {
+      campQuery = campQuery.eq('organization_id', orgId);
+      prospQuery = prospQuery.eq('organization_id', orgId);
+    }
+
+    const [{ data: campaigns }, { data: prospects }] = await Promise.all([campQuery, prospQuery]);
+    const camps = campaigns || [];
+    const prosps = prospects || [];
+
+    const total_campaigns = camps.length;
+    const active_campaigns = camps.filter(c => c.status === 'running').length;
+    const total_prospects = prosps.length;
+
+    let total_sent = 0;
+    let ready_for_message = 0;
+    let total_replied = 0;
+    let total_connected = 0;
+    let pending_jobs = 0;
+    let failed_jobs = 0;
+
+    prosps.forEach(p => {
+      const s = (p.status || '').toLowerCase();
+      const cs = (p.connection_status || '').toLowerCase();
+
+      const isConnected = s === 'connection accepted' || cs === 'connected' || Boolean(p.accepted_at);
+      const isSent = isConnected || s.includes('sent') || cs.includes('sent') || s === 'completed' || Boolean(p.connection_sent_date);
+
+      if (isSent) total_sent++;
+      if (isConnected) {
+        total_connected++;
+        ready_for_message++;
+      }
+      if (s === 'replied') total_replied++;
+      if (s === 'failed') failed_jobs++;
+    });
+
+    return {
+      total_campaigns,
+      active_campaigns,
+      total_prospects,
+      total_sent,
+      ready_for_message,
+      total_replied,
+      total_connected,
+      pending_jobs,
+      failed_jobs,
+    };
+  } catch (err) {
+    console.warn('directGetStats error:', err);
+    return {
+      total_campaigns: 0,
+      active_campaigns: 0,
+      total_prospects: 0,
+      total_sent: 0,
+      ready_for_message: 0,
+      total_replied: 0,
+      total_connected: 0,
+      pending_jobs: 0,
+      failed_jobs: 0,
+    };
+  }
+};
+
+export const directGetCampaignStats = async (campaignId) => {
+  if (!campaignId) return { sent: 0, accepted: 0, replied: 0 };
+  try {
+    const { data: prosps } = await supabaseDirect.from('prospects')
+      .select('status, connection_status, accepted_at, connection_sent_date')
+      .eq('campaign_id', campaignId);
+
+    let sent = 0;
+    let accepted = 0;
+    let replied = 0;
+
+    (prosps || []).forEach(p => {
+      const s = (p.status || '').toLowerCase();
+      const cs = (p.connection_status || '').toLowerCase();
+
+      const isConnected = s === 'connection accepted' || cs === 'connected' || Boolean(p.accepted_at);
+      const isSent = isConnected || s.includes('sent') || cs.includes('sent') || s === 'completed' || Boolean(p.connection_sent_date);
+
+      if (isSent) sent++;
+      if (isConnected) accepted++;
+      if (s === 'replied') replied++;
+    });
+
+    return { sent, accepted, replied };
+  } catch (err) {
+    console.warn('directGetCampaignStats error:', err);
+    return { sent: 0, accepted: 0, replied: 0 };
+  }
+};
+
+export const directGetActivityLog = async ({ limit = 20 } = {}) => {
+  const orgId = getActiveOrganizationId();
+  try {
+    let pQuery = supabaseDirect.from('prospects')
+      .select('id, name, first_name, last_name, linkedin_url, company, status, connection_status, accepted_at, message_sent_date, connection_sent_date, custom_variables, updated_at, created_at');
+
+    if (orgId) {
+      pQuery = pQuery.eq('organization_id', orgId);
+    }
+
+    const { data: prospects } = await pQuery;
+    if (!prospects || prospects.length === 0) return [];
+
+    const entries = [];
+
+    prospects.forEach(p => {
+      const pName = p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Prospect';
+      const cv = p.custom_variables || {};
+      const history = Array.isArray(cv.history) ? cv.history : [];
+
+      history.forEach((h, idx) => {
+        let action = 'send_connection';
+        if (h.node_type === 'send_invitation') action = 'send_connection';
+        else if (h.node_type?.includes('accept')) action = 'check_acceptances';
+        else if (h.node_type === 'send_message') action = 'send_message';
+        else if (h.node_type?.includes('reply')) action = 'check_replies';
+
+        entries.push({
+          id: `${p.id}-h-${idx}`,
+          action,
+          prospect_name: pName,
+          details: h.node_label || h.reply_text || h.message || h.error || h.node_type || 'Action executed',
+          timestamp: h.executed_at || h.timestamp || p.created_at,
+          status: h.status || 'success',
+        });
+      });
+
+      if (p.status === 'Connection Accepted' || p.connection_status === 'connected' || p.accepted_at) {
+        const hasAccept = history.some(h => (h.node_type || '').includes('accept'));
+        if (!hasAccept) {
+          entries.push({
+            id: `${p.id}-acc`,
+            action: 'check_acceptances',
+            prospect_name: pName,
+            details: 'Connected on LinkedIn',
+            timestamp: p.accepted_at || p.updated_at || p.created_at,
+            status: 'success',
+          });
+        }
+      }
+    });
+
+    entries.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+    return entries.slice(0, limit);
+  } catch (err) {
+    console.warn('directGetActivityLog error:', err);
+    return [];
   }
 };

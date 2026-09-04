@@ -139,8 +139,9 @@ export default function Inbox() {
       setProspectsMap(pMap);
 
       // Fetch Message Templates
-      const { data: tData } = await supabaseDirect.from('message_templates').select('*');
-      setTemplates(tData || []);
+      const { getMessages } = await import('../services/api');
+      const tRes = await getMessages().catch(() => ({ messages: [] }));
+      setTemplates(tRes.messages || tRes.templates || []);
 
       // Fetch Live Chats from Unipile
       const chatRes = await directGetUnipileChats(50);
@@ -320,7 +321,7 @@ export default function Inbox() {
       }
     } catch (err) {
       console.error('Error fetching chat thread and profile:', err);
-    } font: {
+    } finally {
       setLoadingMessages(false);
       setLoadingProfile(false);
       setTimeout(scrollToBottom, 100);

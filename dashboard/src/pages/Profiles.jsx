@@ -103,6 +103,13 @@ export default function Profiles() {
   const [loading, setLoading] = useState(false);
 
   // Network tab state
+  const [selectedAccId, setSelectedAccId] = useState(() => {
+    try {
+      return (typeof window !== 'undefined' && localStorage.getItem('lf_selected_account_id')) || '';
+    } catch {
+      return '';
+    }
+  });
   const [accountInfo, setAccountInfo] = useState(null);
   const [connections, setConnections] = useState([]);
   const [invitations, setInvitations] = useState([]);
@@ -110,12 +117,13 @@ export default function Profiles() {
   const [netLoading, setNetLoading] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
 
-  const loadNetworkData = async () => {
+  const loadNetworkData = async (targetId = null) => {
     setNetLoading(true);
     try {
       const isSuper = isSuperAdminUser();
       const orgId = getActiveOrganizationId();
       const userAcc = getActiveUserAccount();
+      const accToUse = targetId || selectedAccId || (typeof window !== 'undefined' ? localStorage.getItem('lf_selected_account_id') : null) || null;
 
       let pQuery = supabaseDirect.from('prospects').select('*');
       if (!isSuper) {
@@ -124,9 +132,9 @@ export default function Profiles() {
       }
 
       const [accRes, connRes, invRes, pRes] = await Promise.all([
-        getUnipileAccountInfo().catch(() => null),
-        getNetworkingConnections().catch(() => ({ connections: [] })),
-        getNetworkingInvitations().catch(() => ({ invitations: [] })),
+        getUnipileAccountInfo(accToUse).catch(() => null),
+        getNetworkingConnections(accToUse).catch(() => ({ connections: [] })),
+        getNetworkingInvitations(accToUse).catch(() => ({ invitations: [] })),
         pQuery.catch(() => ({ data: [] })),
       ]);
 
@@ -137,6 +145,7 @@ export default function Profiles() {
         setEditAccId(accRes.id);
         setExistingAccId(accRes.id);
         setDisplayName(resolvedName);
+        if (!selectedAccId) setSelectedAccId(accRes.id);
       } else {
         setAccountInfo(null);
       }
@@ -150,6 +159,14 @@ export default function Profiles() {
     } finally {
       setNetLoading(false);
     }
+  };
+
+  const handleSwitchAccount = (newAccId) => {
+    setSelectedAccId(newAccId);
+    try {
+      if (typeof window !== 'undefined') localStorage.setItem('lf_selected_account_id', newAccId);
+    } catch {}
+    loadNetworkData(newAccId);
   };
 
   useEffect(() => {
@@ -458,10 +475,10 @@ export default function Profiles() {
   const handleWithdrawByAge = async () => {
     setWithdrawing(true);
     try {
-      const res = await withdrawOldInvitations(withdrawAge);
+      const res = await withdrawOldInvitations(withdrawAge, selectedAccId);
       if (res.success) {
         toast.success(`Withdrew ${res.withdrawn_count || 0} pending invitations older than ${withdrawAge} days!`);
-        loadNetworkData();
+        loadNetworkData(selectedAccId);
       } else {
         toast.error(res.error || 'Failed to withdraw invitations');
       }
@@ -474,7 +491,7 @@ export default function Profiles() {
 
   const handleCancelSingleInvite = async (invId) => {
     try {
-      const res = await cancelNetworkingInvitation(invId);
+      const res = await cancelNetworkingInvitation(invId, selectedAccId);
       if (res.success) {
         toast.success('Invitation withdrawn successfully');
         setInvitations(prev => prev.filter(i => (i.id || i.invitation_id) !== invId));
@@ -508,6 +525,20 @@ export default function Profiles() {
             <div>
               <div className="flex flex-wrap items-center gap-3">
                 <h1 className="text-white text-2xl font-extrabold">{profileDisplayName}</h1>
+                {profiles && profiles.length > 1 && (
+                  <select
+                    value={selectedAccId || profiles[0]?.unipile_account_id}
+                    onChange={e => handleSwitchAccount(e.target.value)}
+                    className="bg-[#111111] border border-[#333333] hover:border-[#6366f1] text-white text-xs font-medium rounded-xl px-3 py-1.5 focus:outline-none focus:border-[#6366f1] transition-all cursor-pointer shadow-sm"
+                    title="Switch Connected LinkedIn Account"
+                  >
+                    {profiles.map(p => (
+                      <option key={p.unipile_account_id || p.profile_key} value={p.unipile_account_id}>
+                        {p.display_name} {p.unipile_account_id === 'zXneBg9WRZ-m7iFuKULo1Q' ? '(Active)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 {connectionStatus === 'CONNECTED' || connectionStatus === 'OK' ? (
                   <span className="text-xs px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
