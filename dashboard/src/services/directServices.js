@@ -136,6 +136,15 @@ const KNOWN_USER_ORGS = {
   'superddd@gmail.com': '13155801-65c9-49af-91bc-ab7f3c4462c4',
 };
 
+export const extractLinkedInSlug = (url) => {
+  if (!url) return '';
+  return String(url).toLowerCase().trim()
+    .replace(/https?:\/\/(www\.)?linkedin\.com\/in\//, '')
+    .replace(/\/+$/, '')
+    .split('?')[0]
+    .split('/')[0];
+};
+
 export const getActiveOrganizationId = () => {
   try {
     const userAcc = getActiveUserAccount();
@@ -318,9 +327,12 @@ export const directGetUnipileAccountInfo = async (accountId = null) => {
   return null;
 };
 
-export const directGetNetworkingConnections = async () => {
-  const userProfiles = await directGetProfiles();
-  const targetAccId = userProfiles[0]?.unipile_account_id;
+export const directGetNetworkingConnections = async (overrideAccountId = null) => {
+  let targetAccId = overrideAccountId;
+  if (!targetAccId) {
+    const userProfiles = await directGetProfiles();
+    targetAccId = userProfiles[0]?.unipile_account_id;
+  }
   if (!targetAccId) {
     return { success: true, connections: [], total: 0 };
   }
@@ -1860,6 +1872,26 @@ export const directRunFlow = async () => {
     let effectiveLimit = Math.min(quotaPerCampaign, campaign.daily_limit || quotaPerCampaign, remainingGlobalQuota);
     let actionsTaken = 0;
 
+    // Pre-fetch 1st-degree connections once for this campaign's LinkedIn profile
+    let campaignAccId = null;
+    if (campaign.profile_key) {
+      try {
+        const { data: profRow } = await supabaseDirect.from('profiles').select('unipile_account_id').eq('profile_key', campaign.profile_key).maybeSingle();
+        campaignAccId = profRow?.unipile_account_id;
+      } catch (e) {}
+    }
+    const { connections: campaignConns } = await directGetNetworkingConnections(campaignAccId);
+    const relSlugs = new Map();
+    const relMemberIds = new Map();
+    const relNames = new Map();
+    (campaignConns || []).forEach(r => {
+      if (r.public_identifier) relSlugs.set(r.public_identifier.toLowerCase().trim(), r);
+      if (r.public_profile_url) relSlugs.set(extractLinkedInSlug(r.public_profile_url), r);
+      if (r.member_id) relMemberIds.set(r.member_id, r);
+      const fullName = `${r.first_name || ''} ${r.last_name || ''}`.toLowerCase().trim();
+      if (fullName) relNames.set(fullName, r);
+    });
+
     for (const prospect of prospects) {
       if (actionsTaken >= effectiveLimit || remainingGlobalQuota <= 0) break;
 
@@ -1970,13 +2002,18 @@ export const directRunFlow = async () => {
       }
 
       if (nodeType === 'send_invitation') {
-        if (todayConnectionsTotal >= dailyConnectionLimit) {
-          console.log(`Daily connection limit reached (${todayConnectionsTotal}/${dailyConnectionLimit}). Skipping connection invitation for ${prospect.name}.`);
-          continue;
+        let isConnected = prospect.connection_status === 'connected' || prospect.status === 'Connection Accepted';
+        let matchedRel = null;
+
+        if (!isConnected) {
+          const pSlug = extractLinkedInSlug(prospect.linkedin_url) || extractLinkedInSlug(prospect.public_identifier);
+          const pName = (prospect.name || `${prospect.first_name || ''} ${prospect.last_name || ''}`).toLowerCase().trim();
+          matchedRel = (pSlug && relSlugs.get(pSlug)) || (prospect.member_id && relMemberIds.get(prospect.member_id)) || (pName && relNames.get(pName));
+          if (matchedRel) {
+            isConnected = true;
+          }
         }
 
-        let isConnected = prospect.connection_status === 'connected' || prospect.status === 'Connection Accepted';
-        
         if (!isConnected) {
           const userProfileData = await directResolveLinkedinProfile(prospect);
           if (userProfileData) {
@@ -1988,22 +2025,27 @@ export const directRunFlow = async () => {
           }
         }
 
-        if (!isConnected) {
-          const { connections } = await directGetNetworkingConnections();
-          const connSet = new Set(connections.map(c => (c.public_identifier || c.provider_id || c.member_id || '').toLowerCase()).filter(Boolean));
-          const pKey = (prospect.public_identifier || prospect.provider_id || prospect.linkedin_url?.split('/in/')?.[1]?.replace(/\//g, '').split('?')[0] || '').toLowerCase();
-          if (pKey && connSet.has(pKey)) {
-            isConnected = true;
-          }
-        }
-
         const edges = sourceEdgesMap.get(currentNode.id) || [];
         const defaultEdge = edges.find(e => !e.data?.condition || e.data.condition === 'default') || edges[0];
 
         if (isConnected) {
           console.log(`Prospect ${prospect.name} is ALREADY CONNECTED! Skipping invitation node and moving to next node.`);
+          const acceptedAt = matchedRel?.created_at ? new Date(matchedRel.created_at).toISOString() : (prospect.accepted_at || new Date().toISOString());
           prospect.status = 'Connection Accepted';
           prospect.connection_status = 'connected';
+          prospect.accepted_at = acceptedAt;
+
+          const hist = prospect.custom_variables?.history || [];
+          if (!hist.some(h => (h.node_type || '').includes('accept'))) {
+            hist.push({
+              node_type: 'connection_accepted',
+              node_label: 'Connection Accepted',
+              status: 'success',
+              executed_at: acceptedAt
+            });
+          }
+          prospect.custom_variables.history = hist;
+
           if (defaultEdge) {
             prospect.custom_variables.current_node_id = defaultEdge.target;
             prospect.custom_variables.next_scheduled_at = null;
@@ -2012,9 +2054,14 @@ export const directRunFlow = async () => {
             await supabaseDirect.from('prospects').update({
               status: 'Connection Accepted',
               connection_status: 'connected',
-              accepted_at: new Date().toISOString(),
+              accepted_at: acceptedAt,
               custom_variables: prospect.custom_variables
             }).eq('id', prospect.id);
+
+            await supabaseDirect.from('campaign_enrollments').update({
+              status: 'connected',
+              updated_at: new Date().toISOString()
+            }).eq('prospect_id', prospect.id);
           } catch (e) {
             console.warn(e);
           }
@@ -2022,14 +2069,19 @@ export const directRunFlow = async () => {
           if (defaultEdge && nodesMap.get(defaultEdge.target)) {
             currentNodeId = defaultEdge.target;
             currentNode = nodesMap.get(currentNodeId);
-            nodeType = currentNode?.type || currentNode?.data?.action_type || 'send_message';
-            nodeConfig = currentNode?.data || {};
+            nodeType = currentNode?.type || currentNode?.data?.action_type || currentNode?.data?.nodeType || 'send_message';
+            nodeConfig = currentNode?.data?.config || currentNode?.data || {};
           } else {
             continue;
           }
         }
 
         if (!isConnected && prospect.status !== 'Connection Request Sent') {
+          if (todayConnectionsTotal >= dailyConnectionLimit) {
+            console.log(`Daily connection limit reached (${todayConnectionsTotal}/${dailyConnectionLimit}). Skipping connection invitation for ${prospect.name}.`);
+            continue;
+          }
+
           const hasNoteToggle = nodeConfig.add_note !== undefined ? Boolean(nodeConfig.add_note)
             : (nodeConfig.include_note !== undefined ? Boolean(nodeConfig.include_note)
             : (nodeConfig.send_note !== undefined ? Boolean(nodeConfig.send_note)
@@ -2108,8 +2160,8 @@ export const directRunFlow = async () => {
             }
           }
           continue;
-        } else {
-          const sentAtStr = prospect.custom_variables.invitation_sent_at || prospect.custom_variables.last_action_at || prospect.created_at;
+        } else if (!isConnected) {
+          const sentAtStr = prospect.custom_variables?.invitation_sent_at || prospect.custom_variables?.last_action_at || prospect.connection_sent_date || prospect.created_at;
           const waitDays = Number(nodeConfig.max_wait_days) || 14;
           const isTimedOut = Date.now() - new Date(sentAtStr).getTime() > waitDays * 24 * 60 * 60 * 1000;
 
@@ -2331,7 +2383,118 @@ export const directRunFlow = async () => {
   };
 };
 
-export const directCheckAcceptances = async () => directRunFlow();
+export const directCheckAcceptances = async () => {
+  try {
+    const userProfiles = await directGetProfiles();
+    if (!userProfiles || userProfiles.length === 0) {
+      return { success: true, message: 'No active profile found', accepted: 0, executed_count: 0 };
+    }
+
+    const orgId = getActiveOrganizationId();
+    let totalUpdated = 0;
+
+    for (const prof of userProfiles) {
+      const targetAccId = prof.unipile_account_id;
+      if (!targetAccId) continue;
+
+      const { connections } = await directGetNetworkingConnections(targetAccId);
+      if (!connections || connections.length === 0) continue;
+
+      const relSlugs = new Map();
+      const relMemberIds = new Map();
+      const relNames = new Map();
+
+      connections.forEach(r => {
+        if (r.public_identifier) relSlugs.set(r.public_identifier.toLowerCase().trim(), r);
+        if (r.public_profile_url) relSlugs.set(extractLinkedInSlug(r.public_profile_url), r);
+        if (r.member_id) relMemberIds.set(r.member_id, r);
+        const fullName = `${r.first_name || ''} ${r.last_name || ''}`.toLowerCase().trim();
+        if (fullName) relNames.set(fullName, r);
+      });
+
+      let pQuery = supabaseDirect.from('prospects')
+        .select('*')
+        .or('status.eq.Connection Request Sent,connection_status.eq.invitation_sent');
+      
+      if (orgId) {
+        pQuery = pQuery.eq('organization_id', orgId);
+      }
+
+      const { data: prospects, error } = await pQuery;
+      if (error || !prospects || prospects.length === 0) continue;
+
+      for (const p of prospects) {
+        const pSlug = extractLinkedInSlug(p.linkedin_url) || extractLinkedInSlug(p.public_identifier);
+        const pName = (p.name || `${p.first_name || ''} ${p.last_name || ''}`).toLowerCase().trim();
+        const rel = (pSlug && relSlugs.get(pSlug)) || (p.member_id && relMemberIds.get(p.member_id)) || (pName && relNames.get(pName));
+
+        if (rel) {
+          const acceptedAt = rel.created_at ? new Date(rel.created_at).toISOString() : new Date().toISOString();
+          const cv = p.custom_variables || {};
+          const history = Array.isArray(cv.history) ? [...cv.history] : [];
+          
+          if (!history.some(h => (h.node_type || '').includes('accept'))) {
+            history.push({
+              node_type: 'connection_accepted',
+              node_label: 'Connection Accepted',
+              status: 'success',
+              executed_at: acceptedAt
+            });
+          }
+
+          let nextNodeId = cv.current_node_id;
+          if (p.campaign_id) {
+            try {
+              const { data: cData } = await supabaseDirect.from('campaigns').select('sequence_config').eq('id', p.campaign_id).maybeSingle();
+              const edges = cData?.sequence_config?.flow_sequence?.edges || [];
+              const nextEdge = edges.find(e => e.source === cv.current_node_id || e.source?.includes('invitation'));
+              if (nextEdge?.target) {
+                nextNodeId = nextEdge.target;
+              }
+            } catch (e) {}
+          }
+
+          const updatedCv = {
+            ...cv,
+            history,
+            current_node_id: nextNodeId,
+            accepted_at: acceptedAt
+          };
+
+          try {
+            await supabaseDirect.from('prospects').update({
+              status: 'Connection Accepted',
+              connection_status: 'connected',
+              accepted_at: acceptedAt,
+              custom_variables: updatedCv,
+              updated_at: new Date().toISOString()
+            }).eq('id', p.id);
+
+            await supabaseDirect.from('campaign_enrollments').update({
+              status: 'connected',
+              updated_at: new Date().toISOString()
+            }).eq('prospect_id', p.id);
+
+            totalUpdated += 1;
+          } catch (e) {
+            console.warn('Error updating prospect acceptance:', e);
+          }
+        }
+      }
+    }
+
+    return {
+      success: true,
+      message: `Checked connection acceptances: ${totalUpdated} new connection(s) synced`,
+      accepted: totalUpdated,
+      executed_count: totalUpdated
+    };
+  } catch (err) {
+    console.error('Error in directCheckAcceptances:', err);
+    return { success: false, error: err.message };
+  }
+};
+
 export const directRunConnections = async () => directRunFlow();
 export const directRunMessages = async () => directRunFlow();
 

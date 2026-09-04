@@ -274,11 +274,30 @@ def submit_2fa_code(account_id: str, code: str) -> Dict[str, Any]:
 
 def list_connections(account_id: str = None, cursor: str = None) -> List[Dict[str, Any]]:
     acc_id = account_id or DEFAULT_UNIPILE_ACCOUNT_ID
+    if not UNIPILE_API_KEY:
+        return []
     all_items = []
     curr_cursor = cursor
-    for _ in range(20):
-        url = f"{UNIPILE_BASE_URL}/users/relations?account_id={acc_id}&limit=100"
-        return {"success": False, "error": str(exc)}
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            for _ in range(20):
+                url = f"{UNIPILE_BASE_URL}/users/relations?account_id={acc_id}&limit=100"
+                if curr_cursor:
+                    url += f"&cursor={curr_cursor}"
+                resp = client.get(url, headers=get_headers())
+                if resp.status_code != 200:
+                    break
+                data = resp.json() if resp.content else {}
+                items = data.get("items") or data.get("relations") or []
+                if not items:
+                    break
+                all_items.extend(items)
+                curr_cursor = data.get("cursor")
+                if not curr_cursor:
+                    break
+    except Exception as exc:
+        logger.warning(f"Error listing connections: {exc}")
+    return all_items
 
 
 def list_invitations(account_id: Optional[str] = None) -> Dict[str, Any]:

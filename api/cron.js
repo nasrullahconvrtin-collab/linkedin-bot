@@ -85,12 +85,83 @@ export default async function handler(req, res) {
         prospects = await sbFetch(`prospects?campaign_id=eq.${c.id}`);
       }
 
-      for (const p of prospects || []) {
-        if (totalSentToday >= dailyConnectionLimit) break;
-        const st = p.status || "Not Contacted";
-        if (["Connection Request Sent", "Connection Sent", "Completed", "Failed", "Replied"].includes(st)) continue;
+      // Pre-fetch 1st-degree relations to check for connection acceptances
+      const { ok: relOk, data: relData } = await unipileFetch(`/users/relations?account_id=${accId}&limit=100`);
+      const relations = (relOk && relData && (relData.items || relData.relations)) || [];
+      const relSlugs = new Set();
+      const relMemberIds = new Set();
+      const relNames = new Map();
+      relations.forEach(r => {
+        if (r.public_identifier) relSlugs.add(r.public_identifier.toLowerCase().trim());
+        const pubUrlSlug = extractPublicId(r.public_profile_url);
+        if (pubUrlSlug) relSlugs.add(pubUrlSlug.toLowerCase().trim());
+        if (r.member_id) relMemberIds.add(r.member_id);
+        const fullName = `${r.first_name || ''} ${r.last_name || ''}`.toLowerCase().trim();
+        if (fullName) relNames.set(fullName, r);
+      });
 
+      for (const p of prospects || []) {
+        const st = p.status || "Not Contacted";
         const cv = p.custom_variables || {};
+
+        // Acceptance reconciliation
+        if (st === 'Connection Request Sent' || st === 'Connection Sent' || p.connection_status === 'invitation_sent') {
+          const pPubId = extractPublicId(p.linkedin_url);
+          const pName = (p.name || `${p.first_name || ''} ${p.last_name || ''}`).toLowerCase().trim();
+          const isAccepted = (pPubId && relSlugs.has(pPubId.toLowerCase().trim())) ||
+                             (p.member_id && relMemberIds.has(p.member_id)) ||
+                             (pName && relNames.has(pName));
+
+          if (isAccepted) {
+            const relObj = (pName && relNames.get(pName));
+            const acceptedAt = relObj?.created_at ? new Date(relObj.created_at).toISOString() : new Date().toISOString();
+            log(`Acceptance detected for ${p.name || p.id}! Transitioning to Connection Accepted.`);
+            p.status = "Connection Accepted";
+            p.connection_status = "connected";
+            p.accepted_at = acceptedAt;
+
+            const hist = cv.history || [];
+            if (!hist.some(h => (h.node_type || '').includes('accept'))) {
+              hist.push({
+                node_type: "connection_accepted",
+                node_label: "Connection Accepted",
+                status: "success",
+                executed_at: acceptedAt
+              });
+            }
+            cv.history = hist;
+            cv.accepted_at = acceptedAt;
+
+            let cNodeId = cv.current_node_id || startNode.id;
+            let cEdges = sourceEdgesMap.get(cNodeId) || [];
+            let cNextEdge = cEdges.find(e => !e.data?.condition || e.data.condition === 'default') || cEdges[0];
+            if (cNextEdge?.target) {
+              cv.current_node_id = cNextEdge.target;
+            }
+
+            await sbFetch(`prospects?id=eq.${p.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({
+                status: "Connection Accepted",
+                connection_status: "connected",
+                accepted_at: acceptedAt,
+                custom_variables: cv
+              })
+            });
+
+            await sbFetch(`campaign_enrollments?prospect_id=eq.${p.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({
+                status: "connected",
+                updated_at: new Date().toISOString()
+              })
+            });
+          }
+        }
+
+        if (totalSentToday >= dailyConnectionLimit) break;
+        if (["Connection Request Sent", "Connection Sent", "Completed", "Failed", "Replied"].includes(p.status)) continue;
+
         let currentNodeId = cv.current_node_id || startNode.id;
         let currentNode = nodesMap.get(currentNodeId);
 
