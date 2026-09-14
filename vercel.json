@@ -19,7 +19,7 @@
   ],
   "rewrites": [
     { "source": "/api/cron", "destination": "/api/cron.js" },
-    { "source": "/api/unipile/(.*)", "destination": "https://api20.unipile.com:15032/api/v1/$1" },
+    { "source": "/api/unipile/(.*)", "destination": "https://api63.unipile.com:19339/api/v1/$1" },
     { "source": "/downloads/(.*)", "destination": "/downloads/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]

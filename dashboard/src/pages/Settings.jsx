@@ -364,7 +364,7 @@ export default function Settings() {
                       Click below to open the official hosted OAuth login page. Authorize your LinkedIn profile securely.
                     </p>
                     <a
-                      href="https://api20.unipile.com:15032/api/v1/hosted/accounts/link"
+                      href="https://api63.unipile.com:19339/api/v1/hosted/accounts/link"
                       target="_blank"
                       rel="noreferrer"
                       className="inline-flex items-center justify-center gap-2 w-full py-3 bg-[#0a66c2] hover:bg-[#084e96] text-white font-bold text-xs rounded-xl transition-all shadow-lg"

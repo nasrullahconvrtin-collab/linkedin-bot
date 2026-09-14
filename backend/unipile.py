@@ -12,8 +12,8 @@ import httpx
 
 logger = logging.getLogger("linkedin_bot.unipile")
 
-UNIPILE_API_KEY = os.getenv("UNIPILE_API_KEY", "6SlhX8Ii.R7wP5y2dLTREmrXKCTpnoEg3clwHKT9wZtIc++MRAkg=")
-UNIPILE_DSN = os.getenv("UNIPILE_DSN", "api20.unipile.com:15032")
+UNIPILE_API_KEY = os.getenv("UNIPILE_API_KEY", "vpftWHjq.lC9ACICdkDlLNupo90avQybHg2UjAtAkMssKHxsEw9o=")
+UNIPILE_DSN = os.getenv("UNIPILE_DSN", "api63.unipile.com:19339")
 UNIPILE_BASE_URL = os.getenv(
     "UNIPILE_API_URL",
     f"https://{UNIPILE_DSN}" if UNIPILE_DSN.startswith("http") else f"https://{UNIPILE_DSN}/api/v1"
