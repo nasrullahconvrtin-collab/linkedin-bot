@@ -177,6 +177,40 @@ export const directGetProfiles = async () => {
   const isSuper = isSuperAdminUser();
 
   try {
+    // 1. Auto-sync active accounts directly from Unipile
+    try {
+      const unipileRes = await unipileFetch('/accounts');
+      if (unipileRes.ok && unipileRes.data?.items) {
+        const activeUnipileAccs = unipileRes.data.items.filter(a => a.type === 'LINKEDIN');
+        for (const uAcc of activeUnipileAccs) {
+          const accId = uAcc.id;
+          const accName = uAcc.name || uAcc.connection_params?.im?.username || 'LinkedIn Profile';
+          const { data: existing } = await supabaseDirect.from('profiles').select('id, unipile_account_id').eq('unipile_account_id', accId);
+          if (!existing || existing.length === 0) {
+            const newKey = `profile_${accId}`;
+            await supabaseDirect.from('profiles').insert([{
+              profile_key: newKey,
+              display_name: accName,
+              unipile_account_id: accId,
+              status: 'active',
+              organization_id: orgId || null,
+              user_email: userEmail || null,
+              session_active: true,
+              enabled: true,
+              settings: {
+                organization_id: orgId || null,
+                user_email: userEmail || null,
+                session_active: true,
+                enabled: true
+              }
+            }]);
+          }
+        }
+      }
+    } catch (uErr) {
+      console.warn('Unipile auto-sync error:', uErr);
+    }
+
     const { data, error } = await supabaseDirect.from('profiles').select('*');
     if (!error && data && data.length > 0) {
       // Only real LinkedIn profiles with unipile_account_id
@@ -293,7 +327,7 @@ export const directCreateProfile = async (data) => {
   };
 };
 
-export const directDisconnectProfile = async () => {
+export const directDisconnectProfile = async (targetId = null) => {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       localStorage.setItem('lf_account_disconnected', 'true');
@@ -303,16 +337,38 @@ export const directDisconnectProfile = async () => {
   const orgId = getActiveOrganizationId();
   const userAcc = getActiveUserAccount();
   const userEmail = userAcc?.email ? userAcc.email.toLowerCase() : null;
+  const isSuper = isSuperAdminUser();
 
   try {
-    const { data: allProfiles } = await supabaseDirect.from('profiles').select('id, profile_key, settings');
+    const { data: allProfiles } = await supabaseDirect.from('profiles').select('*');
     if (allProfiles && allProfiles.length > 0) {
       for (const p of allProfiles) {
         if (p.profile_key?.startsWith('user_')) continue;
-        const pOrgId = p.organization_id || p.settings?.organization_id || p.settings?.orgId;
-        const pEmail = (p.user_email || p.settings?.user_email || p.settings?.email || '').toLowerCase();
-        if ((orgId && pOrgId === orgId) || (userEmail && pEmail === userEmail)) {
+
+        let shouldDelete = false;
+        if (targetId) {
+          shouldDelete = (p.id === targetId || p.profile_key === targetId || p.unipile_account_id === targetId);
+        } else {
+          if (isSuper) {
+            shouldDelete = true;
+          } else {
+            const pOrgId = p.organization_id || p.settings?.organization_id || p.settings?.orgId;
+            const pEmail = (p.user_email || p.settings?.user_email || p.settings?.email || '').toLowerCase();
+            if ((orgId && pOrgId === orgId) || (userEmail && pEmail === userEmail)) {
+              shouldDelete = true;
+            }
+          }
+        }
+
+        if (shouldDelete) {
           await supabaseDirect.from('profiles').delete().eq('id', p.id);
+          if (p.unipile_account_id && !p.unipile_account_id.includes('@')) {
+            try {
+              await unipileFetch(`/accounts/${p.unipile_account_id}`, { method: 'DELETE' });
+            } catch (e) {
+              console.warn('Unipile delete account warning:', e);
+            }
+          }
         }
       }
     }
@@ -324,6 +380,8 @@ export const directDisconnectProfile = async () => {
 
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.removeItem('lf_selected_account_id');
+      localStorage.removeItem('lf_active_account_id');
       Object.keys(localStorage).forEach(key => {
         if (key.startsWith('lf_chat_sent_messages_')) {
           localStorage.removeItem(key);
@@ -333,6 +391,111 @@ export const directDisconnectProfile = async () => {
   } catch (e) {}
 
   return { success: true };
+};
+
+export const directConnectCookie = async (cookieVal) => {
+  if (!cookieVal || !cookieVal.trim()) {
+    return { success: false, error: 'Cookie value cannot be empty' };
+  }
+  try {
+    const res = await unipileFetch('/accounts', {
+      method: 'POST',
+      body: JSON.stringify({
+        provider: 'LINKEDIN',
+        access_token: cookieVal.trim()
+      })
+    });
+    if (res.ok && res.data) {
+      const accId = res.data.id || res.data.account_id;
+      const name = res.data.name || 'LinkedIn Profile';
+      if (accId) {
+        await directCreateProfile({
+          profile_key: `profile_${accId}`,
+          display_name: name,
+          unipile_account_id: accId,
+          session_active: true
+        });
+        return { success: true, account_id: accId, name };
+      }
+      return { success: true, data: res.data };
+    } else {
+      const errMsg = res.data?.detail || res.data?.message || res.data?.title || 'Failed to connect cookie to Unipile';
+      return { success: false, error: errMsg };
+    }
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+};
+
+export const directConnectDirect = async ({ username, password }) => {
+  if (!username || !password) {
+    return { success: false, error: 'Email and password are required' };
+  }
+  try {
+    const res = await unipileFetch('/accounts', {
+      method: 'POST',
+      body: JSON.stringify({
+        provider: 'LINKEDIN',
+        username: username.trim(),
+        password: password
+      })
+    });
+    if (res.ok && res.data) {
+      const accId = res.data.id || res.data.account_id;
+      if (res.data.checkpoint || res.data.checkpoint_required) {
+        return { success: false, checkpoint_required: true, account_id: accId };
+      }
+      if (accId) {
+        await directCreateProfile({
+          profile_key: `profile_${accId}`,
+          display_name: username.split('@')[0] || 'LinkedIn Profile',
+          unipile_account_id: accId,
+          session_active: true
+        });
+      }
+      return { success: true, account_id: accId };
+    } else {
+      const errMsg = res.data?.detail || res.data?.message || res.data?.title || 'Direct LinkedIn connection failed';
+      return { success: false, error: errMsg };
+    }
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+};
+
+export const directCreateHostedLink = async () => {
+  try {
+    const res = await unipileFetch('/hosted/accounts/link', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: 'create',
+        providers: ['LINKEDIN'],
+        api_url: UNIPILE_BASE_URL.replace(/\/api\/v1\/?$/, ''),
+        expiresOn: new Date(Date.now() + 3600000).toISOString()
+      })
+    });
+    if (res.ok && res.data?.url) {
+      return { success: true, url: res.data.url };
+    }
+    return { success: false, error: res.data?.message || 'Could not generate hosted auth link' };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+};
+
+export const directSubmit2FA = async (accountId, code) => {
+  try {
+    const res = await unipileFetch(`/accounts/checkpoint`, {
+      method: 'POST',
+      body: JSON.stringify({
+        account_id: accountId,
+        code: code.trim()
+      })
+    });
+    return { success: res.ok, data: res.data };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 };
 
 export const directGetUnipileAccountInfo = async (accountId = null) => {

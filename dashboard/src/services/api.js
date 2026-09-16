@@ -33,6 +33,10 @@ import {
   directUpdateProspect,
   directUpdateProspectList,
   directWithdrawOldInvitations,
+  directConnectCookie,
+  directConnectDirect,
+  directCreateHostedLink,
+  directSubmit2FA,
 } from './directServices';
 
 // Strip BOM (U+FEFF) that Windows UTF-8 env files can inject into the value
@@ -308,13 +312,16 @@ export const getUnipileAccountInfo = async (account_id) => {
 };
 
 export const connectUnipileDirect = (data) =>
-  api.post('/unipile/connect-direct', data).catch(() => ({ success: true, account_id: 'bBzuBoeOQAuBCQNFu7shyQ' }));
+  directConnectDirect(data);
 
 export const connectUnipileCookie = (cookie_val) =>
-  api.post('/unipile/connect-cookie', { cookie_val }).catch(() => ({ success: true, account_id: 'bBzuBoeOQAuBCQNFu7shyQ' }));
+  directConnectCookie(cookie_val);
 
 export const submitUnipile2FA = (account_id, code) =>
-  api.post('/unipile/submit-2fa', { account_id, code }).catch(() => ({ success: true }));
+  directSubmit2FA(account_id, code);
+
+export const createUnipileHostedLink = () =>
+  directCreateHostedLink();
 
 export default api;
 

@@ -19,6 +19,7 @@ import {
   getUnipileAccountInfo,
   submitUnipile2FA,
   withdrawOldInvitations,
+  createUnipileHostedLink,
 } from '../services/api';
 import { supabaseDirect, directDisconnectProfile, getStoredDisconnectedFlag, directCreateProfile, getActiveOrganizationId, getActiveUserAccount, isSuperAdminUser } from '../services/directServices';
 
@@ -304,15 +305,17 @@ export default function Profiles() {
 
   // Disconnect / Remove Account Handler
   const handleRemoveConnectedAccount = async () => {
-    const accName = accountInfo?.name || editName || 'Fatima Maqsood';
+    const accName = accountInfo?.name || editName || 'LinkedIn Profile';
     if (!confirm(`Are you sure you want to disconnect and remove ${accName}? This will reset all active profile sessions and inbox access from the tool.`)) {
       return;
     }
     setRemoving(true);
     try {
-      await directDisconnectProfile();
+      const targetId = selectedAccId || accountInfo?.id || editAccId;
+      await directDisconnectProfile(targetId);
 
       setAccountInfo(null);
+      setSelectedAccId('');
       setConnections([]);
       setInvitations([]);
       setProspects([]);
@@ -385,6 +388,24 @@ export default function Profiles() {
         loadNetworkData();
       } else {
         toast.error(res.error || 'Invalid 2FA code');
+      }
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpenHostedLink = async () => {
+    setLoading(true);
+    try {
+      const res = await createUnipileHostedLink();
+      if (res.success && res.url) {
+        window.open(res.url, '_blank');
+        toast.success('Opened LinkedIn connection page. Once completed, refresh this page!');
+        setModal(false);
+      } else {
+        toast.error(res.error || 'Failed to generate connection link');
       }
     } catch (err) {
       toast.error(err.message);
@@ -534,7 +555,7 @@ export default function Profiles() {
                   >
                     {profiles.map(p => (
                       <option key={p.unipile_account_id || p.profile_key} value={p.unipile_account_id}>
-                        {p.display_name} {p.unipile_account_id === 'zXneBg9WRZ-m7iFuKULo1Q' ? '(Active)' : ''}
+                        {p.display_name}
                       </option>
                     ))}
                   </select>
@@ -787,49 +808,79 @@ export default function Profiles() {
               </button>
             </div>
 
-            <div className="space-y-3">
-              <p className="text-xs text-[#9ca3af]">
-                Select how you want to connect your LinkedIn account to your workspace.
-              </p>
+            <div className="space-y-4">
+              {/* Hosted Link 1-Click Connect */}
+              <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-2xl p-4 text-center space-y-2.5">
+                <div className="flex items-center justify-center gap-2 text-indigo-400 font-semibold text-xs">
+                  <Sparkles size={15} />
+                  <span>Recommended: Official 1-Click Connect</span>
+                </div>
+                <p className="text-[11px] text-[#9ca3af] leading-relaxed">
+                  Connect securely via official Unipile auth link with full 2FA and OTP support.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleOpenHostedLink}
+                  disabled={loading}
+                  className="w-full py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                >
+                  {loading ? <Loader2 size={15} className="animate-spin" /> : <ExternalLink size={15} />}
+                  Connect via Official LinkedIn Link
+                </button>
+              </div>
+
+              <div className="relative flex items-center justify-center my-1">
+                <div className="border-t border-[#2a2a2a] w-full" />
+                <span className="bg-[#111111] px-3 text-[10px] text-[#6b7280] uppercase tracking-wider font-semibold">Or Connect Manually</span>
+                <div className="border-t border-[#2a2a2a] w-full" />
+              </div>
 
               <div className="flex rounded-xl bg-[#1a1a1a] p-1 border border-[#2a2a2a]">
                 <button
                   onClick={() => setConnMethod('account_id')}
-                  className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
+                  className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${
                     connMethod === 'account_id' ? 'bg-[#6366f1] text-white shadow-md' : 'text-[#9ca3af] hover:text-white'
                   }`}
                 >
                   Account ID
                 </button>
                 <button
+                  onClick={() => setConnMethod('cookie')}
+                  className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                    connMethod === 'cookie' ? 'bg-[#6366f1] text-white shadow-md' : 'text-[#9ca3af] hover:text-white'
+                  }`}
+                >
+                  Cookie (li_at)
+                </button>
+                <button
                   onClick={() => setConnMethod('direct')}
-                  className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
+                  className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${
                     connMethod === 'direct' ? 'bg-[#6366f1] text-white shadow-md' : 'text-[#9ca3af] hover:text-white'
                   }`}
                 >
-                  Credentials / 2FA
+                  Credentials
                 </button>
               </div>
 
-              {connMethod === 'account_id' ? (
-                <form onSubmit={handleConnectAccountId} className="space-y-3 pt-2">
+              {connMethod === 'account_id' && (
+                <form onSubmit={handleConnectAccountId} className="space-y-3 pt-1">
                   <div>
                     <label className="block text-xs font-semibold text-[#9ca3af] mb-1">Display Name</label>
                     <input
                       type="text"
                       value={displayName}
                       onChange={e => setDisplayName(e.target.value)}
-                      placeholder="Fatima Maqsood"
+                      placeholder="e.g. Ken Ryan"
                       className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-[#6366f1]"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-[#9ca3af] mb-1">LinkedIn Account ID</label>
+                    <label className="block text-xs font-semibold text-[#9ca3af] mb-1">LinkedIn Account ID (from Unipile)</label>
                     <input
                       type="text"
                       value={existingAccId}
                       onChange={e => setExistingAccId(e.target.value)}
-                      placeholder="zXneBg9WRZ-m7iFuKULo1Q"
+                      placeholder="e.g. Jf5LTKlsTTa969buU8kOfA"
                       className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2 text-white text-sm font-mono focus:outline-none focus:border-[#6366f1]"
                     />
                   </div>
@@ -838,11 +889,35 @@ export default function Profiles() {
                     disabled={loading || !existingAccId.trim()}
                     className="w-full py-2.5 bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold text-xs rounded-xl shadow-lg transition-all disabled:opacity-50"
                   >
-                    {loading ? 'Connecting...' : 'Connect LinkedIn Profile'}
+                    {loading ? 'Connecting...' : 'Save LinkedIn Account'}
                   </button>
                 </form>
-              ) : (
-                <form onSubmit={handleConnectDirect} className="space-y-3 pt-2">
+              )}
+
+              {connMethod === 'cookie' && (
+                <form onSubmit={handleConnectCookie} className="space-y-3 pt-1">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#9ca3af] mb-1">LinkedIn Session Cookie (li_at)</label>
+                    <input
+                      type="password"
+                      value={cookieVal}
+                      onChange={e => setCookieVal(e.target.value)}
+                      placeholder="AQEDAT... (li_at cookie value)"
+                      className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2 text-white text-sm font-mono focus:outline-none focus:border-[#6366f1]"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={loading || !cookieVal.trim()}
+                    className="w-full py-2.5 bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold text-xs rounded-xl shadow-lg transition-all disabled:opacity-50"
+                  >
+                    {loading ? 'Connecting...' : 'Connect with Session Cookie'}
+                  </button>
+                </form>
+              )}
+
+              {connMethod === 'direct' && (
+                <form onSubmit={handleConnectDirect} className="space-y-3 pt-1">
                   <div>
                     <label className="block text-xs font-semibold text-[#9ca3af] mb-1">LinkedIn Email</label>
                     <input
