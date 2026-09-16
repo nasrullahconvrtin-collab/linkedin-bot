@@ -6,7 +6,16 @@ const timestamp = Date.now();
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  server: { port: 3000 },
+  server: {
+    port: 3000,
+    proxy: {
+      '/api/unipile': {
+        target: 'https://api63.unipile.com:19339/api/v1',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/unipile/, '')
+      }
+    }
+  },
   build: {
     rollupOptions: {
       output: {

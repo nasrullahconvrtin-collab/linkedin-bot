@@ -1,7 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://mhzvxnbnaytirrgiwsnv.supabase.co';
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_gn93SdRFAAvpnH6faute9g_n8DiwZ_j';
+const ENV_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_URL = (ENV_URL && !ENV_URL.includes('mjwganpjawthnowemabt') && !ENV_URL.includes('lupbvrgmkovpohjnbddf'))
+  ? ENV_URL
+  : 'https://mhzvxnbnaytirrgiwsnv.supabase.co';
+
+const ENV_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const SUPABASE_ANON_KEY = (ENV_KEY && !ENV_KEY.includes('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1qd2dhbnBqYXd0aG5vd2VtYWJ0'))
+  ? ENV_KEY
+  : 'sb_publishable_gn93SdRFAAvpnH6faute9g_n8DiwZ_j';
+
 const UNIPILE_API_KEY = 'vpftWHjq.lC9ACICdkDlLNupo90avQybHg2UjAtAkMssKHxsEw9o=';
 const UNIPILE_BASE_URL = 'https://api63.unipile.com:19339/api/v1';
 
@@ -9,7 +17,7 @@ export const supabaseDirect = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 export const isValidUuid = (val) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 const getUnipileBaseUrl = () => {
-  if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
+  if (typeof window !== 'undefined') {
     return '/api/unipile';
   }
   return UNIPILE_BASE_URL;
@@ -187,16 +195,16 @@ export const directGetProfiles = async () => {
               profile_key: newKey,
               display_name: accName,
               unipile_account_id: accId,
-              status: 'active',
-              organization_id: orgId || null,
-              user_email: userEmail || null,
+              organization_id: '00000000-0000-0000-0000-000000000001',
+              user_email: userEmail || 'superuser@gmail.com',
               session_active: true,
               enabled: true,
               settings: {
-                organization_id: orgId || null,
-                user_email: userEmail || null,
+                organization_id: '00000000-0000-0000-0000-000000000001',
+                user_email: userEmail || 'superuser@gmail.com',
                 session_active: true,
-                enabled: true
+                enabled: true,
+                status: 'active'
               }
             }]);
           }
@@ -208,42 +216,12 @@ export const directGetProfiles = async () => {
 
     const { data, error } = await supabaseDirect.from('profiles').select('*');
     if (!error && data && data.length > 0) {
-      // Only real LinkedIn profiles with unipile_account_id
+      // In this dedicated database, all real LinkedIn profiles belong to this tool
       let realProfiles = data.filter(p => {
         if (p.profile_key?.startsWith('user_')) return false;
         if (!p.unipile_account_id || p.unipile_account_id.includes('@')) return false;
-
-        // Super admins have global access to all connected profiles
-        if (isSuper) return true;
-
-        const pOrgId = p.organization_id || p.settings?.organization_id || p.settings?.orgId;
-        const pEmail = (p.user_email || p.settings?.user_email || p.settings?.email || '').toLowerCase();
-
-        // If profile has no explicit org or email (global/unassigned in workspace), make it available to the workspace
-        if (!pOrgId && !pEmail) return true;
-
-        // Match user's orgId or userEmail
-        if (orgId && pOrgId && pOrgId === orgId) return true;
-        if (userEmail && pEmail && pEmail === userEmail) return true;
-        return false;
+        return true;
       });
-
-      // If user has no directly matched profile, check active profile key or selection in localStorage
-      if (realProfiles.length === 0) {
-        const storedAccId = typeof window !== 'undefined' ? (localStorage.getItem('lf_selected_account_id') || localStorage.getItem('lf_active_account_id')) : null;
-        if (storedAccId) {
-          const match = data.find(p => p.unipile_account_id === storedAccId && !p.profile_key?.startsWith('user_') && !p.unipile_account_id.includes('@'));
-          if (match) realProfiles.push(match);
-        }
-      }
-
-      // Standalone/Single-tenant fallback: if still empty, use any valid real profile from Supabase
-      if (realProfiles.length === 0) {
-        const validProfiles = data.filter(p => !p.profile_key?.startsWith('user_') && p.unipile_account_id && !p.unipile_account_id.includes('@'));
-        if (validProfiles.length > 0) {
-          realProfiles = validProfiles;
-        }
-      }
 
       // Clear disconnected flag when valid profiles exist
       if (realProfiles.length > 0 && typeof window !== 'undefined' && window.localStorage) {
@@ -268,8 +246,8 @@ export const directGetProfiles = async () => {
         session_active: p.session_active ?? p.settings?.session_active ?? true,
         enabled: p.enabled ?? p.settings?.enabled ?? true,
         daily_sent: p.daily_sent || p.settings?.daily_sent || 0,
-        organization_id: p.organization_id,
-        user_email: p.user_email,
+        organization_id: p.organization_id || '00000000-0000-0000-0000-000000000001',
+        user_email: p.user_email || 'superuser@gmail.com',
       }));
     }
   } catch (e) {
@@ -289,13 +267,13 @@ export const directCreateProfile = async (data) => {
   } catch (e) {}
 
   const userAcc = getActiveUserAccount();
-  const orgId = getActiveOrganizationId();
   const profile_key = data.profile_key || `prof_${Date.now()}`;
   const display_name = data.display_name || 'LinkedIn Profile';
   const unipile_account_id = data.unipile_account_id || null;
   activeAccountId = unipile_account_id;
 
-  const email = userAcc?.email ? userAcc.email.toLowerCase() : null;
+  const email = userAcc?.email ? userAcc.email.toLowerCase() : 'superuser@gmail.com';
+  const orgId = '00000000-0000-0000-0000-000000000001';
 
   try {
     await supabaseDirect.from('profiles').upsert([
@@ -303,16 +281,16 @@ export const directCreateProfile = async (data) => {
         profile_key,
         display_name,
         unipile_account_id,
-        status: 'active',
-        organization_id: orgId || userAcc?.organization_id || null,
+        organization_id: orgId,
         user_email: email,
         session_active: true,
         enabled: true,
         settings: {
-          organization_id: orgId || userAcc?.organization_id || null,
+          organization_id: orgId,
           user_email: email,
           session_active: true,
           enabled: true,
+          status: 'active',
           ...(data.settings || {}),
         },
         updated_at: new Date().toISOString(),
@@ -333,14 +311,11 @@ export const directCreateProfile = async (data) => {
 export const directDisconnectProfile = async (targetId = null) => {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
-      localStorage.setItem('lf_account_disconnected', 'true');
+      localStorage.removeItem('lf_account_disconnected');
+      localStorage.removeItem('lf_selected_account_id');
+      localStorage.removeItem('lf_active_account_id');
     }
   } catch (e) {}
-
-  const orgId = getActiveOrganizationId();
-  const userAcc = getActiveUserAccount();
-  const userEmail = userAcc?.email ? userAcc.email.toLowerCase() : null;
-  const isSuper = isSuperAdminUser();
 
   try {
     const { data: allProfiles } = await supabaseDirect.from('profiles').select('*');
@@ -352,15 +327,7 @@ export const directDisconnectProfile = async (targetId = null) => {
         if (targetId) {
           shouldDelete = (p.id === targetId || p.profile_key === targetId || p.unipile_account_id === targetId);
         } else {
-          if (isSuper) {
-            shouldDelete = true;
-          } else {
-            const pOrgId = p.organization_id || p.settings?.organization_id || p.settings?.orgId;
-            const pEmail = (p.user_email || p.settings?.user_email || p.settings?.email || '').toLowerCase();
-            if ((orgId && pOrgId === orgId) || (userEmail && pEmail === userEmail)) {
-              shouldDelete = true;
-            }
-          }
+          shouldDelete = true;
         }
 
         if (shouldDelete) {
@@ -368,32 +335,30 @@ export const directDisconnectProfile = async (targetId = null) => {
           if (p.unipile_account_id && !p.unipile_account_id.includes('@')) {
             try {
               await unipileFetch(`/accounts/${p.unipile_account_id}`, { method: 'DELETE' });
-            } catch (e) {
-              console.warn('Unipile delete account warning:', e);
+            } catch (err) {
+              console.warn('Unipile account delete warning:', err);
             }
           }
         }
       }
     }
+    return { success: true };
   } catch (err) {
     console.warn('directDisconnectProfile error:', err);
+    return { success: false, error: err.message };
+  } finally {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.removeItem('lf_selected_account_id');
+        localStorage.removeItem('lf_active_account_id');
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith('lf_chat_sent_messages_')) {
+            localStorage.removeItem(key);
+          }
+        });
+      }
+    } catch (e) {}
   }
-
-  activeAccountId = null;
-
-  try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      localStorage.removeItem('lf_selected_account_id');
-      localStorage.removeItem('lf_active_account_id');
-      Object.keys(localStorage).forEach(key => {
-        if (key.startsWith('lf_chat_sent_messages_')) {
-          localStorage.removeItem(key);
-        }
-      });
-    }
-  } catch (e) {}
-
-  return { success: true };
 };
 
 export const directConnectCookie = async (cookieVal) => {
