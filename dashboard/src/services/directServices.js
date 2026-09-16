@@ -73,11 +73,6 @@ export const unipileFormFetch = async (endpoint, formData, options = {}) => {
 };
 
 export const getStoredDisconnectedFlag = () => {
-  try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      return localStorage.getItem('lf_account_disconnected') === 'true';
-    }
-  } catch (e) {}
   return false;
 };
 
@@ -224,6 +219,9 @@ export const directGetProfiles = async () => {
         const pOrgId = p.organization_id || p.settings?.organization_id || p.settings?.orgId;
         const pEmail = (p.user_email || p.settings?.user_email || p.settings?.email || '').toLowerCase();
 
+        // If profile has no explicit org or email (global/unassigned in workspace), make it available to the workspace
+        if (!pOrgId && !pEmail) return true;
+
         // Match user's orgId or userEmail
         if (orgId && pOrgId && pOrgId === orgId) return true;
         if (userEmail && pEmail && pEmail === userEmail) return true;
@@ -245,6 +243,11 @@ export const directGetProfiles = async () => {
         if (validProfiles.length > 0) {
           realProfiles = validProfiles;
         }
+      }
+
+      // Clear disconnected flag when valid profiles exist
+      if (realProfiles.length > 0 && typeof window !== 'undefined' && window.localStorage) {
+        try { localStorage.removeItem('lf_account_disconnected'); } catch (e) {}
       }
 
       // Prioritize selected account if one is stored
