@@ -174,46 +174,7 @@ export const getActiveOrganizationId = () => {
 let activeAccountId = null;
 
 export const directGetProfiles = async () => {
-  const orgId = getActiveOrganizationId();
-  const userAcc = getActiveUserAccount();
-  const userEmail = userAcc?.email ? userAcc.email.toLowerCase() : null;
-  const isSuper = isSuperAdminUser();
-
   try {
-    // 1. Auto-sync active accounts directly from Unipile
-    try {
-      const unipileRes = await unipileFetch('/accounts');
-      if (unipileRes.ok && unipileRes.data?.items) {
-        const activeUnipileAccs = unipileRes.data.items.filter(a => a.type === 'LINKEDIN');
-        for (const uAcc of activeUnipileAccs) {
-          const accId = uAcc.id;
-          const accName = uAcc.name || uAcc.connection_params?.im?.username || 'LinkedIn Profile';
-          const { data: existing } = await supabaseDirect.from('profiles').select('id, unipile_account_id').eq('unipile_account_id', accId);
-          if (!existing || existing.length === 0) {
-            const newKey = `profile_${accId}`;
-            await supabaseDirect.from('profiles').insert([{
-              profile_key: newKey,
-              display_name: accName,
-              unipile_account_id: accId,
-              organization_id: '00000000-0000-0000-0000-000000000001',
-              user_email: userEmail || 'superuser@gmail.com',
-              session_active: true,
-              enabled: true,
-              settings: {
-                organization_id: '00000000-0000-0000-0000-000000000001',
-                user_email: userEmail || 'superuser@gmail.com',
-                session_active: true,
-                enabled: true,
-                status: 'active'
-              }
-            }]);
-          }
-        }
-      }
-    } catch (uErr) {
-      console.warn('Unipile auto-sync error:', uErr);
-    }
-
     const { data, error } = await supabaseDirect.from('profiles').select('*');
     if (!error && data && data.length > 0) {
       // In this dedicated database, all real LinkedIn profiles belong to this tool
@@ -256,6 +217,31 @@ export const directGetProfiles = async () => {
 
   // Return empty array if no profiles exist
   return [];
+};
+
+export const directImportNewestUnipileAccount = async () => {
+  try {
+    const unipileRes = await unipileFetch('/accounts');
+    if (unipileRes.ok && unipileRes.data?.items) {
+      const activeUnipileAccs = unipileRes.data.items.filter(a => a.type === 'LINKEDIN');
+      if (activeUnipileAccs.length > 0) {
+        activeUnipileAccs.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+        const latestAcc = activeUnipileAccs[0];
+        const accId = latestAcc.id;
+        const accName = latestAcc.name || latestAcc.connection_params?.im?.username || 'LinkedIn Profile';
+        await directCreateProfile({
+          profile_key: `profile_${accId}`,
+          display_name: accName,
+          unipile_account_id: accId,
+          session_active: true
+        });
+        return { success: true, account: latestAcc };
+      }
+    }
+    return { success: false, error: 'No LinkedIn account found on Unipile' };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 };
 
 
@@ -431,16 +417,20 @@ export const directConnectDirect = async ({ username, password }) => {
   }
 };
 
-export const directCreateHostedLink = async () => {
+export const directCreateHostedLink = async (redirectUrl = null) => {
   try {
+    const payload = {
+      type: 'create',
+      providers: ['LINKEDIN'],
+      api_url: UNIPILE_BASE_URL.replace(/\/api\/v1\/?$/, ''),
+      expiresOn: new Date(Date.now() + 3600000).toISOString()
+    };
+    if (redirectUrl) {
+      payload.success_redirect_url = redirectUrl;
+    }
     const res = await unipileFetch('/hosted/accounts/link', {
       method: 'POST',
-      body: JSON.stringify({
-        type: 'create',
-        providers: ['LINKEDIN'],
-        api_url: UNIPILE_BASE_URL.replace(/\/api\/v1\/?$/, ''),
-        expiresOn: new Date(Date.now() + 3600000).toISOString()
-      })
+      body: JSON.stringify(payload)
     });
     if (res.ok && res.data?.url) {
       return { success: true, url: res.data.url };

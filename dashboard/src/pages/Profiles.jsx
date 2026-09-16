@@ -20,6 +20,7 @@ import {
   submitUnipile2FA,
   withdrawOldInvitations,
   createUnipileHostedLink,
+  importNewestUnipileAccount,
 } from '../services/api';
 import { supabaseDirect, directDisconnectProfile, getStoredDisconnectedFlag, directCreateProfile, getActiveOrganizationId, getActiveUserAccount, isSuperAdminUser } from '../services/directServices';
 
@@ -172,6 +173,10 @@ export default function Profiles() {
 
   useEffect(() => {
     loadNetworkData();
+    if (typeof window !== 'undefined' && window.location.search.includes('hosted_success=true')) {
+      window.history.replaceState({}, '', window.location.pathname);
+      handleSyncHostedAccount();
+    }
   }, []);
 
   useEffect(() => {
@@ -183,6 +188,12 @@ export default function Profiles() {
         setSelectedAccId(profiles[0].unipile_account_id);
         loadNetworkData(profiles[0].unipile_account_id);
       }
+    } else {
+      setSelectedAccId('');
+      setAccountInfo(null);
+      setConnections([]);
+      setInvitations([]);
+      setProspects([]);
     }
   }, [profiles]);
 
@@ -411,13 +422,32 @@ export default function Profiles() {
   const handleOpenHostedLink = async () => {
     setLoading(true);
     try {
-      const res = await createUnipileHostedLink();
+      const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}/profiles?hosted_success=true` : null;
+      const res = await createUnipileHostedLink(redirectUrl);
       if (res.success && res.url) {
         window.open(res.url, '_blank');
-        toast.success('Opened LinkedIn connection page. Once completed, refresh this page!');
-        setModal(false);
+        toast.success('Opened LinkedIn authentication window. Once connected, click "Sync Connected Account" below!');
       } else {
         toast.error(res.error || 'Failed to generate connection link');
+      }
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSyncHostedAccount = async () => {
+    setLoading(true);
+    try {
+      const res = await importNewestUnipileAccount();
+      if (res.success) {
+        toast.success(`Connected & saved: ${res.account?.name || 'LinkedIn Profile'}!`);
+        setModal(false);
+        await fetchProfiles();
+        loadNetworkData();
+      } else {
+        toast.error(res.error || 'No connected LinkedIn account detected on Unipile yet');
       }
     } catch (err) {
       toast.error(err.message);
@@ -838,6 +868,15 @@ export default function Profiles() {
                 >
                   {loading ? <Loader2 size={15} className="animate-spin" /> : <ExternalLink size={15} />}
                   Connect via Official LinkedIn Link
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSyncHostedAccount}
+                  disabled={loading}
+                  className="w-full py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/20 font-semibold text-xs rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                >
+                  {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                  Check & Sync Connected Account
                 </button>
               </div>
 
