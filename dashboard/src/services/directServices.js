@@ -1,7 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://mjwganpjawthnowemabt.supabase.co';
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1qd2dhbnBqYXd0aG5vd2VtYWJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzMDczMTUsImV4cCI6MjEwMTg4MzMxNX0.OwKeHoH2DH-jS7-_XRf6Vkx4bNZPKgbL9WOr5oSd27c';
+const ENV_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_URL = (ENV_URL && !ENV_URL.includes('mhzvxnbnaytirrgiwsnv') && !ENV_URL.includes('lupbvrgmkovpohjnbddf'))
+  ? ENV_URL
+  : 'https://mjwganpjawthnowemabt.supabase.co';
+
+const ENV_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const SUPABASE_ANON_KEY = (ENV_KEY && !ENV_KEY.includes('sb_publishable_gn93SdRFAAvpnH6faute9g_n8DiwZ_j') && !ENV_KEY.includes('sb_publishable_Ybu1D-FMVkpgJ-Z4y6KoIQ_A5Eo-M24'))
+  ? ENV_KEY
+  : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1qd2dhbnBqYXd0aG5vd2VtYWJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzMDczMTUsImV4cCI6MjEwMTg4MzMxNX0.OwKeHoH2DH-jS7-_XRf6Vkx4bNZPKgbL9WOr5oSd27c';
+
 const UNIPILE_API_KEY = 'vpftWHjq.lC9ACICdkDlLNupo90avQybHg2UjAtAkMssKHxsEw9o=';
 const UNIPILE_BASE_URL = 'https://api63.unipile.com:19339/api/v1';
 
@@ -9,7 +17,7 @@ export const supabaseDirect = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 export const isValidUuid = (val) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 const getUnipileBaseUrl = () => {
-  if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
+  if (typeof window !== 'undefined') {
     return '/api/unipile';
   }
   return UNIPILE_BASE_URL;
@@ -303,7 +311,6 @@ export const directCreateProfile = async (data) => {
         profile_key,
         display_name,
         unipile_account_id,
-        status: 'active',
         organization_id: orgId || userAcc?.organization_id || null,
         user_email: email,
         session_active: true,
@@ -313,6 +320,7 @@ export const directCreateProfile = async (data) => {
           user_email: email,
           session_active: true,
           enabled: true,
+          status: 'active',
           ...(data.settings || {}),
         },
         updated_at: new Date().toISOString(),
@@ -333,7 +341,9 @@ export const directCreateProfile = async (data) => {
 export const directDisconnectProfile = async (targetId = null) => {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
-      localStorage.setItem('lf_account_disconnected', 'true');
+      localStorage.removeItem('lf_account_disconnected');
+      localStorage.removeItem('lf_selected_account_id');
+      localStorage.removeItem('lf_active_account_id');
     }
   } catch (e) {}
 
@@ -368,32 +378,30 @@ export const directDisconnectProfile = async (targetId = null) => {
           if (p.unipile_account_id && !p.unipile_account_id.includes('@')) {
             try {
               await unipileFetch(`/accounts/${p.unipile_account_id}`, { method: 'DELETE' });
-            } catch (e) {
-              console.warn('Unipile delete account warning:', e);
+            } catch (err) {
+              console.warn('Unipile account delete warning:', err);
             }
           }
         }
       }
     }
+    return { success: true };
   } catch (err) {
     console.warn('directDisconnectProfile error:', err);
+    return { success: false, error: err.message };
+  } finally {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.removeItem('lf_selected_account_id');
+        localStorage.removeItem('lf_active_account_id');
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith('lf_chat_sent_messages_')) {
+            localStorage.removeItem(key);
+          }
+        });
+      }
+    } catch (e) {}
   }
-
-  activeAccountId = null;
-
-  try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      localStorage.removeItem('lf_selected_account_id');
-      localStorage.removeItem('lf_active_account_id');
-      Object.keys(localStorage).forEach(key => {
-        if (key.startsWith('lf_chat_sent_messages_')) {
-          localStorage.removeItem(key);
-        }
-      });
-    }
-  } catch (e) {}
-
-  return { success: true };
 };
 
 export const directConnectCookie = async (cookieVal) => {
