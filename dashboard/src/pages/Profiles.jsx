@@ -174,6 +174,18 @@ export default function Profiles() {
     loadNetworkData();
   }, []);
 
+  useEffect(() => {
+    if (profiles && profiles.length > 0) {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        try { localStorage.removeItem('lf_account_disconnected'); } catch (e) {}
+      }
+      if (!selectedAccId && profiles[0]?.unipile_account_id) {
+        setSelectedAccId(profiles[0].unipile_account_id);
+        loadNetworkData(profiles[0].unipile_account_id);
+      }
+    }
+  }, [profiles]);
+
   // Calculate Date Bounds for Timeline Filter
   const dateBounds = useMemo(() => {
     const now = new Date();
@@ -524,7 +536,7 @@ export default function Profiles() {
     }
   };
 
-  const isAccountConnected = Boolean(profiles && profiles.length > 0 && !getStoredDisconnectedFlag());
+  const isAccountConnected = Boolean(profiles && profiles.length > 0);
   const profileDisplayName = accountInfo?.name || profiles[0]?.display_name || 'LinkedIn Profile';
   const connectionStatus = accountInfo?.status || (isAccountConnected ? 'CONNECTED' : 'DISCONNECTED');
 
