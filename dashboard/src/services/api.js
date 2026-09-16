@@ -37,6 +37,7 @@ import {
   directConnectDirect,
   directCreateHostedLink,
   directSubmit2FA,
+  directImportNewestUnipileAccount,
 } from './directServices';
 
 // Strip BOM (U+FEFF) that Windows UTF-8 env files can inject into the value
@@ -320,8 +321,11 @@ export const connectUnipileCookie = (cookie_val) =>
 export const submitUnipile2FA = (account_id, code) =>
   directSubmit2FA(account_id, code);
 
-export const createUnipileHostedLink = () =>
-  directCreateHostedLink();
+export const createUnipileHostedLink = (redirectUrl = null) =>
+  directCreateHostedLink(redirectUrl);
+
+export const importNewestUnipileAccount = () =>
+  directImportNewestUnipileAccount();
 
 export default api;
 
