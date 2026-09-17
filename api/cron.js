@@ -53,14 +53,13 @@ export default async function handler(req, res) {
     const profiles = await sbFetch("profiles?select=*");
     const profileMap = new Map((profiles || []).map(p => [p.profile_key, p]));
 
-    const dailyConnectionLimit = 15;
     let totalSentToday = 0;
-
     for (const c of campaigns || []) {
-      if (totalSentToday >= dailyConnectionLimit) break;
-
       const profile = profileMap.get(c.profile_key);
       if (!profile || !profile.unipile_account_id) continue;
+
+      const dailyConnectionLimit = Number(profile.settings?.daily_connection_limit || 15);
+      if (totalSentToday >= dailyConnectionLimit) break;
 
       const accId = profile.unipile_account_id;
       log(`Processing Campaign '${c.name}' for account '${profile.display_name}' (${accId})`);
