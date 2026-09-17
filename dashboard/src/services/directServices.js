@@ -2514,14 +2514,17 @@ export const directRunFlow = async () => {
             }
 
             if (defaultEdge && nodesMap.get(defaultEdge.target)) {
-              currentNodeId = defaultEdge.target;
-              currentNode = nodesMap.get(currentNodeId);
-              nodeType = currentNode?.data?.nodeType || currentNode?.type;
-              nodeConfig = currentNode?.data?.config || {};
-              nodeLabel = currentNode?.data?.label || currentNode?.id;
-            } else {
-              continue;
+              prospect.custom_variables.current_node_id = defaultEdge.target;
+              prospect.custom_variables.next_scheduled_at = null;
+              try {
+                await supabaseDirect.from('prospects').update({
+                  custom_variables: prospect.custom_variables
+                }).eq('id', prospect.id);
+              } catch (e) {
+                console.warn(e);
+              }
             }
+            continue;
           }
         }
       }
