@@ -366,13 +366,6 @@ export const directDisconnectProfile = async (targetId = null) => {
 
         if (shouldDelete) {
           await supabaseDirect.from('profiles').delete().eq('id', p.id);
-          if (p.unipile_account_id && !p.unipile_account_id.includes('@')) {
-            try {
-              await unipileFetch(`/accounts/${p.unipile_account_id}`, { method: 'DELETE' });
-            } catch (err) {
-              console.warn('Unipile account delete warning:', err);
-            }
-          }
         }
       }
     }
