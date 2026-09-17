@@ -1217,7 +1217,6 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             headline: rowData.headline || rowData.job_title || existingProspect?.headline || '',
             email: emailVal || existingProspect?.email || '',
             linkedin_url: cleanUrl || rawUrl || existingProspect?.linkedin_url || '',
-            initial_message: initMsg || existingProspect?.initial_message || '',
             organization_id: effectiveOrgId || existingProspect?.organization_id || null,
             user_email: userEmail || existingProspect?.user_email || null,
             custom_variables: mergedCustomVars,
@@ -1228,13 +1227,6 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             status: (existingProspect?.status && existingProspect.status !== 'Not Contacted') ? existingProspect.status : 'Not Contacted',
             updated_at: new Date().toISOString(),
           };
-
-          for (let f = 1; f <= 5; f++) {
-            const fVal = rowData[`followup_${f}`] || rowData[`follow_up_${f}`] || customVars[`followup_${f}`] || customVars[`follow_up_${f}`] || mergedCustomVars[`followup_${f}`] || existingProspect?.[`followup_${f}`];
-            if (fVal) {
-              prospectRow[`followup_${f}`] = fVal;
-            }
-          }
 
           if (existingProspect) {
             // Already in master prospects table -> update record & ensure enrolled in this campaign
