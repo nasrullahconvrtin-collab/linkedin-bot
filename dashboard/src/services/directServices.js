@@ -1203,6 +1203,11 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             }
           }
 
+          const initMsg = rowData.initial_message || customVars.initial_message || mergedCustomVars.initial_message || existingProspect?.initial_message || '';
+          if (initMsg) {
+            mergedCustomVars.initial_message = initMsg;
+          }
+
           const prospectRow = {
             first_name: firstName || existingProspect?.first_name || 'Lead',
             last_name: lastName || existingProspect?.last_name || '',
@@ -1212,6 +1217,7 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             headline: rowData.headline || rowData.job_title || existingProspect?.headline || '',
             email: emailVal || existingProspect?.email || '',
             linkedin_url: cleanUrl || rawUrl || existingProspect?.linkedin_url || '',
+            initial_message: initMsg || existingProspect?.initial_message || '',
             organization_id: effectiveOrgId || existingProspect?.organization_id || null,
             user_email: userEmail || existingProspect?.user_email || null,
             custom_variables: mergedCustomVars,
@@ -1222,6 +1228,13 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             status: (existingProspect?.status && existingProspect.status !== 'Not Contacted') ? existingProspect.status : 'Not Contacted',
             updated_at: new Date().toISOString(),
           };
+
+          for (let f = 1; f <= 5; f++) {
+            const fVal = rowData[`followup_${f}`] || rowData[`follow_up_${f}`] || customVars[`followup_${f}`] || customVars[`follow_up_${f}`] || mergedCustomVars[`followup_${f}`] || existingProspect?.[`followup_${f}`];
+            if (fVal) {
+              prospectRow[`followup_${f}`] = fVal;
+            }
+          }
 
           if (existingProspect) {
             // Already in master prospects table -> update record & ensure enrolled in this campaign
@@ -2226,21 +2239,40 @@ export const directRunFlow = async () => {
 
           let resolvedValue = '';
           
-          if (normVar === 'firstname' || normVar === 'first_name') resolvedValue = prospect.first_name || '';
-          else if (normVar === 'lastname' || normVar === 'last_name') resolvedValue = prospect.last_name || '';
-          else if (normVar === 'company') resolvedValue = prospect.company || '';
-          else if (normVar === 'title') resolvedValue = prospect.job_title || '';
-          else {
-            if (prospect[varName] !== undefined) resolvedValue = prospect[varName];
-            else if (prospect.custom_variables) {
-              const matchKey = Object.keys(prospect.custom_variables).find(k => norm(k) === normVar);
-              if (matchKey !== undefined) {
-                resolvedValue = prospect.custom_variables[matchKey];
+          if (normVar === 'firstname' || normVar === 'first_name') {
+            resolvedValue = prospect.first_name || prospect.custom_variables?.first_name || '';
+          } else if (normVar === 'lastname' || normVar === 'last_name') {
+            resolvedValue = prospect.last_name || prospect.custom_variables?.last_name || '';
+          } else if (normVar === 'company') {
+            resolvedValue = prospect.company || prospect.custom_variables?.company || '';
+          } else if (normVar === 'title' || normVar === 'jobtitle') {
+            resolvedValue = prospect.job_title || prospect.custom_variables?.job_title || prospect.custom_variables?.title || '';
+          } else {
+            // 1. Check top-level prospect property if non-empty
+            if (prospect[varName] !== undefined && prospect[varName] !== null && String(prospect[varName]).trim() !== '') {
+              resolvedValue = prospect[varName];
+            }
+            // 2. Check custom_variables with exact key or normalized key
+            if (!resolvedValue && prospect.custom_variables) {
+              if (prospect.custom_variables[varName] !== undefined && prospect.custom_variables[varName] !== null && String(prospect.custom_variables[varName]).trim() !== '') {
+                resolvedValue = prospect.custom_variables[varName];
+              } else {
+                const matchKey = Object.keys(prospect.custom_variables).find(k => norm(k) === normVar);
+                if (matchKey !== undefined && prospect.custom_variables[matchKey] !== undefined && prospect.custom_variables[matchKey] !== null) {
+                  resolvedValue = prospect.custom_variables[matchKey];
+                }
+              }
+            }
+            // 3. Fallback: check top-level prospect with normalized key
+            if (!resolvedValue) {
+              const topMatchKey = Object.keys(prospect).find(k => norm(k) === normVar);
+              if (topMatchKey && prospect[topMatchKey] !== undefined && prospect[topMatchKey] !== null && String(prospect[topMatchKey]).trim() !== '') {
+                resolvedValue = prospect[topMatchKey];
               }
             }
           }
           
-          text = text.replace(m, resolvedValue !== undefined ? String(resolvedValue) : '');
+          text = text.replace(m, resolvedValue !== undefined && resolvedValue !== null ? String(resolvedValue) : '');
         }
         
         return text;
