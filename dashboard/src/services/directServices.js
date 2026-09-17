@@ -1383,39 +1383,37 @@ function autoGuessHeader(header) {
 
 export const downloadSampleCSVTemplate = () => {
   const headers = [
+    'linkedin_url',
     'first_name',
     'last_name',
-    'linkedin_url',
     'company',
     'job_title',
+    'location',
     'email',
     'initial_message',
     'follow_up_1',
     'follow_up_2',
     'follow_up_3',
     'follow_up_4',
-    'follow_up_5',
-    'company_pain_points',
-    'growth_goals',
-    'our_tailored_offer'
+    'pain_point',
+    'custom_offer'
   ];
   
   const sampleRow = [
+    'https://www.linkedin.com/in/craig-wilber-0b332525',
     'Craig',
     'Wilber',
-    'https://www.linkedin.com/in/craig-wilber-0b332525',
     'Lead Service Group LLC',
-    'CEO',
+    'Managing Director',
+    'Greater New York City Area',
     'craig@leadservicegroup.com',
-    '"Hi {{first_name}}, ConvrtIn\'s B2B outbound expertise addresses your lead flow needs."',
-    '"The fact that you operate both as publisher and buyer across 100+ verticals is rare. Curious what the biggest gap is right now?"',
-    '"We work with outbound B2B operations on building and qualifying lead sources. Figured worth mentioning as you expand."',
-    '"That\'s exactly why call center operators who move fastest lock in publisher relationships early."',
-    '"We built a clean verified list of qualified US-based publishers. Happy to walk you through how we structured it."',
-    '"Hope the new hires ramp fast and expansion goes smoothly!"',
-    'Scaling lead sourcing across verticals',
-    'Building direct publisher partnerships',
-    'Qualified B2B traffic sources'
+    '"Hi Craig, saw your work across 100+ publisher verticals at Lead Service Group. Worth connecting?"',
+    '"Craig, curious how your team is managing lead qualification during your expansion this quarter?"',
+    '"We work with outbound B2B teams to streamline outreach infrastructure without adding headcount."',
+    '"Worth a brief 10-min chat to compare notes on what we are seeing across similar verticals?"',
+    'Timing might not be right now, but door is always open. Best of luck with expansion!',
+    'Manual outreach bottlenecks',
+    'Automated outbound SDR pipeline'
   ];
 
   const content = `${headers.join(',')}\n${sampleRow.join(',')}`;
@@ -1423,10 +1421,58 @@ export const downloadSampleCSVTemplate = () => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.setAttribute('href', url);
-  link.setAttribute('download', 'linkedflow_prospects_template.csv');
+  link.setAttribute('download', 'official_prospects_template.csv');
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+};
+
+export const validateCSVHeaders = (headers = []) => {
+  if (!headers || headers.length === 0) {
+    return { valid: false, error: 'CSV file contains no headers.' };
+  }
+
+  const cleanHeaders = headers.map(h => (h || '').trim());
+  const cleanNorm = cleanHeaders.map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
+
+  // Check required linkedin_url
+  const hasLinkedinUrl = cleanNorm.some(h => h.includes('linkedin') || h.includes('profileurl') || h === 'url');
+  if (!hasLinkedinUrl) {
+    return {
+      valid: false,
+      error: 'Missing required "linkedin_url" column. Every prospect must have a LinkedIn profile URL so the tool can identify them.'
+    };
+  }
+
+  const STANDARD_KEYS = new Set([
+    'linkedinurl', 'firstname', 'lastname', 'name', 'company', 'jobtitle', 'title',
+    'headline', 'location', 'city', 'state', 'country', 'email', 'notes', 'invitenote',
+    'initialmessage', 'initial', 'followup1', 'followup2', 'followup3', 'followup4', 'followup5',
+    'followup1', 'followup2', 'followup3', 'followup4', 'followup5',
+    'inmailsubject', 'inmailmessage'
+  ]);
+
+  const standardFields = [];
+  const customVariables = [];
+
+  cleanHeaders.forEach((h, idx) => {
+    const norm = cleanNorm[idx];
+    if (!norm) return;
+    if (STANDARD_KEYS.has(norm)) {
+      standardFields.push(h);
+    } else {
+      const slug = h.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      if (slug) customVariables.push({ header: h, variable: `{{${slug}}}` });
+    }
+  });
+
+  return {
+    valid: true,
+    hasLinkedinUrl: true,
+    standardFields,
+    customVariables,
+    totalHeaders: cleanHeaders.length
+  };
 };
 
 // ── Prospect Lists Direct Operations ────────────────────────────

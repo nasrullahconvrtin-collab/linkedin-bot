@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { FileSpreadsheet, ArrowRight, Check, X, AlertCircle, Loader2, Sparkles, Layers, ListPlus, HelpCircle } from 'lucide-react';
+import { FileSpreadsheet, ArrowRight, Check, X, AlertCircle, Loader2, Sparkles, Layers, ListPlus, HelpCircle, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { downloadSampleCSVTemplate, validateCSVHeaders } from '../services/directServices';
 
 const MAPPING_OPTIONS = [
   { group: 'Standard Fields', options: [
@@ -68,6 +69,7 @@ export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete
   const [targetListId, setTargetListId] = useState(defaultListId || '');
   const [targetCampaignId, setTargetCampaignId] = useState(initialCampaignId || '');
   const [loading, setLoading] = useState(false);
+  const [validationResult, setValidationResult] = useState(null);
 
   // Parse CSV text cleanly handling quotes and newlines
   const parseCSV = (csvText) => {
@@ -107,6 +109,7 @@ export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete
   const processFile = React.useCallback((selectedFile) => {
     if (!selectedFile) return;
     setFile(selectedFile);
+    setValidationResult(null);
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
@@ -119,6 +122,16 @@ export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete
 
         const headers = parsed[0].map(h => h.trim().replace(/^["']|["']$/g, ''));
         const dataRows = parsed.slice(1).filter(r => r.some(Boolean));
+
+        // Strict header validation
+        const validation = validateCSVHeaders(headers);
+        setValidationResult(validation);
+
+        if (!validation.valid) {
+          toast.error(validation.error);
+          setStep(1); // Block and keep on step 1 with clear warning
+          return;
+        }
 
         setCsvHeaders(headers);
         setSampleRows(dataRows.slice(0, 3));
@@ -189,6 +202,7 @@ export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete
   const handleClose = () => {
     setStep(1);
     setFile(null);
+    setValidationResult(null);
     setCsvHeaders([]);
     setSampleRows([]);
     setColumnMapping({});
@@ -244,8 +258,57 @@ export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete
           
           {/* STEP 1: UPLOAD FILE */}
           {step === 1 && (
-            <div className="py-8 text-center space-y-4">
-              <div className="border-2 border-dashed border-[#2a2a2a] hover:border-[#6366f1] bg-[#181818] rounded-2xl p-10 transition-all group cursor-pointer relative">
+            <div className="space-y-4 py-2">
+              {/* Official Template Banner */}
+              <div className="bg-[#1e1b4b]/40 border border-[#6366f1]/30 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#6366f1]/20 text-[#6366f1] flex items-center justify-center flex-shrink-0">
+                    <Download size={20} />
+                  </div>
+                  <div>
+                    <div className="text-white text-sm font-semibold flex items-center gap-2">
+                      Official CSV Template
+                      <span className="text-[10px] uppercase font-bold bg-[#6366f1]/20 text-[#a5b4fc] px-1.5 py-0.5 rounded border border-[#6366f1]/30">
+                        Recommended
+                      </span>
+                    </div>
+                    <div className="text-[#9ca3af] text-xs">
+                      Headers match internal variables 1:1 (<code className="text-white bg-[#111111] px-1 py-0.5 rounded">linkedin_url</code>, <code className="text-white bg-[#111111] px-1 py-0.5 rounded">initial_message</code>, <code className="text-white bg-[#111111] px-1 py-0.5 rounded">follow_up_1</code>). Supports unlimited custom variables!
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={downloadSampleCSVTemplate}
+                  className="px-3.5 py-2 bg-[#6366f1] hover:bg-[#4f46e5] text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors shadow-sm whitespace-nowrap flex-shrink-0"
+                >
+                  <Download size={14} />
+                  Download Template (.csv)
+                </button>
+              </div>
+
+              {/* Validation Error Alert if file was rejected */}
+              {validationResult && !validationResult.valid && (
+                <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-left flex items-start gap-3">
+                  <AlertCircle size={20} className="text-red-400 mt-0.5 flex-shrink-0" />
+                  <div className="space-y-1">
+                    <div className="text-red-300 font-semibold text-sm">Import Blocked: Invalid Header Format</div>
+                    <div className="text-red-200/80 text-xs">{validationResult.error}</div>
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={downloadSampleCSVTemplate}
+                        className="text-xs text-[#818cf8] underline hover:text-white font-medium flex items-center gap-1"
+                      >
+                        Download the official template to match your columns &rarr;
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Drag & Drop Upload Zone */}
+              <div className="border-2 border-dashed border-[#2a2a2a] hover:border-[#6366f1] bg-[#181818] rounded-2xl p-10 transition-all group cursor-pointer relative text-center">
                 <input
                   type="file"
                   accept=".csv"
@@ -256,7 +319,9 @@ export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete
                   <FileSpreadsheet size={32} />
                 </div>
                 <h3 className="text-white font-bold text-base mb-1">Click or drag & drop CSV file here</h3>
-                <p className="text-[#9ca3af] text-xs">Supports any standard CSV file with headers (e.g. Sales Navigator exports, CRM lists)</p>
+                <p className="text-[#9ca3af] text-xs max-w-md mx-auto">
+                  Must contain <span className="text-white font-mono">linkedin_url</span> column. Message templates and any custom columns will be auto-detected and converted into usable variables.
+                </p>
               </div>
             </div>
           )}
@@ -264,6 +329,25 @@ export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete
           {/* STEP 2: MAP FIELDS & CUSTOM VARIABLES */}
           {step === 2 && (
             <div className="space-y-4">
+              {/* Detected Custom Variables Badge Bar */}
+              {validationResult?.customVariables?.length > 0 && (
+                <div className="bg-[#1e1b4b]/30 border border-[#6366f1]/30 rounded-xl p-3 flex items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                      <Check size={14} /> Official Format Validated
+                    </span>
+                    <span className="text-[#4b5563]">|</span>
+                    <span className="text-[#a5b4fc] font-medium">
+                      ✨ {validationResult.customVariables.length} Custom Variables ready to use in templates:
+                    </span>
+                    {validationResult.customVariables.map(cv => (
+                      <span key={cv.variable} className="px-2 py-0.5 rounded bg-[#6366f1]/20 border border-[#6366f1]/40 text-white font-mono text-[11px]">
+                        {cv.variable}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               
               {/* File details & Top Action Toolbar */}
               <div className="flex flex-wrap items-center justify-between gap-3 bg-[#181818] p-3.5 rounded-xl border border-[#2a2a2a]">

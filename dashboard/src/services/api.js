@@ -152,7 +152,7 @@ export const bulkImportProspects = (file, columnMapping = null, mode = 'create_o
   return directBulkImportProspects(file, columnMapping, mode, listId, campaignId);
 };
 
-export { downloadSampleCSVTemplate } from './directServices';
+export { downloadSampleCSVTemplate, validateCSVHeaders } from './directServices';
 
 
 // ── Activity Log ─────────────────────────────────────────────
