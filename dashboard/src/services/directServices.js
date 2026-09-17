@@ -499,14 +499,25 @@ export const directSubmit2FA = async (accountId, code) => {
 
 export const directGetUnipileAccountInfo = async (accountId = null) => {
   const userProfiles = await directGetProfiles();
-  const targetAccId = accountId || userProfiles[0]?.unipile_account_id;
+  const validAccIds = new Set(userProfiles.map(p => p.unipile_account_id).filter(Boolean));
+
+  let targetAccId = accountId;
+  // Database Isolation Gate: verify requested accountId exists in this database's profiles
+  if (!targetAccId || !validAccIds.has(targetAccId)) {
+    targetAccId = userProfiles[0]?.unipile_account_id;
+    if (typeof window !== 'undefined' && window.localStorage) {
+      if (targetAccId) localStorage.setItem('lf_selected_account_id', targetAccId);
+      else localStorage.removeItem('lf_selected_account_id');
+    }
+  }
   if (!targetAccId) return null;
 
   try {
     const { ok, data } = await unipileFetch(`/accounts/${targetAccId}`);
     if (ok && data && data.id) {
+      const matchedProfile = userProfiles.find(p => p.unipile_account_id === data.id);
       const imParam = data.connection_params?.im || {};
-      const realName = data.name || imParam.username || userProfiles[0]?.display_name || 'LinkedIn Profile';
+      const realName = matchedProfile?.display_name || data.name || imParam.username || 'LinkedIn Profile';
       return {
         id: data.id,
         name: realName,
@@ -524,9 +535,11 @@ export const directGetUnipileAccountInfo = async (accountId = null) => {
 };
 
 export const directGetNetworkingConnections = async (overrideAccountId = null) => {
+  const userProfiles = await directGetProfiles();
+  const validAccIds = new Set(userProfiles.map(p => p.unipile_account_id).filter(Boolean));
+
   let targetAccId = overrideAccountId;
-  if (!targetAccId) {
-    const userProfiles = await directGetProfiles();
+  if (!targetAccId || !validAccIds.has(targetAccId)) {
     targetAccId = userProfiles[0]?.unipile_account_id;
   }
   if (!targetAccId) {
@@ -560,9 +573,11 @@ export const directGetNetworkingConnections = async (overrideAccountId = null) =
 };
 
 export const directGetNetworkingInvitations = async (overrideAccountId = null) => {
+  const userProfiles = await directGetProfiles();
+  const validAccIds = new Set(userProfiles.map(p => p.unipile_account_id).filter(Boolean));
+
   let targetAccId = overrideAccountId;
-  if (!targetAccId) {
-    const userProfiles = await directGetProfiles();
+  if (!targetAccId || !validAccIds.has(targetAccId)) {
     targetAccId = userProfiles[0]?.unipile_account_id;
   }
   if (!targetAccId) {
@@ -644,12 +659,27 @@ export const directGetCampaigns = async () => {
   try {
     let campaignQuery = supabaseDirect.from('campaigns').select('*').order('created_at', { ascending: false });
     if (isValidUuid(orgId)) campaignQuery = campaignQuery.eq('organization_id', orgId);
-    const { data: rawCampaigns, error } = await campaignQuery;
+    let { data: rawCampaigns, error } = await campaignQuery;
+
+    // Fallback: If org-filtered query returned 0 campaigns, query all campaigns in database
+    // This prevents a stale cross-database localStorage organization_id from hiding active campaigns
+    if (!error && (!rawCampaigns || rawCampaigns.length === 0) && isValidUuid(orgId)) {
+      const { data: allCamp } = await supabaseDirect.from('campaigns').select('*').order('created_at', { ascending: false });
+      if (allCamp && allCamp.length > 0) {
+        rawCampaigns = allCamp;
+      }
+    }
+
     if (!error && rawCampaigns) {
       const campaigns = rawCampaigns;
 
       let prospectQuery = supabaseDirect.from('prospects').select('id, campaign_id, status, connection_status, connection_sent_date, message_sent_date, custom_variables');
-      if (isValidUuid(orgId)) prospectQuery = prospectQuery.eq('organization_id', orgId);
+      const campOrgIds = new Set(campaigns.map(c => c.organization_id).filter(isValidUuid));
+      if (campOrgIds.size === 1) {
+        prospectQuery = prospectQuery.eq('organization_id', Array.from(campOrgIds)[0]);
+      } else if (isValidUuid(orgId)) {
+        prospectQuery = prospectQuery.eq('organization_id', orgId);
+      }
       const { data: prospects } = await prospectQuery;
       const prospectMap = new Map();
       (prospects || []).forEach(p => {
@@ -919,7 +949,18 @@ export const directGetProspects = async (params = {}) => {
     const offset = params.offset !== undefined ? Number(params.offset) : ((params.page || 1) - 1) * limit;
     query = query.range(offset, offset + limit - 1);
     
-    const { data: rawData, count, error } = await query;
+    let { data: rawData, count, error } = await query;
+
+    // Fallback: If org filter returned 0 prospects, query all prospects in this database
+    if (!error && (!rawData || rawData.length === 0) && !params.campaign_id && !params.status && !params.list_id && isValidUuid(orgId)) {
+      const fallbackQuery = supabaseDirect.from('prospects').select('*', { count: 'exact' }).order('created_at', { ascending: false }).range(offset, offset + limit - 1);
+      const { data: fbData, count: fbCount } = await fallbackQuery;
+      if (fbData && fbData.length > 0) {
+        rawData = fbData;
+        count = fbCount;
+      }
+    }
+
     if (!error && rawData) {
       return { prospects: rawData, total: count || rawData.length };
     }

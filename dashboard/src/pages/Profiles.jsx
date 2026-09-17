@@ -124,8 +124,18 @@ export default function Profiles() {
     try {
       const isSuper = isSuperAdminUser();
       const orgId = getActiveOrganizationId();
-      const userAcc = getActiveUserAccount();
-      const accToUse = targetId || selectedAccId || (typeof window !== 'undefined' ? localStorage.getItem('lf_selected_account_id') : null) || null;
+      const validAccIds = new Set((profiles || []).map(p => p.unipile_account_id).filter(Boolean));
+      let accToUse = targetId || selectedAccId || (typeof window !== 'undefined' ? localStorage.getItem('lf_selected_account_id') : null) || null;
+      if (accToUse && validAccIds.size > 0 && !validAccIds.has(accToUse)) {
+        accToUse = profiles[0]?.unipile_account_id || null;
+        if (typeof window !== 'undefined' && window.localStorage) {
+          if (accToUse) localStorage.setItem('lf_selected_account_id', accToUse);
+          else localStorage.removeItem('lf_selected_account_id');
+        }
+      }
+      if (!accToUse && profiles?.[0]?.unipile_account_id) {
+        accToUse = profiles[0].unipile_account_id;
+      }
 
       let pQuery = supabaseDirect.from('prospects').select('*');
       if (!isSuper) {
@@ -567,7 +577,8 @@ export default function Profiles() {
   };
 
   const isAccountConnected = Boolean(profiles && profiles.length > 0);
-  const profileDisplayName = accountInfo?.name || profiles[0]?.display_name || 'LinkedIn Profile';
+  const matchedProfile = profiles.find(p => p.unipile_account_id === (selectedAccId || accountInfo?.id)) || profiles[0];
+  const profileDisplayName = matchedProfile?.display_name || accountInfo?.name || 'LinkedIn Profile';
   const connectionStatus = accountInfo?.status || (isAccountConnected ? 'CONNECTED' : 'DISCONNECTED');
 
   const tabs = [
