@@ -15,6 +15,82 @@ const UNIPILE_BASE_URL = 'https://api63.unipile.com:19339/api/v1';
 
 export const supabaseDirect = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// ─── Module-level isolation guard ────────────────────────────────────────────
+// Runs once when the module loads (before any component mounts).
+// Clears localStorage keys that may have been written by a different Supabase
+// deployment (e.g. Convrtin data leaking into IntegriLeads or vice-versa).
+(async () => {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+
+    // 1. Validate lf_selected_account_id against profiles in THIS database
+    const storedAccId = localStorage.getItem('lf_selected_account_id');
+    if (storedAccId) {
+      const { data: profiles } = await supabaseDirect
+        .from('profiles')
+        .select('unipile_account_id');
+      const validIds = new Set(
+        (profiles || []).map(p => p.unipile_account_id).filter(Boolean)
+      );
+      if (!validIds.has(storedAccId)) {
+        console.warn('[DirectServices] Stale lf_selected_account_id detected — clearing.');
+        localStorage.removeItem('lf_selected_account_id');
+        localStorage.removeItem('lf_active_account_id');
+        // If there's exactly one profile in this DB, auto-select it
+        if (validIds.size === 1) {
+          const firstId = [...validIds][0];
+          localStorage.setItem('lf_selected_account_id', firstId);
+          console.info('[DirectServices] Auto-selected account:', firstId);
+        }
+      }
+    } else {
+      // No account stored at all — auto-select the first profile in this DB
+      const { data: profiles } = await supabaseDirect
+        .from('profiles')
+        .select('unipile_account_id')
+        .limit(1);
+      const firstId = profiles?.[0]?.unipile_account_id;
+      if (firstId) {
+        localStorage.setItem('lf_selected_account_id', firstId);
+        console.info('[DirectServices] Auto-selected first account:', firstId);
+      }
+    }
+
+    // 2. Validate lf_user_account org against campaigns in THIS database
+    const storedUser = localStorage.getItem('lf_user_account');
+    if (storedUser) {
+      try {
+        const userObj = JSON.parse(storedUser);
+        const storedOrgId = userObj?.organization_id;
+        if (storedOrgId) {
+          // Check if this org has any campaigns in the current database
+          const { data: campaigns } = await supabaseDirect
+            .from('campaigns')
+            .select('id')
+            .eq('organization_id', storedOrgId)
+            .limit(1);
+          if (!campaigns || campaigns.length === 0) {
+            // No campaigns for this org in the current DB — fetch the real org
+            const { data: anyCampaign } = await supabaseDirect
+              .from('campaigns')
+              .select('organization_id')
+              .limit(1);
+            if (anyCampaign?.[0]?.organization_id) {
+              const correctOrgId = anyCampaign[0].organization_id;
+              console.warn(`[DirectServices] Stale org ${storedOrgId} → correcting to ${correctOrgId}`);
+              userObj.organization_id = correctOrgId;
+              localStorage.setItem('lf_user_account', JSON.stringify(userObj));
+            }
+          }
+        }
+      } catch (e) { /* ignore parse errors */ }
+    }
+  } catch (e) {
+    // Silently ignore — never break the app at module load
+  }
+})();
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const isValidUuid = (val) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 const getUnipileBaseUrl = () => {
   if (typeof window !== 'undefined') {
