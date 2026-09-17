@@ -2192,7 +2192,7 @@ export const directRunFlow = async () => {
 
       let nodeType = currentNode.data?.nodeType;
       let nodeConfig = currentNode.data?.config || {};
-      const nodeLabel = currentNode.data?.label || currentNode.id;
+      let nodeLabel = currentNode.data?.label || currentNode.id;
 
       // Auto-resolve LinkedIn IDs if the prospect has not been visited/resolved yet
       const isActionNode = ['follow_profile', 'endorse_profile', 'send_invitation', 'send_message'].includes(nodeType);
@@ -2235,6 +2235,7 @@ export const directRunFlow = async () => {
             currentNode = nodesMap.get(currentNodeId);
             nodeType = currentNode?.data?.nodeType || currentNode?.type;
             nodeConfig = currentNode?.data?.config || {};
+            nodeLabel = currentNode?.data?.label || currentNode?.id;
           } else {
             continue;
           }
@@ -2311,8 +2312,9 @@ export const directRunFlow = async () => {
           if (defaultEdge && nodesMap.get(defaultEdge.target)) {
             currentNodeId = defaultEdge.target;
             currentNode = nodesMap.get(currentNodeId);
-            nodeType = currentNode?.type || currentNode?.data?.action_type || currentNode?.data?.nodeType || 'send_message';
+            nodeType = currentNode?.data?.nodeType || currentNode?.data?.action_type || currentNode?.type || 'send_message';
             nodeConfig = currentNode?.data?.config || currentNode?.data || {};
+            nodeLabel = currentNode?.data?.label || currentNode?.id;
           } else {
             continue;
           }
@@ -2516,6 +2518,7 @@ export const directRunFlow = async () => {
               currentNode = nodesMap.get(currentNodeId);
               nodeType = currentNode?.data?.nodeType || currentNode?.type;
               nodeConfig = currentNode?.data?.config || {};
+              nodeLabel = currentNode?.data?.label || currentNode?.id;
             } else {
               continue;
             }
