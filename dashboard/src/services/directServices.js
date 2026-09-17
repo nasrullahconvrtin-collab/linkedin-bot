@@ -2464,7 +2464,21 @@ export const directRunFlow = async () => {
         const wasSent = prospect.custom_variables.last_sent_node_id === currentNode.id;
 
         if (!wasSent) {
-          const msgText = render(nodeConfig.message || '');
+          const msgText = render(nodeConfig.message || '').trim();
+          if (!msgText) {
+            console.warn(`[Runner] Skipping send_message for ${prospect.name}: message rendered empty (template: "${nodeConfig.message || ''}")`);
+            prospect.custom_variables.history = [
+              ...(prospect.custom_variables.history || []),
+              { node_id: currentNode.id, node_type: 'send_message', executed_at: new Date().toISOString(), status: 'skipped', error: 'Rendered message is empty (missing template variable: ' + (nodeConfig.message || 'empty') + ')' }
+            ];
+            try {
+              await supabaseDirect.from('prospects').update({
+                status: 'Needs Review',
+                custom_variables: prospect.custom_variables
+              }).eq('id', prospect.id);
+            } catch (e) {}
+            continue;
+          }
           console.log(`Sending message to ${prospect.name}...`);
           const res = await directSendUnipileChatMessage(prospect, msgText);
 
