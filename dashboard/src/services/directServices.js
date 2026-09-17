@@ -937,6 +937,12 @@ export const directCreateProspect = async (data) => {
   const userAcc = getActiveUserAccount();
   const orgId = getActiveOrganizationId();
   const email = userAcc?.email ? userAcc.email.toLowerCase() : null;
+  const customVars = {
+    ...(data.custom_variables || {}),
+    organization_id: orgId || userAcc?.organization_id || null,
+    user_email: email,
+  };
+  if (data.location) customVars.location = data.location;
 
   const payload = {
     first_name: firstName,
@@ -944,6 +950,7 @@ export const directCreateProspect = async (data) => {
     name: data.name || `${firstName} ${data.last_name || ''}`.trim(),
     company: data.company || '',
     job_title: data.job_title || data.title || '',
+    headline: data.headline || data.job_title || data.title || '',
     email: data.email || '',
     linkedin_url: data.linkedin_url || '',
     status: data.status || 'Not Contacted',
@@ -951,11 +958,7 @@ export const directCreateProspect = async (data) => {
     list_id: data.list_id || null,
     organization_id: orgId || userAcc?.organization_id || null,
     user_email: email,
-    custom_variables: {
-      ...(data.custom_variables || {}),
-      organization_id: orgId || userAcc?.organization_id || null,
-      user_email: email,
-    },
+    custom_variables: customVars,
     created_at: new Date().toISOString(),
   };
   try {
@@ -1184,15 +1187,31 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
           };
           if (effectiveOrgId) mergedCustomVars.organization_id = effectiveOrgId;
 
+          // Always preserve all mapped rowData fields (location, initial_message, follow-ups, etc.) into custom_variables
+          Object.entries(rowData).forEach(([k, v]) => {
+            if (v !== undefined && v !== null && String(v).trim() !== '') {
+              mergedCustomVars[k] = String(v).trim();
+            }
+          });
+
+          // Ensure follow-up variables exist with both underscore and non-underscore keys
+          for (let f = 1; f <= 5; f++) {
+            const val = rowData[`followup_${f}`] || rowData[`follow_up_${f}`] || customVars[`followup_${f}`] || customVars[`follow_up_${f}`] || existingProspect?.custom_variables?.[`followup_${f}`] || existingProspect?.custom_variables?.[`follow_up_${f}`];
+            if (val) {
+              mergedCustomVars[`followup_${f}`] = val;
+              mergedCustomVars[`follow_up_${f}`] = val;
+            }
+          }
+
           const prospectRow = {
             first_name: firstName || existingProspect?.first_name || 'Lead',
             last_name: lastName || existingProspect?.last_name || '',
             name: rowData.name || `${firstName} ${lastName}`.trim() || existingProspect?.name || 'Prospect',
             company: rowData.company || existingProspect?.company || '',
             job_title: rowData.job_title || rowData.headline || existingProspect?.job_title || '',
+            headline: rowData.headline || rowData.job_title || existingProspect?.headline || '',
             email: emailVal || existingProspect?.email || '',
             linkedin_url: cleanUrl || rawUrl || existingProspect?.linkedin_url || '',
-            location: rowData.location || existingProspect?.location || '',
             organization_id: effectiveOrgId || existingProspect?.organization_id || null,
             user_email: userEmail || existingProspect?.user_email || null,
             custom_variables: mergedCustomVars,
@@ -1252,7 +1271,7 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
 
         // UPDATE existing prospects in master table
         for (const row of toUpdate) {
-          const { id, ...fields } = row;
+          const { id, location, ...fields } = row;
           const { data, error } = await supabaseDirect
             .from('prospects')
             .update(fields)
@@ -1350,15 +1369,15 @@ function autoGuessHeader(header) {
   if (clean.includes('company') || clean.includes('organization')) return 'company';
   if (clean.includes('job') || clean.includes('title')) return 'job_title';
   if (clean.includes('headline')) return 'headline';
-  if (clean.includes('location') || clean.includes('city')) return 'location';
-  if (clean.includes('note')) return 'notes';
+  if (clean.includes('location') || clean.includes('city') || clean.includes('country') || clean.includes('state')) return 'location';
   if (clean.includes('invite') && clean.includes('note')) return 'invite_note';
+  if (clean.includes('note')) return 'notes';
   if (clean.includes('initial')) return 'initial_message';
-  if (clean.includes('followup_1')) return 'followup_1';
-  if (clean.includes('followup_2')) return 'followup_2';
-  if (clean.includes('followup_3')) return 'followup_3';
-  if (clean.includes('followup_4')) return 'followup_4';
-  if (clean.includes('followup_5')) return 'followup_5';
+  if (clean.includes('followup_1') || clean.includes('follow_up_1') || clean === 'followup1' || clean === 'fu1') return 'followup_1';
+  if (clean.includes('followup_2') || clean.includes('follow_up_2') || clean === 'followup2' || clean === 'fu2') return 'followup_2';
+  if (clean.includes('followup_3') || clean.includes('follow_up_3') || clean === 'followup3' || clean === 'fu3') return 'followup_3';
+  if (clean.includes('followup_4') || clean.includes('follow_up_4') || clean === 'followup4' || clean === 'fu4') return 'followup_4';
+  if (clean.includes('followup_5') || clean.includes('follow_up_5') || clean === 'followup5' || clean === 'fu5') return 'followup_5';
   return 'custom_var';
 }
 
@@ -1681,8 +1700,11 @@ export const directSendUnipileChatMessage = async (prospect, text = '') => {
   const recipientId = getLinkedinId(prospect);
   const accountId = await getAccountForProspect(prospect);
   if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
-
-  const messageText = text || prospect.initial_message || 'Hello!';
+  const messageText = (text || prospect.initial_message || prospect.custom_variables?.initial_message || '').trim();
+  if (!messageText) {
+    console.error(`[directSendUnipileChatMessage] No message text found for prospect ${prospect.name || prospect.id}`);
+    return { success: false, error: 'EMPTY_MESSAGE: No message configured or resolved for prospect' };
+  }
 
   // Pre-message human review pause & typing simulation
   await humanPause(10, 22, 'Opening chat window');
@@ -1769,10 +1791,15 @@ export const directSendUnipileInMail = async (prospect, subject = '', text = '',
   }
   if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
 
+  const messageText = (text || prospect.inmail_message || prospect.custom_variables?.inmail_message || '').trim();
+  if (!messageText) {
+    return { success: false, error: 'EMPTY_INMAIL_MESSAGE: No InMail message text provided' };
+  }
+
   const payload = {
     account_id: accountId,
     attendees_ids: [recipientId],
-    text: text || 'Hello!',
+    text: messageText,
     subject: subject || 'Introduction',
     inmail: true,
   };
