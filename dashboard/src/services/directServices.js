@@ -285,38 +285,24 @@ export const directGetProfiles = async () => {
 };
 
 export const directImportNewestUnipileAccount = async (targetAccountId = null) => {
+  if (!targetAccountId) {
+    return { success: false, error: 'Target account ID is required. Automatic discovery of arbitrary accounts is disabled to prevent cross-account linking.' };
+  }
   try {
-    const unipileRes = await unipileFetch('/accounts');
-    if (unipileRes.ok && unipileRes.data?.items) {
-      const activeUnipileAccs = unipileRes.data.items.filter(a => a.type === 'LINKEDIN');
-      if (activeUnipileAccs.length > 0) {
-        let targetAcc = null;
-        if (targetAccountId) {
-          targetAcc = activeUnipileAccs.find(a => a.id === targetAccountId);
-        }
-        if (!targetAcc) {
-          // Find accounts that are NOT already bound to ANY profile in Supabase
-          const { data: existingProfiles } = await supabaseDirect.from('profiles').select('unipile_account_id');
-          const boundAccIds = new Set((existingProfiles || []).map(p => p.unipile_account_id).filter(Boolean));
-          
-          activeUnipileAccs.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-          // First try to find a newly connected account that isn't bound yet
-          targetAcc = activeUnipileAccs.find(a => !boundAccIds.has(a.id));
-        }
-        if (targetAcc) {
-          const accId = targetAcc.id;
-          const accName = targetAcc.name || targetAcc.connection_params?.im?.username || 'LinkedIn Profile';
-          await directCreateProfile({
-            profile_key: `profile_${accId}`,
-            display_name: accName,
-            unipile_account_id: accId,
-            session_active: true
-          });
-          return { success: true, account: targetAcc };
-        }
-      }
+    const unipileRes = await unipileFetch(`/accounts/${targetAccountId}`);
+    if (unipileRes.ok && unipileRes.data) {
+      const targetAcc = unipileRes.data;
+      const accId = targetAcc.id;
+      const accName = targetAcc.name || targetAcc.connection_params?.im?.username || 'LinkedIn Profile';
+      await directCreateProfile({
+        profile_key: `profile_${accId}`,
+        display_name: accName,
+        unipile_account_id: accId,
+        session_active: true
+      });
+      return { success: true, account: targetAcc };
     }
-    return { success: false, error: 'No LinkedIn account found on Unipile' };
+    return { success: false, error: `Account ${targetAccountId} not found on Unipile` };
   } catch (e) {
     return { success: false, error: e.message };
   }

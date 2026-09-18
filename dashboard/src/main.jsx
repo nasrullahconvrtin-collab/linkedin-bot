@@ -41,30 +41,13 @@ async function sanitizeLocalStorage() {
     }
 
     // 2. Validate lf_user_account organization_id
+    // Preserves each tenant's specific organization_id without cross-tenant mutation
     const storedUser = localStorage.getItem('lf_user_account');
     if (storedUser) {
-      const userObj = JSON.parse(storedUser);
-      const storedOrgId = userObj?.organization_id;
-      if (storedOrgId) {
-        const campRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/campaigns?organization_id=eq.${storedOrgId}&select=id&limit=1`,
-          { headers }
-        );
-        const camps = await campRes.json().catch(() => []);
-        if (!Array.isArray(camps) || camps.length === 0) {
-          // Stale org — get the real one from this DB
-          const anyRes = await fetch(
-            `${SUPABASE_URL}/rest/v1/campaigns?select=organization_id&limit=1`,
-            { headers }
-          );
-          const any = await anyRes.json().catch(() => []);
-          if (Array.isArray(any) && any[0]?.organization_id) {
-            console.warn('[INIT] Stale org corrected:', storedOrgId, '→', any[0].organization_id);
-            userObj.organization_id = any[0].organization_id;
-            localStorage.setItem('lf_user_account', JSON.stringify(userObj));
-          }
-        }
-      }
+      try {
+        const userObj = JSON.parse(storedUser);
+        // Do not mutate or overwrite organization_id across tenants
+      } catch (e) {}
     }
   } catch (e) {
     console.warn('[INIT] localStorage sanitize error (non-fatal):', e);

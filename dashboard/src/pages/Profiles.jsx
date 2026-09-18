@@ -201,7 +201,9 @@ export default function Profiles() {
       const urlParams = new URLSearchParams(window.location.search);
       const accIdFromUrl = urlParams.get('account_id');
       window.history.replaceState({}, '', window.location.pathname);
-      handleSyncHostedAccount(accIdFromUrl);
+      if (accIdFromUrl) {
+        handleSyncHostedAccount(accIdFromUrl);
+      }
     }
   }, []);
 
@@ -453,7 +455,7 @@ export default function Profiles() {
       const res = await createUnipileHostedLink(redirectUrl);
       if (res.success && res.url) {
         window.open(res.url, '_blank');
-        toast.success('Opened LinkedIn authentication window. Once connected, click "Sync Connected Account" below!');
+        toast.success('Opened LinkedIn authentication window. Complete login to link your account.');
       } else {
         toast.error(res.error || 'Failed to generate connection link');
       }
@@ -465,6 +467,10 @@ export default function Profiles() {
   };
 
   const handleSyncHostedAccount = async (targetAccId = null) => {
+    if (!targetAccId) {
+      toast.error('Account ID is required to link an account.');
+      return;
+    }
     setLoading(true);
     try {
       const res = await importNewestUnipileAccount(targetAccId);
@@ -474,7 +480,7 @@ export default function Profiles() {
         await fetchProfiles();
         loadNetworkData();
       } else {
-        toast.error(res.error || 'No connected LinkedIn account detected on Unipile yet');
+        toast.error(res.error || 'Failed to connect LinkedIn account');
       }
     } catch (err) {
       toast.error(err.message);
@@ -896,15 +902,6 @@ export default function Profiles() {
                 >
                   {loading ? <Loader2 size={15} className="animate-spin" /> : <ExternalLink size={15} />}
                   Connect via Official LinkedIn Link
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSyncHostedAccount}
-                  disabled={loading}
-                  className="w-full py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/20 font-semibold text-xs rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
-                >
-                  {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                  Check & Sync Connected Account
                 </button>
               </div>
 
