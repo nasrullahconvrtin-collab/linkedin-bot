@@ -1265,7 +1265,10 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
           const customVars = {};
 
           rawHeaders.forEach((h, idx) => {
-            const val = (cols[idx] || '').trim();
+            let val = (cols[idx] || '').trim();
+            if (val.includes('\\n') || val.includes('\\r')) {
+              val = val.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\r/g, '\n');
+            }
             const target = columnMapping?.[h] || autoGuessHeader(h);
             if (target === 'skip') return;
             if (target === 'custom_var') {
@@ -1880,7 +1883,10 @@ export const directSendUnipileChatMessage = async (prospect, text = '') => {
   const recipientId = getLinkedinId(prospect);
   const accountId = await getAccountForProspect(prospect);
   if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
-  const messageText = (text || prospect.initial_message || prospect.custom_variables?.initial_message || '').trim();
+  let messageText = (text || prospect.initial_message || prospect.custom_variables?.initial_message || '').trim();
+  if (messageText.includes('\\n') || messageText.includes('\\r')) {
+    messageText = messageText.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\r/g, '\n');
+  }
   if (!messageText) {
     console.error(`[directSendUnipileChatMessage] No message text found for prospect ${prospect.name || prospect.id}`);
     return { success: false, error: 'EMPTY_MESSAGE: No message configured or resolved for prospect' };
@@ -2396,6 +2402,9 @@ export const directRunFlow = async () => {
           text = text.replace(m, resolvedValue !== undefined && resolvedValue !== null ? String(resolvedValue) : '');
         }
         
+        if (text.includes('\\n') || text.includes('\\r')) {
+          text = text.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\r/g, '\n');
+        }
         return text;
       };
 

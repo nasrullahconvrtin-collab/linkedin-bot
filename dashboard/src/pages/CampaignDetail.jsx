@@ -50,13 +50,41 @@ const REQUIRED_FIELDS = [
   { key: 'followup_4',       label: 'Follow-up 4' },
 ];
 
-function parseCSV(text) {
-  const lines = text.trim().split('\n');
-  if (!lines.length) return { headers: [], rows: [] };
-  const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
-  const rows = lines.slice(1).map(line => {
-    const vals = line.split(',').map(v => v.replace(/"/g, '').trim());
-    return Object.fromEntries(headers.map((h, i) => [h, vals[i] || '']));
+function parseCSV(csvText) {
+  if (!csvText || !csvText.trim()) return { headers: [], rows: [] };
+  const lines = [];
+  let row = [""];
+  let inQuotes = false;
+
+  for (let i = 0; i < csvText.length; i++) {
+    const char = csvText[i];
+    const nextChar = csvText[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        row[row.length - 1] += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      row.push("");
+    } else if ((char === '\r' || char === '\n') && !inQuotes) {
+      if (char === '\r' && nextChar === '\n') i++;
+      lines.push(row.map(c => c.trim()));
+      row = [""];
+    } else {
+      row[row.length - 1] += char;
+    }
+  }
+  if (row.length > 1 || row[0] !== "") {
+    lines.push(row.map(c => c.trim()));
+  }
+
+  if (lines.length === 0) return { headers: [], rows: [] };
+  const headers = lines[0].map(h => h.replace(/^["']|["']$/g, '').trim());
+  const rows = lines.slice(1).filter(r => r.some(Boolean)).map(r => {
+    return Object.fromEntries(headers.map((h, i) => [h, r[i] !== undefined ? r[i] : '']));
   });
   return { headers, rows };
 }
@@ -505,8 +533,8 @@ export default function CampaignDetail() {
     const newHeaders = headers.map(h => rename[h] || h);
     const lines = [newHeaders.join(',')].concat(
       rows.map(row => newHeaders.map((_, i) => {
-        const val = row[headers[i]] || '';
-        return /[",\n]/.test(val) ? `"${val.replaceAll('"', '""')}"` : val;
+        const val = row[headers[i]] !== undefined ? String(row[headers[i]]) : '';
+        return /[",\n\r]/.test(val) ? `"${val.replaceAll('"', '""')}"` : val;
       }).join(','))
     );
     return new File([lines.join('\n')], 'import.csv', { type: 'text/csv' });
