@@ -1226,11 +1226,13 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
         // Fetch prospects already enrolled in THIS campaign via campaign_enrollments
         const enrolledInCampaignSet = new Set();
         if (campaignId) {
-          const { data: cEnrollments } = await supabaseDirect
-            .from('campaign_enrollments')
-            .select('prospect_id')
-            .eq('campaign_id', campaignId);
-          (cEnrollments || []).forEach(e => enrolledInCampaignSet.add(e.prospect_id));
+          try {
+            const { data: cEnrollments } = await supabaseDirect
+              .from('campaign_enrollments')
+              .select('prospect_id')
+              .eq('campaign_id', campaignId);
+            (cEnrollments || []).forEach(e => enrolledInCampaignSet.add(e.prospect_id));
+          } catch (e) { /* campaign_enrollments table may not exist */ }
         }
 
         // Global map across ANY campaign to prevent duplicate rows in prospects table
@@ -1285,7 +1287,9 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
 
           // Check if prospect exists anywhere in the master prospects table
           const existingProspect = (cleanUrl ? globalUrlMap.get(cleanUrl) : null) || (emailVal ? globalEmailMap.get(emailVal) : null);
-          const isAlreadyInThisCampaign = existingProspect ? enrolledInCampaignSet.has(existingProspect.id) : false;
+          const isAlreadyInThisCampaign = existingProspect
+            ? (enrolledInCampaignSet.has(existingProspect.id) || (campaignId && existingProspect.campaign_id === campaignId))
+            : false;
 
           // Duplicate handling:
           if ((importMode === 'skip_duplicates' || importMode === 'create') && isAlreadyInThisCampaign) continue;
@@ -1303,6 +1307,13 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             user_email: userEmail,
           };
           if (effectiveOrgId) mergedCustomVars.organization_id = effectiveOrgId;
+
+          // When importing into a campaign, clear stale runner state so campaign starts fresh
+          if (campaignId) {
+            delete mergedCustomVars.current_node_id;
+            delete mergedCustomVars.history;
+            delete mergedCustomVars.completed_at;
+          }
 
           // Always preserve all mapped rowData fields (location, initial_message, follow-ups, etc.) into custom_variables
           Object.entries(rowData).forEach(([k, v]) => {
@@ -1341,14 +1352,14 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             member_id: existingProspect?.member_id || null,
             provider_id: existingProspect?.provider_id || null,
             connection_status: existingProspect?.connection_status || null,
-            status: (existingProspect?.status && existingProspect.status !== 'Not Contacted') ? existingProspect.status : 'Not Contacted',
+            status: campaignId ? 'Not Contacted' : (existingProspect?.status || 'Not Contacted'),
             updated_at: new Date().toISOString(),
           };
 
           if (existingProspect) {
             // Already in master prospects table -> update record & ensure enrolled in this campaign
             prospectRow.id = existingProspect.id;
-            prospectRow.campaign_id = existingProspect.campaign_id || campaignId || null;
+            prospectRow.campaign_id = campaignId || existingProspect.campaign_id || null;
             toUpdate.push(prospectRow);
             enrolledIdsToEnsure.push(existingProspect.id);
           } else {
@@ -1409,20 +1420,22 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
 
         console.log(`[Import] Done — created: ${createdCount}, updated: ${updatedCount}`);
 
-        // Guarantee enrollment in campaign_enrollments table
+        // Guarantee enrollment in campaign_enrollments table (if it exists)
         if (campaignId && enrolledIdsToEnsure.length > 0) {
-          const uniqueIds = [...new Set(enrolledIdsToEnsure)];
-          const enrollRows = uniqueIds.map(pid => ({
-            campaign_id: campaignId,
-            prospect_id: pid,
-            status: 'active',
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          }));
-          const { error: ceErr } = await supabaseDirect
-            .from('campaign_enrollments')
-            .upsert(enrollRows, { onConflict: 'campaign_id,prospect_id' });
-          if (ceErr) console.warn('[Import] campaign_enrollments upsert warning:', ceErr.message);
+          try {
+            const uniqueIds = [...new Set(enrolledIdsToEnsure)];
+            const enrollRows = uniqueIds.map(pid => ({
+              campaign_id: campaignId,
+              prospect_id: pid,
+              status: 'active',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            }));
+            const { error: ceErr } = await supabaseDirect
+              .from('campaign_enrollments')
+              .upsert(enrollRows, { onConflict: 'campaign_id,prospect_id' });
+            if (ceErr) console.warn('[Import] campaign_enrollments upsert warning:', ceErr.message);
+          } catch (e) { /* campaign_enrollments table may not exist */ }
         }
 
         resolve({
