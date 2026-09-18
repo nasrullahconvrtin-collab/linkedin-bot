@@ -149,6 +149,9 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('lf_auth');
     localStorage.removeItem('lf_is_superadmin');
     localStorage.removeItem('lf_user_account');
+    localStorage.removeItem('lf_selected_account_id');
+    localStorage.removeItem('lf_active_account_id');
+    localStorage.removeItem('lf_account_disconnected');
     setUser(null);
     setOrganization(null);
   };

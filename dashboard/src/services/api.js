@@ -324,8 +324,8 @@ export const submitUnipile2FA = (account_id, code) =>
 export const createUnipileHostedLink = (redirectUrl = null) =>
   directCreateHostedLink(redirectUrl);
 
-export const importNewestUnipileAccount = () =>
-  directImportNewestUnipileAccount();
+export const importNewestUnipileAccount = (targetAccountId = null) =>
+  directImportNewestUnipileAccount(targetAccountId);
 
 export default api;
 

@@ -23,6 +23,8 @@ export default function Login() {
     localStorage.removeItem('lf_is_superadmin');
     localStorage.removeItem('lf_user_account');
     localStorage.removeItem('lf_account_disconnected');
+    localStorage.removeItem('lf_selected_account_id');
+    localStorage.removeItem('lf_active_account_id');
 
     const cleanEmail = email.trim().toLowerCase();
     const isSuperAdminEmail = cleanEmail === 'nasrullah.freelancer@gmail.com' || cleanEmail === 'nasrullah.freelancer@gmail.con' || cleanEmail === 'superuser@gmail.com';

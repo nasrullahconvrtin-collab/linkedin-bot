@@ -39,13 +39,6 @@ async function sanitizeLocalStorage() {
       localStorage.removeItem('lf_selected_account_id');
       localStorage.removeItem('lf_active_account_id');
     }
-    // Auto-select if nothing is stored or we just cleared it
-    const currentAccId = localStorage.getItem('lf_selected_account_id');
-    if (!currentAccId && validIds.size > 0) {
-      const firstId = [...validIds][0];
-      localStorage.setItem('lf_selected_account_id', firstId);
-      console.info('[INIT] Auto-selected account:', firstId);
-    }
 
     // 2. Validate lf_user_account organization_id
     const storedUser = localStorage.getItem('lf_user_account');

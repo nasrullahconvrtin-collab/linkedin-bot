@@ -184,8 +184,10 @@ export default function Profiles() {
   useEffect(() => {
     loadNetworkData();
     if (typeof window !== 'undefined' && window.location.search.includes('hosted_success=true')) {
+      const urlParams = new URLSearchParams(window.location.search);
+      const accIdFromUrl = urlParams.get('account_id');
       window.history.replaceState({}, '', window.location.pathname);
-      handleSyncHostedAccount();
+      handleSyncHostedAccount(accIdFromUrl);
     }
   }, []);
 
@@ -320,8 +322,9 @@ export default function Profiles() {
     setSavingSettings(true);
     try {
       // Use directCreateProfile so organization_id is always stamped on the row
+      const existingKey = matchedProfile?.profile_key || (editAccId ? `profile_${editAccId}` : `profile_${Date.now()}`);
       await directCreateProfile({
-        profile_key: 'profile_1',
+        profile_key: existingKey,
         display_name: editName || 'LinkedIn Profile',
         unipile_account_id: editAccId,
         session_active: true,
@@ -447,10 +450,10 @@ export default function Profiles() {
     }
   };
 
-  const handleSyncHostedAccount = async () => {
+  const handleSyncHostedAccount = async (targetAccId = null) => {
     setLoading(true);
     try {
-      const res = await importNewestUnipileAccount();
+      const res = await importNewestUnipileAccount(targetAccId);
       if (res.success) {
         toast.success(`Connected & saved: ${res.account?.name || 'LinkedIn Profile'}!`);
         setModal(false);

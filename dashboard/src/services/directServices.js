@@ -36,23 +36,6 @@ export const supabaseDirect = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
         console.warn('[DirectServices] Stale lf_selected_account_id detected — clearing.');
         localStorage.removeItem('lf_selected_account_id');
         localStorage.removeItem('lf_active_account_id');
-        // If there's exactly one profile in this DB, auto-select it
-        if (validIds.size === 1) {
-          const firstId = [...validIds][0];
-          localStorage.setItem('lf_selected_account_id', firstId);
-          console.info('[DirectServices] Auto-selected account:', firstId);
-        }
-      }
-    } else {
-      // No account stored at all — auto-select the first profile in this DB
-      const { data: profiles } = await supabaseDirect
-        .from('profiles')
-        .select('unipile_account_id')
-        .limit(1);
-      const firstId = profiles?.[0]?.unipile_account_id;
-      if (firstId) {
-        localStorage.setItem('lf_selected_account_id', firstId);
-        console.info('[DirectServices] Auto-selected first account:', firstId);
       }
     }
 
@@ -263,14 +246,11 @@ export const directGetProfiles = async () => {
         if (p.profile_key?.startsWith('user_')) return false;
         if (!p.unipile_account_id || p.unipile_account_id.includes('@')) return false;
 
-        // Super admins have global access to all connected profiles
-        if (isSuper) return true;
+        // Super admins have global access only when operating in the Master Workspace
+        if (isSuper && orgId === '00000000-0000-0000-0000-000000000001') return true;
 
         const pOrgId = p.organization_id || p.settings?.organization_id || p.settings?.orgId;
         const pEmail = (p.user_email || p.settings?.user_email || p.settings?.email || '').toLowerCase();
-
-        // If profile has no explicit org or email (global/unassigned in workspace), make it available to the workspace
-        if (!pOrgId && !pEmail) return true;
 
         // Match user's orgId or userEmail
         if (orgId && pOrgId && pOrgId === orgId) return true;
@@ -278,36 +258,30 @@ export const directGetProfiles = async () => {
         return false;
       });
 
-      // If user has no directly matched profile, check active profile key or selection in localStorage
-      if (realProfiles.length === 0) {
-        const storedAccId = typeof window !== 'undefined' ? (localStorage.getItem('lf_selected_account_id') || localStorage.getItem('lf_active_account_id')) : null;
-        if (storedAccId) {
-          const match = data.find(p => p.unipile_account_id === storedAccId && !p.profile_key?.startsWith('user_') && !p.unipile_account_id.includes('@'));
-          if (match) realProfiles.push(match);
-        }
-      }
-
-      // Standalone/Single-tenant fallback: if still empty, use any valid real profile from Supabase
-      if (realProfiles.length === 0) {
-        const validProfiles = data.filter(p => !p.profile_key?.startsWith('user_') && p.unipile_account_id && !p.unipile_account_id.includes('@'));
-        if (validProfiles.length > 0) {
-          realProfiles = validProfiles;
-        }
-      }
-
-      // Clear disconnected flag when valid profiles exist
+      // Clear disconnected flag when valid profiles exist for this user
       if (realProfiles.length > 0 && typeof window !== 'undefined' && window.localStorage) {
         try { localStorage.removeItem('lf_account_disconnected'); } catch (e) {}
       }
 
-      // Prioritize selected account if one is stored
+      // Prioritize selected account if one is stored AND belongs to this user's real profiles
       const preferredAccId = typeof window !== 'undefined' ? (localStorage.getItem('lf_selected_account_id') || localStorage.getItem('lf_active_account_id')) : null;
-      if (preferredAccId) {
+      if (preferredAccId && realProfiles.some(p => p.unipile_account_id === preferredAccId)) {
         realProfiles.sort((a, b) => {
           if (a.unipile_account_id === preferredAccId) return -1;
           if (b.unipile_account_id === preferredAccId) return 1;
           return 0;
         });
+      } else if (realProfiles.length > 0) {
+        // Auto-select the first profile belonging to THIS workspace
+        try {
+          localStorage.setItem('lf_selected_account_id', realProfiles[0].unipile_account_id);
+        } catch (e) {}
+      } else {
+        // Workspace has NO profile connected yet — ensure no stale profile ID is stored
+        try {
+          localStorage.removeItem('lf_selected_account_id');
+          localStorage.removeItem('lf_active_account_id');
+        } catch (e) {}
       }
 
       return realProfiles.map(p => ({
@@ -326,27 +300,40 @@ export const directGetProfiles = async () => {
     console.warn('Supabase fetch error:', e);
   }
 
-  // Return empty array if no profiles exist
+  // Return empty array if no profiles exist for this workspace
   return [];
 };
 
-export const directImportNewestUnipileAccount = async () => {
+export const directImportNewestUnipileAccount = async (targetAccountId = null) => {
   try {
     const unipileRes = await unipileFetch('/accounts');
     if (unipileRes.ok && unipileRes.data?.items) {
       const activeUnipileAccs = unipileRes.data.items.filter(a => a.type === 'LINKEDIN');
       if (activeUnipileAccs.length > 0) {
-        activeUnipileAccs.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-        const latestAcc = activeUnipileAccs[0];
-        const accId = latestAcc.id;
-        const accName = latestAcc.name || latestAcc.connection_params?.im?.username || 'LinkedIn Profile';
-        await directCreateProfile({
-          profile_key: `profile_${accId}`,
-          display_name: accName,
-          unipile_account_id: accId,
-          session_active: true
-        });
-        return { success: true, account: latestAcc };
+        let targetAcc = null;
+        if (targetAccountId) {
+          targetAcc = activeUnipileAccs.find(a => a.id === targetAccountId);
+        }
+        if (!targetAcc) {
+          // Find accounts that are NOT already bound to another profile in Supabase
+          const { data: existingProfiles } = await supabaseDirect.from('profiles').select('unipile_account_id');
+          const boundAccIds = new Set((existingProfiles || []).map(p => p.unipile_account_id).filter(Boolean));
+          
+          activeUnipileAccs.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+          // First try to find a newly connected account that isn't bound yet
+          targetAcc = activeUnipileAccs.find(a => !boundAccIds.has(a.id)) || activeUnipileAccs[0];
+        }
+        if (targetAcc) {
+          const accId = targetAcc.id;
+          const accName = targetAcc.name || targetAcc.connection_params?.im?.username || 'LinkedIn Profile';
+          await directCreateProfile({
+            profile_key: `profile_${accId}`,
+            display_name: accName,
+            unipile_account_id: accId,
+            session_active: true
+          });
+          return { success: true, account: targetAcc };
+        }
       }
     }
     return { success: false, error: 'No LinkedIn account found on Unipile' };
@@ -441,7 +428,14 @@ export const directDisconnectProfile = async (targetId = null) => {
         }
 
         if (shouldDelete) {
-          await supabaseDirect.from('profiles').delete().eq('id', p.id);
+          const pOrgId = p.organization_id || p.settings?.organization_id || p.settings?.orgId;
+          const pEmail = (p.user_email || p.settings?.user_email || p.settings?.email || '').toLowerCase();
+          const canDelete = isSuper || (orgId && pOrgId === orgId) || (userEmail && pEmail === userEmail);
+          if (canDelete) {
+            await supabaseDirect.from('profiles').delete().eq('id', p.id);
+          } else {
+            console.warn(`[Security] Blocked unauthorized attempt by org ${orgId} to delete profile ${p.id}`);
+          }
         }
       }
     }
