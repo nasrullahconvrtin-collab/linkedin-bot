@@ -1895,12 +1895,13 @@ export const directSendUnipileChatMessage = async (prospect, text = '') => {
     return { success: false, error: 'EMPTY_MESSAGE: No message configured or resolved for prospect' };
   }
 
-  // Dedup check: physical guarantee against sending to the exact same recipient twice within 3 minutes
-  const sendKey = `${accountId}:${recipientId}`;
+  // Dedup check: physical guarantee against sending the exact same message to the recipient twice within 3 minutes
+  const contentFingerprint = (messageText || '').replace(/\s+/g, ' ').trim().slice(0, 80).toLowerCase();
+  const sendKey = `${accountId}:${recipientId}:${contentFingerprint}`;
   const lastSendTime = recentRecipientSends.get(sendKey);
   if (lastSendTime && (Date.now() - lastSendTime < 180_000)) {
-    console.warn(`[DEDUP GUARD] Aborting duplicate message to ${recipientId} — already sent ${Math.round((Date.now() - lastSendTime) / 1000)}s ago.`);
-    return { success: true, duplicateBlocked: true };
+    console.warn(`[DEDUP GUARD] Aborting duplicate message to ${recipientId} — identical message already sent ${Math.round((Date.now() - lastSendTime) / 1000)}s ago.`);
+    return { success: false, duplicateBlocked: true, error: 'Identical message was already sent to this recipient within the last 3 minutes.' };
   }
   recentRecipientSends.set(sendKey, Date.now());
 
@@ -1921,26 +1922,15 @@ export const directSendUnipileChatMessage = async (prospect, text = '') => {
 
   if (ok) {
     try {
+      const nextStatus = prospect.status === 'Following Up' || prospect.status === 'Message Sent' ? prospect.status : 'Initial Message Sent';
       await supabaseDirect.from('prospects').update({
-        status: 'Initial Message Sent',
+        status: nextStatus,
         message_sent_date: new Date().toISOString(),
       }).eq('id', prospect.id);
     } catch (e) {
       console.warn('Supabase update warning:', e);
     }
     await humanPause(15, 30, 'Post-message cooloff');
-    return { success: true, data };
-  }
-
-  if (ok) {
-    try {
-      await supabaseDirect.from('prospects').update({
-        status: 'Initial Message Sent',
-        message_sent_date: new Date().toISOString(),
-      }).eq('id', prospect.id);
-    } catch (e) {
-      console.warn('Supabase update warning:', e);
-    }
     return { success: true, data };
   }
   return { success: false, error: data?.detail || 'Unipile chat message failed' };
@@ -2737,10 +2727,16 @@ export const directRunFlow = async () => {
           console.log(`Sending message to ${prospect.name}...`);
           const res = await directSendUnipileChatMessage(prospect, msgText);
 
+          if (res.duplicateBlocked) {
+            console.warn(`[Runner] Duplicate message blocked for ${prospect.name}. Skipping without advancing node.`);
+            continue;
+          }
+
           if (res.success) {
             totalMessages += 1;
             actionsTaken += 1;
-            prospect.status = 'Initial Message Sent';
+            const isFollowUp = (nodeLabel || '').toLowerCase().includes('follow') || (nodeConfig.message || '').toLowerCase().includes('follow');
+            prospect.status = isFollowUp ? 'Following Up' : 'Initial Message Sent';
             prospect.custom_variables.last_sent_node_id = currentNode.id;
             prospect.custom_variables.message_sent_at = new Date().toISOString();
             prospect.custom_variables.last_action_at = new Date().toISOString();
@@ -2750,7 +2746,7 @@ export const directRunFlow = async () => {
             ];
             try {
               await supabaseDirect.from('prospects').update({
-                status: 'Initial Message Sent',
+                status: prospect.status,
                 message_sent_date: new Date().toISOString(),
                 custom_variables: prospect.custom_variables
               }).eq('id', prospect.id);
