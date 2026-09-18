@@ -1342,7 +1342,6 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             name: rowData.name || `${firstName} ${lastName}`.trim() || existingProspect?.name || 'Prospect',
             company: rowData.company || existingProspect?.company || '',
             job_title: rowData.job_title || rowData.headline || existingProspect?.job_title || '',
-            headline: rowData.headline || rowData.job_title || existingProspect?.headline || '',
             email: emailVal || existingProspect?.email || '',
             linkedin_url: cleanUrl || rawUrl || existingProspect?.linkedin_url || '',
             organization_id: effectiveOrgId || existingProspect?.organization_id || null,
