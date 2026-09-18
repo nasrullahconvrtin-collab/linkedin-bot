@@ -1952,7 +1952,34 @@ export const directGetUnipileChats = async (limit = 50, overrideAccountId = null
   }
   const { ok, data } = await unipileFetch(`/chats?account_id=${accountId}&limit=${limit}`);
   if (ok && data) {
-    return { success: true, chats: data.items || data.chats || [] };
+    const rawChats = data.items || data.chats || [];
+
+    // Parallel fetch attendees for chats to resolve real LinkedIn names and profile avatars
+    const enrichedChats = await Promise.all(
+      rawChats.map(async (c) => {
+        if (c.name && c.avatar_url) return c;
+        try {
+          const { ok: attOk, data: attData } = await unipileFetch(`/chats/${c.id}/attendees?account_id=${accountId}`);
+          if (attOk && attData?.items) {
+            const attendee = attData.items.find(a => !a.is_self) || attData.items[0];
+            if (attendee) {
+              return {
+                ...c,
+                name: c.name || attendee.name || null,
+                avatar_url: attendee.picture_url || null,
+                headline: attendee.specifics?.occupation || null,
+                attendee_provider_id: c.attendee_provider_id || attendee.provider_id || null,
+                attendee_profile_url: attendee.profile_url || null,
+                network_distance: attendee.specifics?.network_distance || null,
+              };
+            }
+          }
+        } catch (e) {}
+        return c;
+      })
+    );
+
+    return { success: true, chats: enrichedChats };
   }
   return { success: false, chats: [] };
 };

@@ -490,15 +490,15 @@ export default function Inbox() {
   const prospectRef = selectedChat?.prospect_ref;
   const displayName = realProfile
     ? `${realProfile.first_name || ''} ${realProfile.last_name || ''}`.trim() || realProfile.public_identifier || selectedChat?.name
-    : prospectRef?.name || selectedChat?.name || 'LinkedIn Member';
+    : selectedChat?.name || prospectRef?.name || 'LinkedIn Member';
 
-  const displayHeadline = realProfile?.headline || prospectRef?.job_title || prospectRef?.company || 'LinkedIn Outreach Contact';
+  const displayHeadline = realProfile?.headline || selectedChat?.headline || prospectRef?.job_title || prospectRef?.company || 'LinkedIn Outreach Contact';
   const displayLocation = realProfile?.location || prospectRef?.location || 'Location Not Specified';
   const displayCompany = realProfile?.headline ? (realProfile.headline.split('|')[0] || realProfile.headline) : prospectRef?.company || 'Direct Contact';
   const displayLinkedinUrl = realProfile?.public_identifier
     ? `https://www.linkedin.com/in/${realProfile.public_identifier}`
-    : prospectRef?.linkedin_url || null;
-  const displayAvatar = realProfile?.profile_picture_url_large || realProfile?.profile_picture_url || prospectRef?.avatar_url;
+    : selectedChat?.attendee_profile_url || prospectRef?.linkedin_url || null;
+  const displayAvatar = realProfile?.profile_picture_url_large || realProfile?.profile_picture_url || selectedChat?.avatar_url || prospectRef?.avatar_url;
   const displayPhone = (realProfile?.contact_info?.phones && realProfile.contact_info.phones[0]) || prospectRef?.phone || null;
   const displayWebsite = (realProfile?.websites && realProfile.websites[0]) || prospectRef?.website || null;
   const displayEmail = prospectRef?.email || null;
@@ -639,7 +639,9 @@ export default function Inbox() {
             ) : (
               filteredChats.map(c => {
                 const isSelected = selectedChat?.id === c.id;
-                const cName = c.prospect_ref?.name || c.name || 'LinkedIn Member';
+                const cName = c.name || c.prospect_ref?.name || 'LinkedIn Member';
+                const cAvatar = c.avatar_url || c.prospect_ref?.avatar_url || null;
+                const cHeadline = c.headline || c.prospect_ref?.job_title || c.prospect_ref?.company || null;
                 const lastText = c.last_message_text || c.prospect_ref?.last_message || 'Active conversation';
                 const isUnread = Boolean(c.unread > 0 || c.unread_count > 0);
                 const relTime = formatRelativeTime(c.timestamp);
@@ -657,8 +659,8 @@ export default function Inbox() {
                     {/* Avatar with unread indicator */}
                     <div className="relative shrink-0 mt-0.5">
                       <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-950 to-purple-950 border border-indigo-500/30 flex items-center justify-center font-bold text-white text-xs shadow-inner overflow-hidden">
-                        {c.prospect_ref?.avatar_url ? (
-                          <img src={c.prospect_ref.avatar_url} alt={cName} className="w-full h-full rounded-full object-cover" />
+                        {cAvatar ? (
+                          <img src={cAvatar} alt={cName} className="w-full h-full rounded-full object-cover" />
                         ) : (
                           cName.slice(0, 2).toUpperCase()
                         )}
@@ -681,9 +683,9 @@ export default function Inbox() {
                       <p className="text-[11px] text-[#9ca3af] truncate leading-tight">
                         {lastText}
                       </p>
-                      {c.prospect_ref?.company && (
+                      {cHeadline && (
                         <p className="text-[10px] text-[#6b7280] truncate mt-0.5 font-medium">
-                          {c.prospect_ref.company}
+                          {cHeadline}
                         </p>
                       )}
                     </div>
