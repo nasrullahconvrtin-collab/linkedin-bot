@@ -246,9 +246,6 @@ export const directGetProfiles = async () => {
         if (p.profile_key?.startsWith('user_')) return false;
         if (!p.unipile_account_id || p.unipile_account_id.includes('@')) return false;
 
-        // Super admins have global access only when operating in the Master Workspace
-        if (isSuper && orgId === '00000000-0000-0000-0000-000000000001') return true;
-
         const pOrgId = p.organization_id || p.settings?.organization_id || p.settings?.orgId;
         const pEmail = (p.user_email || p.settings?.user_email || p.settings?.email || '').toLowerCase();
 

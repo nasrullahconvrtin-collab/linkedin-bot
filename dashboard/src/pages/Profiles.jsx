@@ -125,8 +125,21 @@ export default function Profiles() {
       const isSuper = isSuperAdminUser();
       const orgId = getActiveOrganizationId();
       const validAccIds = new Set((profiles || []).map(p => p.unipile_account_id).filter(Boolean));
+      if (validAccIds.size === 0) {
+        setAccountInfo(null);
+        setConnections([]);
+        setInvitations([]);
+        setSelectedAccId('');
+        if (typeof window !== 'undefined' && window.localStorage) {
+          localStorage.removeItem('lf_selected_account_id');
+          localStorage.removeItem('lf_active_account_id');
+        }
+        setNetLoading(false);
+        return;
+      }
+
       let accToUse = targetId || selectedAccId || (typeof window !== 'undefined' ? localStorage.getItem('lf_selected_account_id') : null) || null;
-      if (accToUse && validAccIds.size > 0 && !validAccIds.has(accToUse)) {
+      if (accToUse && !validAccIds.has(accToUse)) {
         accToUse = profiles[0]?.unipile_account_id || null;
         if (typeof window !== 'undefined' && window.localStorage) {
           if (accToUse) localStorage.setItem('lf_selected_account_id', accToUse);
