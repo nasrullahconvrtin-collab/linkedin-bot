@@ -135,19 +135,23 @@ export function AppProvider({ children }) {
     const r = setInterval(fetchReplies, 30_000);
     const f = setInterval(fetchFailedJobs, 60_000);
     
-    let fl;
+    let isMounted = true;
+    let fl = null;
     directGetAppSettings().then(settings => {
-      const intervalMs = settings?.runner_interval_ms || 60_000;
+      if (!isMounted) return;
+      const intervalMs = Math.max(30_000, Number(settings?.runner_interval_ms || 60_000));
       fl = setInterval(() => {
         runFlow().catch(err => console.warn('Background runFlow error:', err));
       }, intervalMs);
     }).catch(() => {
+      if (!isMounted) return;
       fl = setInterval(() => {
         runFlow().catch(err => console.warn('Background runFlow error:', err));
       }, 60_000);
     });
 
     return () => {
+      isMounted = false;
       clearInterval(s);
       clearInterval(p);
       clearInterval(r);

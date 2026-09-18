@@ -1879,6 +1879,9 @@ export const directSendUnipileConnectionInvite = async (prospect, message = '') 
   return { success: false, error: data?.detail || 'Unipile invite failed' };
 };
 
+// In-memory recipient send cache to physically prevent duplicate messages within 3 minutes
+const recentRecipientSends = new Map();
+
 export const directSendUnipileChatMessage = async (prospect, text = '') => {
   const recipientId = getLinkedinId(prospect);
   const accountId = await getAccountForProspect(prospect);
@@ -1891,6 +1894,15 @@ export const directSendUnipileChatMessage = async (prospect, text = '') => {
     console.error(`[directSendUnipileChatMessage] No message text found for prospect ${prospect.name || prospect.id}`);
     return { success: false, error: 'EMPTY_MESSAGE: No message configured or resolved for prospect' };
   }
+
+  // Dedup check: physical guarantee against sending to the exact same recipient twice within 3 minutes
+  const sendKey = `${accountId}:${recipientId}`;
+  const lastSendTime = recentRecipientSends.get(sendKey);
+  if (lastSendTime && (Date.now() - lastSendTime < 180_000)) {
+    console.warn(`[DEDUP GUARD] Aborting duplicate message to ${recipientId} — already sent ${Math.round((Date.now() - lastSendTime) / 1000)}s ago.`);
+    return { success: true, duplicateBlocked: true };
+  }
+  recentRecipientSends.set(sendKey, Date.now());
 
   // Pre-message human review pause & typing simulation
   await humanPause(10, 22, 'Opening chat window');
@@ -2206,8 +2218,28 @@ export const isWithinWorkingHours = (settings) => {
   return { allowed: true, reason: '' };
 };
 
+let isFlowExecutionActive = false;
+
 export const directRunFlow = async () => {
-  const appSettings = await directGetAppSettings();
+  if (isFlowExecutionActive) {
+    console.log('[Runner] Flow engine is already executing in this tab. Skipping concurrent run.');
+    return { success: true, totalExecuted: 0, message: 'Already running' };
+  }
+
+  const LOCK_KEY = 'lf_flow_runner_lock';
+  const now = Date.now();
+  try {
+    const lockVal = Number(localStorage.getItem(LOCK_KEY) || 0);
+    if (lockVal && (now - lockVal < 90_000)) {
+      console.log('[Runner] Another browser tab is currently executing the flow. Skipping.');
+      return { success: true, totalExecuted: 0, message: 'Another tab active' };
+    }
+    localStorage.setItem(LOCK_KEY, String(now));
+  } catch (e) {}
+
+  isFlowExecutionActive = true;
+  try {
+    const appSettings = await directGetAppSettings();
   const hoursCheck = isWithinWorkingHours(appSettings);
   if (!hoursCheck.allowed) {
     console.log(`Campaign flow engine paused: ${hoursCheck.reason}`);
@@ -2437,7 +2469,11 @@ export const directRunFlow = async () => {
       }
 
       if (nodeType === 'wait') {
-        const days = Number(nodeConfig.days) || 0;
+        let days = Number(nodeConfig.days) || 0;
+        if (days === 0 && nodeLabel) {
+          const m = String(nodeLabel).match(/(\d+)\s*days?/i);
+          if (m) days = Number(m[1]);
+        }
         const nextScheduledStr = prospect.custom_variables?.next_scheduled_at;
 
         if (days > 0 && nextScheduledStr) {
@@ -2687,6 +2723,17 @@ export const directRunFlow = async () => {
             } catch (e) {}
             continue;
           }
+          // PRE-SEND CLAIM: Lock node in DB before typing delay starts so concurrent processes immediately skip this prospect
+          prospect.custom_variables.last_sent_node_id = currentNode.id;
+          prospect.custom_variables.send_in_progress_at = new Date().toISOString();
+          try {
+            await supabaseDirect.from('prospects').update({
+              custom_variables: prospect.custom_variables
+            }).eq('id', prospect.id);
+          } catch (e) {
+            console.warn('[Runner] Pre-send claim warning:', e);
+          }
+
           console.log(`Sending message to ${prospect.name}...`);
           const res = await directSendUnipileChatMessage(prospect, msgText);
 
@@ -2873,13 +2920,19 @@ export const directRunFlow = async () => {
     }
   }
 
-  return {
-    success: true,
-    accepted: 0,
-    connections_sent: totalConnections,
-    messages_sent: totalMessages,
-    executed_count: totalExecuted,
-  };
+    return {
+      success: true,
+      accepted: 0,
+      connections_sent: totalConnections,
+      messages_sent: totalMessages,
+      executed_count: totalExecuted,
+    };
+  } finally {
+    isFlowExecutionActive = false;
+    try {
+      localStorage.removeItem('lf_flow_runner_lock');
+    } catch (e) {}
+  }
 };
 
 export const directCheckAcceptances = async () => {
