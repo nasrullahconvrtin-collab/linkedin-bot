@@ -67,16 +67,6 @@ export const dbCreateUserAccount = async ({ email, password, displayName, worksp
   };
 
   try {
-    await supabaseDirect.from('profiles').upsert([{
-      profile_key: `user_${cleanEmail}`,
-      display_name: displayName || cleanEmail.split('@')[0],
-      unipile_account_id: cleanEmail,
-      settings: { email: cleanEmail, password_text: cleanPassword, role, orgId },
-      updated_at: new Date().toISOString(),
-    }]);
-  } catch (e) {}
-
-  try {
     const existing = JSON.parse(localStorage.getItem('lf_custom_user_accounts') || '[]');
     localStorage.setItem('lf_custom_user_accounts', JSON.stringify([fallbackObj, ...existing]));
   } catch (e) {}

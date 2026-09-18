@@ -15,61 +15,39 @@ const UNIPILE_BASE_URL = 'https://api63.unipile.com:19339/api/v1';
 
 export const supabaseDirect = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+export const KNOWN_USER_ORGS = {
+  'nasrullah.muhammad410@gmail.com': '9aa9913b-5d18-48ce-ad3c-ec1b3a9c844f',
+  'nasrullah.freelancer@gmail.com': '00000000-0000-0000-0000-000000000001',
+  'nasrullah.freelancer@gmail.con': '00000000-0000-0000-0000-000000000001',
+  'superuser@gmail.com': '00000000-0000-0000-0000-000000000001',
+  'maryamansar.freelancer@gmail.com': '2efbcfe1-3f3e-4a8d-876e-def4c1c97aab',
+  'nasrullah.moreleadsco@gmail.com': '350f58b9-8a2f-4f81-af1f-669831799e19',
+  'sana.moreleadsco@gmail.com': '6bdf2297-00cf-4244-a7bf-5a75f1838385',
+  'superddd@gmail.com': '13155801-65c9-49af-91bc-ab7f3c4462c4',
+};
+
 // ─── Module-level isolation guard ────────────────────────────────────────────
 // Runs once when the module loads (before any component mounts).
-// Clears localStorage keys that may have been written by a different Supabase
-// deployment (e.g. Convrtin data leaking into IntegriLeads or vice-versa).
-(async () => {
+// Ensures active localStorage user account is locked to its legitimate organization
+// and clears any cross-tenant or stale profile pointers.
+(() => {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return;
 
-    // 1. Validate lf_selected_account_id against profiles in THIS database
-    const storedAccId = localStorage.getItem('lf_selected_account_id');
-    if (storedAccId) {
-      const { data: profiles } = await supabaseDirect
-        .from('profiles')
-        .select('unipile_account_id');
-      const validIds = new Set(
-        (profiles || []).map(p => p.unipile_account_id).filter(Boolean)
-      );
-      if (!validIds.has(storedAccId)) {
-        console.warn('[DirectServices] Stale lf_selected_account_id detected — clearing.');
-        localStorage.removeItem('lf_selected_account_id');
-        localStorage.removeItem('lf_active_account_id');
-      }
-    }
-
-    // 2. Validate lf_user_account org against campaigns in THIS database
     const storedUser = localStorage.getItem('lf_user_account');
     if (storedUser) {
       try {
         const userObj = JSON.parse(storedUser);
-        const storedOrgId = userObj?.organization_id;
-        if (storedOrgId) {
-          // Check if this org has any campaigns in the current database
-          const { data: campaigns } = await supabaseDirect
-            .from('campaigns')
-            .select('id')
-            .eq('organization_id', storedOrgId)
-            .limit(1);
-          if (!campaigns || campaigns.length === 0) {
-            // No campaigns for this org in the current DB — fetch the real org
-            const { data: anyCampaign } = await supabaseDirect
-              .from('campaigns')
-              .select('organization_id')
-              .limit(1);
-            if (anyCampaign?.[0]?.organization_id) {
-              const correctOrgId = anyCampaign[0].organization_id;
-              console.warn(`[DirectServices] Stale org ${storedOrgId} → correcting to ${correctOrgId}`);
-              userObj.organization_id = correctOrgId;
-              localStorage.setItem('lf_user_account', JSON.stringify(userObj));
-            }
-          }
+        const email = (userObj?.email || '').toLowerCase().trim();
+        if (KNOWN_USER_ORGS[email] && userObj.organization_id !== KNOWN_USER_ORGS[email]) {
+          console.warn(`[Isolation Guard] Correcting organization_id for ${email}: ${userObj.organization_id} -> ${KNOWN_USER_ORGS[email]}`);
+          userObj.organization_id = KNOWN_USER_ORGS[email];
+          localStorage.setItem('lf_user_account', JSON.stringify(userObj));
         }
-      } catch (e) { /* ignore parse errors */ }
+      } catch (e) {}
     }
   } catch (e) {
-    // Silently ignore — never break the app at module load
+    // Silently ignore
   }
 })();
 // ─────────────────────────────────────────────────────────────────────────────
@@ -187,17 +165,6 @@ export const isSuperAdminUser = () => {
   return false;
 };
 
-const KNOWN_USER_ORGS = {
-  'nasrullah.muhammad410@gmail.com': '9aa9913b-5d18-48ce-ad3c-ec1b3a9c844f',
-  'nasrullah.freelancer@gmail.com': '00000000-0000-0000-0000-000000000001',
-  'nasrullah.freelancer@gmail.con': '00000000-0000-0000-0000-000000000001',
-  'superuser@gmail.com': '00000000-0000-0000-0000-000000000001',
-  'maryamansar.freelancer@gmail.com': '2efbcfe1-3f3e-4a8d-876e-def4c1c97aab',
-  'nasrullah.moreleadsco@gmail.com': '350f58b9-8a2f-4f81-af1f-669831799e19',
-  'sana.moreleadsco@gmail.com': '6bdf2297-00cf-4244-a7bf-5a75f1838385',
-  'superddd@gmail.com': '13155801-65c9-49af-91bc-ab7f3c4462c4',
-};
-
 export const extractLinkedInSlug = (url) => {
   if (!url) return '';
   return String(url).toLowerCase().trim()
@@ -211,14 +178,17 @@ export const getActiveOrganizationId = () => {
   try {
     const userAcc = getActiveUserAccount();
     if (userAcc) {
-      if (isValidUuid(userAcc.organization_id)) return userAcc.organization_id;
-
       const email = (userAcc.email || '').toLowerCase().trim();
+      // 1. Strict Override for Known User Accounts to prevent any localStorage corruption
       if (KNOWN_USER_ORGS[email]) {
-        userAcc.organization_id = KNOWN_USER_ORGS[email];
-        try { localStorage.setItem('lf_user_account', JSON.stringify(userAcc)); } catch (e) {}
-        return userAcc.organization_id;
+        if (userAcc.organization_id !== KNOWN_USER_ORGS[email]) {
+          userAcc.organization_id = KNOWN_USER_ORGS[email];
+          try { localStorage.setItem('lf_user_account', JSON.stringify(userAcc)); } catch (e) {}
+        }
+        return KNOWN_USER_ORGS[email];
       }
+
+      if (isValidUuid(userAcc.organization_id)) return userAcc.organization_id;
 
       if (isSuperAdminUser()) {
         return '00000000-0000-0000-0000-000000000001';
@@ -235,21 +205,26 @@ let activeAccountId = null;
 export const directGetProfiles = async () => {
   const orgId = getActiveOrganizationId();
   const userAcc = getActiveUserAccount();
-  const userEmail = userAcc?.email ? userAcc.email.toLowerCase() : null;
-  const isSuper = isSuperAdminUser();
+  const userEmail = userAcc?.email ? userAcc.email.toLowerCase().trim() : null;
 
   try {
-    const { data, error } = await supabaseDirect.from('profiles').select('*');
+    let query = supabaseDirect.from('profiles').select('*');
+    if (isValidUuid(orgId)) {
+      query = query.eq('organization_id', orgId);
+    } else if (userEmail) {
+      query = query.eq('user_email', userEmail);
+    }
+
+    const { data, error } = await query;
     if (!error && data && data.length > 0) {
-      // Only real LinkedIn profiles with unipile_account_id
+      // Only real LinkedIn profiles with unipile_account_id belonging to this organization/user
       let realProfiles = data.filter(p => {
         if (p.profile_key?.startsWith('user_')) return false;
         if (!p.unipile_account_id || p.unipile_account_id.includes('@')) return false;
 
         const pOrgId = p.organization_id || p.settings?.organization_id || p.settings?.orgId;
-        const pEmail = (p.user_email || p.settings?.user_email || p.settings?.email || '').toLowerCase();
+        const pEmail = (p.user_email || p.settings?.user_email || p.settings?.email || '').toLowerCase().trim();
 
-        // Match user's orgId or userEmail
         if (orgId && pOrgId && pOrgId === orgId) return true;
         if (userEmail && pEmail && pEmail === userEmail) return true;
         return false;
@@ -297,6 +272,14 @@ export const directGetProfiles = async () => {
     console.warn('Supabase fetch error:', e);
   }
 
+  // Workspace has NO profile connected — wipe any stale account pointers from localStorage
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.removeItem('lf_selected_account_id');
+      localStorage.removeItem('lf_active_account_id');
+    }
+  } catch (e) {}
+
   // Return empty array if no profiles exist for this workspace
   return [];
 };
@@ -312,13 +295,13 @@ export const directImportNewestUnipileAccount = async (targetAccountId = null) =
           targetAcc = activeUnipileAccs.find(a => a.id === targetAccountId);
         }
         if (!targetAcc) {
-          // Find accounts that are NOT already bound to another profile in Supabase
+          // Find accounts that are NOT already bound to ANY profile in Supabase
           const { data: existingProfiles } = await supabaseDirect.from('profiles').select('unipile_account_id');
           const boundAccIds = new Set((existingProfiles || []).map(p => p.unipile_account_id).filter(Boolean));
           
           activeUnipileAccs.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
           // First try to find a newly connected account that isn't bound yet
-          targetAcc = activeUnipileAccs.find(a => !boundAccIds.has(a.id)) || activeUnipileAccs[0];
+          targetAcc = activeUnipileAccs.find(a => !boundAccIds.has(a.id));
         }
         if (targetAcc) {
           const accId = targetAcc.id;
@@ -728,15 +711,6 @@ export const directGetCampaigns = async () => {
     if (isValidUuid(orgId)) campaignQuery = campaignQuery.eq('organization_id', orgId);
     let { data: rawCampaigns, error } = await campaignQuery;
 
-    // Fallback: If org-filtered query returned 0 campaigns, query all campaigns in database
-    // This prevents a stale cross-database localStorage organization_id from hiding active campaigns
-    if (!error && (!rawCampaigns || rawCampaigns.length === 0) && isValidUuid(orgId)) {
-      const { data: allCamp } = await supabaseDirect.from('campaigns').select('*').order('created_at', { ascending: false });
-      if (allCamp && allCamp.length > 0) {
-        rawCampaigns = allCamp;
-      }
-    }
-
     if (!error && rawCampaigns) {
       const campaigns = rawCampaigns;
 
@@ -1016,17 +990,7 @@ export const directGetProspects = async (params = {}) => {
     const offset = params.offset !== undefined ? Number(params.offset) : ((params.page || 1) - 1) * limit;
     query = query.range(offset, offset + limit - 1);
     
-    let { data: rawData, count, error } = await query;
-
-    // Fallback: If org filter returned 0 prospects, query all prospects in this database
-    if (!error && (!rawData || rawData.length === 0) && !params.campaign_id && !params.status && !params.list_id && isValidUuid(orgId)) {
-      const fallbackQuery = supabaseDirect.from('prospects').select('*', { count: 'exact' }).order('created_at', { ascending: false }).range(offset, offset + limit - 1);
-      const { data: fbData, count: fbCount } = await fallbackQuery;
-      if (fbData && fbData.length > 0) {
-        rawData = fbData;
-        count = fbCount;
-      }
-    }
+    const { data: rawData, count, error } = await query;
 
     if (!error && rawData) {
       return { prospects: rawData, total: count || rawData.length };
@@ -1207,12 +1171,14 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
           }
         }
 
-        const effectiveOrgId = campaignOrgId || (isValidUuid(rawOrgId) ? rawOrgId : null);
-
-        // Fetch existing prospects to build maps
-        const { data: existingList } = await supabaseDirect
+        // Fetch existing prospects to build maps strictly for this organization
+        let existQuery = supabaseDirect
           .from('prospects')
           .select('id, linkedin_url, email, status, connection_status, member_id, provider_id, custom_variables, name, first_name, last_name, company, job_title, location, campaign_id, organization_id');
+        if (effectiveOrgId) {
+          existQuery = existQuery.eq('organization_id', effectiveOrgId);
+        }
+        const { data: existingList } = await existQuery;
 
         // Fetch prospects already enrolled in THIS campaign via campaign_enrollments
         const enrolledInCampaignSet = new Set();
@@ -2229,7 +2195,10 @@ export const directRunFlow = async () => {
 
   let campaigns = [];
   try {
-    const { data } = await supabaseDirect.from('campaigns').select('*').eq('status', 'running');
+    const orgId = getActiveOrganizationId();
+    let cQuery = supabaseDirect.from('campaigns').select('*').eq('status', 'running');
+    if (isValidUuid(orgId)) cQuery = cQuery.eq('organization_id', orgId);
+    const { data } = await cQuery;
     campaigns = data || [];
   } catch (err) {
     console.error('Error fetching running campaigns:', err);

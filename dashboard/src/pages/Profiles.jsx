@@ -151,9 +151,10 @@ export default function Profiles() {
       }
 
       let pQuery = supabaseDirect.from('prospects').select('*');
-      if (!isSuper) {
-        if (orgId) pQuery = pQuery.eq('organization_id', orgId);
-        else if (userAcc?.email) pQuery = pQuery.eq('user_email', userAcc.email.toLowerCase());
+      if (orgId) {
+        pQuery = pQuery.eq('organization_id', orgId);
+      } else if (userAcc?.email) {
+        pQuery = pQuery.eq('user_email', userAcc.email.toLowerCase());
       }
 
       const [accRes, connRes, invRes, pRes] = await Promise.all([

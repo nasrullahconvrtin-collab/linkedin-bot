@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   ChevronDown, ChevronLeft, ChevronRight, FileText, LayoutDashboard,
-  ListChecks, Megaphone, Users, MessageSquare, Settings, Zap, UserCheck, Briefcase, MessageCircle, Activity
+  ListChecks, Megaphone, Users, MessageSquare, Settings, Zap, UserCheck, Briefcase, MessageCircle, Activity,
+  Building, ShieldCheck
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { getActiveUserAccount, isSuperAdminUser } from '../services/directServices';
 
 const NAV = [
   { to: '/',          label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -27,6 +29,9 @@ export default function Sidebar({ collapsed = false, onToggle }) {
   const { wsConnected, unreadReplies } = useApp();
   const location = useLocation();
   const width = collapsed ? 76 : 240;
+  const userAcc = getActiveUserAccount();
+  const isSuper = isSuperAdminUser();
+  const currentWorkspaceName = userAcc?.workspace_name || userAcc?.organizations?.name || (userAcc?.email ? userAcc.email.split('@')[0] : 'Workspace');
 
   const campaignSectionActive = CAMPAIGN_NAV.some(item => (
     item.end ? location.pathname === item.to : location.pathname.startsWith(item.to)
@@ -47,7 +52,7 @@ export default function Sidebar({ collapsed = false, onToggle }) {
     <aside className="app-sidebar fixed left-0 top-0 h-full flex flex-col z-20 transition-[width] duration-300 bg-[#141414] border-r border-[#2a2a2a]" style={{ width }}>
 
       {/* Logo */}
-      <div className={`flex items-center gap-2.5 ${collapsed ? 'px-4 justify-center' : 'px-5'} py-5 border-b border-[#2a2a2a]`}>
+      <div className={`flex items-center gap-2.5 ${collapsed ? 'px-4 justify-center' : 'px-5'} py-4 border-b border-[#2a2a2a]`}>
         <div className="brand-mark w-9 h-9 rounded-xl bg-[#6366f1] flex items-center justify-center shrink-0">
           <Zap size={16} className="text-white" />
         </div>
@@ -56,6 +61,27 @@ export default function Sidebar({ collapsed = false, onToggle }) {
           <span className="text-[#6b7280] text-[11px] font-medium">Automation OS</span>
         </div>
       </div>
+
+      {/* Active Workspace Pill */}
+      {!collapsed && (
+        <div className="px-3 py-2 border-b border-[#2a2a2a] bg-[#0c0c0c]/80 flex items-center justify-between text-[11px]">
+          <div className="flex items-center gap-1.5 min-w-0 pr-1">
+            <Building size={12} className="text-[#6366f1] shrink-0" />
+            <span className="text-[#d1d5db] font-semibold truncate" title={userAcc?.email || ''}>
+              {currentWorkspaceName}
+            </span>
+          </div>
+          {isSuper && location.pathname !== '/super-admin' && (
+            <NavLink
+              to="/super-admin"
+              className="text-[#6366f1] hover:text-white text-[10px] font-bold bg-[#6366f1]/10 hover:bg-[#6366f1] px-1.5 py-0.5 rounded transition-colors shrink-0"
+              title="Return to Super-Admin"
+            >
+              Admin
+            </NavLink>
+          )}
+        </div>
+      )}
 
       {/* Nav */}
       <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">

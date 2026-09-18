@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Building, ShieldCheck, Activity, Users, Globe, Cpu, RefreshCw, CheckCircle,
-  UserPlus, Mail, Lock, Key, Copy, Trash2, Loader2, Sparkles
+  UserPlus, Mail, Lock, Key, Copy, Trash2, Loader2, Sparkles, ExternalLink, LogIn
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
@@ -18,6 +18,9 @@ export default function SuperAdmin() {
     railwayConnected: true,
   });
   const [userAccounts, setUserAccounts] = useState([]);
+  const [tenantProfiles, setTenantProfiles] = useState([]);
+  const [tenantCampaigns, setTenantCampaigns] = useState([]);
+  const [tenantProspects, setTenantProspects] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Form State for User Creation
@@ -32,24 +35,37 @@ export default function SuperAdmin() {
     async function loadAdminStats() {
       setLoading(true);
       try {
-        const { count: orgCount } = await supabaseDirect.from('organizations').select('*', { count: 'exact', head: true });
-        const { count: profCount } = await supabaseDirect.from('profiles').select('*', { count: 'exact', head: true });
-        const { count: prospectCount } = await supabaseDirect.from('prospects').select('*', { count: 'exact', head: true });
-        const { count: campaignCount } = await supabaseDirect.from('campaigns').select('*', { count: 'exact', head: true });
+        const [
+          { count: orgCount },
+          { data: allProfiles },
+          { data: allProspects },
+          { data: allCampaigns },
+          accs
+        ] = await Promise.all([
+          supabaseDirect.from('organizations').select('*', { count: 'exact', head: true }),
+          supabaseDirect.from('profiles').select('id, profile_key, display_name, unipile_account_id, organization_id, user_email, settings'),
+          supabaseDirect.from('prospects').select('id, organization_id, user_email'),
+          supabaseDirect.from('campaigns').select('id, name, organization_id, user_email'),
+          dbGetUserAccounts()
+        ]);
 
-        const accs = await dbGetUserAccounts();
-        setUserAccounts(accs);
+        setUserAccounts(accs || []);
+        setTenantProfiles(allProfiles || []);
+        setTenantCampaigns(allCampaigns || []);
+        setTenantProspects(allProspects || []);
 
         const distinctOrgs = new Set([
           ...((accs || []).map(a => a.organization_id || a.organizations?.id || a.email).filter(Boolean)),
           'org_superadmin_master'
         ]);
 
+        const realProfilesCount = (allProfiles || []).filter(p => !p.profile_key?.startsWith('user_') && p.unipile_account_id && !p.unipile_account_id.includes('@')).length;
+
         setStats({
           totalOrgs: Math.max(orgCount || 0, distinctOrgs.size),
-          totalProfiles: profCount || 1,
-          totalProspects: prospectCount || 0,
-          totalCampaigns: campaignCount || 0,
+          totalProfiles: realProfilesCount,
+          totalProspects: (allProspects || []).length,
+          totalCampaigns: (allCampaigns || []).length,
           systemStatus: 'Operational 24/7',
           railwayConnected: true,
         });
@@ -61,6 +77,29 @@ export default function SuperAdmin() {
     }
     loadAdminStats();
   }, []);
+
+  const handleSwitchToWorkspace = (acc) => {
+    const userObj = {
+      id: acc.id,
+      email: acc.email,
+      display_name: acc.display_name || acc.email.split('@')[0],
+      organization_id: acc.organization_id,
+      role: acc.role || 'member',
+      workspace_name: acc.organizations?.name || 'Workspace',
+    };
+    localStorage.setItem('lf_user_account', JSON.stringify(userObj));
+    localStorage.setItem('lf_auth', '1');
+    if (acc.role === 'superadmin' || acc.email === 'nasrullah.freelancer@gmail.com') {
+      localStorage.setItem('lf_is_superadmin', '1');
+    } else {
+      localStorage.removeItem('lf_is_superadmin');
+    }
+    localStorage.removeItem('lf_selected_account_id');
+    localStorage.removeItem('lf_active_account_id');
+    localStorage.removeItem('lf_account_disconnected');
+    toast.success(`Accessing workspace: ${acc.organizations?.name || acc.email}`);
+    window.location.href = '/';
+  };
 
   const handleCreateAccount = async (e) => {
     e.preventDefault();
@@ -265,43 +304,86 @@ export default function SuperAdmin() {
                 No custom user accounts created yet. Use the form above to provision user credentials instantly.
               </div>
             ) : (
-              userAccounts.map(acc => (
-                <div key={acc.id} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-full bg-[#6366f1]/20 text-[#6366f1] flex items-center justify-center font-bold text-xs shrink-0">
-                      {(acc.display_name || acc.email).slice(0, 2).toUpperCase()}
+              userAccounts.map(acc => {
+                const connectedProf = (tenantProfiles || []).find(p => {
+                  if (p.profile_key?.startsWith('user_')) return false;
+                  if (!p.unipile_account_id || p.unipile_account_id.includes('@')) return false;
+                  const pOrg = p.organization_id || p.settings?.organization_id;
+                  const pEmail = (p.user_email || p.settings?.user_email || '').toLowerCase().trim();
+                  return (acc.organization_id && pOrg === acc.organization_id) || (acc.email && pEmail === acc.email.toLowerCase().trim());
+                });
+
+                const campCount = (tenantCampaigns || []).filter(c => acc.organization_id && c.organization_id === acc.organization_id).length;
+                const prospCount = (tenantProspects || []).filter(p => acc.organization_id && p.organization_id === acc.organization_id).length;
+
+                return (
+                  <div key={acc.id} className="py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex items-start sm:items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-full bg-[#6366f1]/20 text-[#6366f1] flex items-center justify-center font-bold text-xs shrink-0">
+                        {(acc.display_name || acc.email).slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-white font-bold text-sm truncate">{acc.email}</p>
+                          {connectedProf ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                              <CheckCircle size={11} className="shrink-0" />
+                              LinkedIn: {connectedProf.display_name}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-white/5 text-[#9ca3af] border border-[#2a2a2a]">
+                              <Globe size={11} className="shrink-0" />
+                              No LinkedIn Connected
+                            </span>
+                          )}
+                          <span className="text-[11px] text-[#9ca3af] bg-[#111111] px-2 py-0.5 rounded-full border border-[#2a2a2a]">
+                            {campCount} {campCount === 1 ? 'Campaign' : 'Campaigns'} · {prospCount} {prospCount === 1 ? 'Prospect' : 'Prospects'}
+                          </span>
+                        </div>
+
+                        <p className="text-[#6b7280] text-xs">
+                          Password: <code className="text-emerald-400 bg-[#111111] px-1.5 py-0.5 rounded border border-[#2a2a2a] font-mono">{acc.password_text}</code>
+                          {' · '} Workspace: <span className="text-white font-medium">{acc.organizations?.name || 'Workspace'}</span>
+                          {acc.role === 'superadmin' && (
+                            <span className="ml-2 text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded text-[10px] font-bold border border-indigo-500/20">
+                              SUPERADMIN
+                            </span>
+                          )}
+                        </p>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-white font-bold text-sm truncate">{acc.email}</p>
-                      <p className="text-[#6b7280] text-xs mt-0.5">
-                        Password: <code className="text-emerald-400 bg-[#111111] px-1.5 py-0.5 rounded border border-[#2a2a2a] font-mono">{acc.password_text}</code>
-                        {' · '} Workspace: <span className="text-white font-medium">{acc.organizations?.name || 'Workspace'}</span>
-                      </p>
+
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => handleSwitchToWorkspace(acc)}
+                        className="px-3 py-1.5 bg-[#6366f1] hover:bg-[#4f46e5] text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 shadow-md shadow-indigo-500/20"
+                        title={`Access ${acc.email}'s workspace`}
+                      >
+                        <LogIn size={13} /> Access Workspace
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const creds = `Login URL: https://linkedflow-lite.vercel.app/login\nEmail: ${acc.email}\nPassword: ${acc.password_text}`;
+                          navigator.clipboard.writeText(creds);
+                          toast.success(`Credentials copied for ${acc.email}!`);
+                        }}
+                        className="px-3 py-1.5 bg-[#111111] hover:bg-[#222222] text-[#9ca3af] hover:text-white border border-[#2a2a2a] text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5"
+                      >
+                        <Copy size={13} /> Copy Credentials
+                      </button>
+
+                      <button
+                        onClick={() => handleDeleteAccount(acc.id, acc.email)}
+                        className="p-2 text-[#6b7280] hover:text-red-400 rounded-lg hover:bg-red-500/10 transition-colors"
+                        title="Delete User Account"
+                      >
+                        <Trash2 size={15} />
+                      </button>
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        const creds = `Login URL: https://linkedflow-lite.vercel.app/login\nEmail: ${acc.email}\nPassword: ${acc.password_text}`;
-                        navigator.clipboard.writeText(creds);
-                        toast.success(`Credentials copied for ${acc.email}!`);
-                      }}
-                      className="px-3 py-1.5 bg-[#111111] hover:bg-[#222222] text-[#9ca3af] hover:text-white border border-[#2a2a2a] text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5"
-                    >
-                      <Copy size={13} /> Copy Credentials
-                    </button>
-
-                    <button
-                      onClick={() => handleDeleteAccount(acc.id, acc.email)}
-                      className="p-2 text-[#6b7280] hover:text-red-400 rounded-lg hover:bg-red-500/10 transition-colors"
-                      title="Delete User Account"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

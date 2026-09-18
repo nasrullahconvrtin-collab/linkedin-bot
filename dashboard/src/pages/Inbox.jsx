@@ -117,11 +117,11 @@ export default function Inbox() {
       const unipileAccId = userProfiles[0]?.unipile_account_id || 'none';
 
       // Fetch Supabase campaigns map - FILTERED by current user's org
-      const isSuper = isSuperAdminUser();
       let cQuery = supabaseDirect.from('campaigns').select('id, name');
-      if (!isSuper) {
-        if (orgId) cQuery = cQuery.eq('organization_id', orgId);
-        else if (userAcc?.email) cQuery = cQuery.eq('user_email', userAcc.email.toLowerCase());
+      if (orgId) {
+        cQuery = cQuery.eq('organization_id', orgId);
+      } else if (userAcc?.email) {
+        cQuery = cQuery.eq('user_email', userAcc.email.toLowerCase());
       }
       const { data: cData } = await cQuery;
       const cMap = {};
