@@ -101,6 +101,51 @@ function getDateDividerLabel(isoStr) {
   }
 }
 
+function resolveAttachmentUrl(att) {
+  if (!att?.url) return null;
+  if (typeof att.url === 'string' && att.url.startsWith('att://')) {
+    try {
+      const parts = att.url.split('/');
+      const encoded = parts[parts.length - 1];
+      const decoded = atob(decodeURIComponent(encoded));
+      if (decoded.startsWith('http://') || decoded.startsWith('https://')) {
+        return decoded;
+      }
+    } catch {
+      // Fallback
+    }
+  }
+  return typeof att.url === 'string' ? att.url : null;
+}
+
+function isImageAttachment(att) {
+  if (!att) return false;
+  if (att.type === 'img' || att.type === 'image' || (typeof att.type === 'string' && att.type.startsWith('image/'))) return true;
+  if (typeof att.mimetype === 'string' && att.mimetype.startsWith('image/')) return true;
+  if (att.sticker) return true;
+  const url = resolveAttachmentUrl(att) || '';
+  return /\.(png|jpe?g|gif|webp|svg)(\?.*)?$/i.test(url);
+}
+
+function formatAttachmentSize(size) {
+  if (!size) return null;
+  if (typeof size === 'number') {
+    return size > 1024 * 1024 
+      ? (size / (1024 * 1024)).toFixed(1) + ' MB'
+      : (size / 1024).toFixed(1) + ' KB';
+  }
+  if (typeof size === 'string') {
+    return size;
+  }
+  if (typeof size === 'object' && size !== null) {
+    if (size.width && size.height) {
+      return `${size.width}×${size.height}`;
+    }
+    return null;
+  }
+  return null;
+}
+
 export default function Inbox() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -492,18 +537,34 @@ export default function Inbox() {
     ? `${realProfile.first_name || ''} ${realProfile.last_name || ''}`.trim() || realProfile.public_identifier || selectedChat?.name
     : selectedChat?.name || prospectRef?.name || 'LinkedIn Member';
 
-  const displayHeadline = realProfile?.headline || selectedChat?.headline || prospectRef?.job_title || prospectRef?.company || 'LinkedIn Outreach Contact';
-  const displayLocation = realProfile?.location || prospectRef?.location || 'Location Not Specified';
-  const displayCompany = realProfile?.headline ? (realProfile.headline.split('|')[0] || realProfile.headline) : prospectRef?.company || 'Direct Contact';
-  const displayLinkedinUrl = realProfile?.public_identifier
+  const displayHeadline = (typeof realProfile?.headline === 'string' ? realProfile.headline : null) || 
+    (typeof selectedChat?.headline === 'string' ? selectedChat.headline : null) || 
+    (typeof prospectRef?.job_title === 'string' ? prospectRef.job_title : null) || 
+    (typeof prospectRef?.company === 'string' ? prospectRef.company : null) || 
+    'LinkedIn Outreach Contact';
+  const displayLocation = (typeof realProfile?.location === 'string' ? realProfile.location : null) || 
+    (typeof prospectRef?.location === 'string' ? prospectRef.location : null) || 
+    'Location Not Specified';
+  const displayCompany = typeof realProfile?.headline === 'string' 
+    ? (realProfile.headline.split('|')[0] || realProfile.headline) 
+    : (typeof prospectRef?.company === 'string' ? prospectRef.company : 'Direct Contact');
+  const displayLinkedinUrl = typeof realProfile?.public_identifier === 'string'
     ? `https://www.linkedin.com/in/${realProfile.public_identifier}`
-    : selectedChat?.attendee_profile_url || prospectRef?.linkedin_url || null;
-  const displayAvatar = realProfile?.profile_picture_url_large || realProfile?.profile_picture_url || selectedChat?.avatar_url || prospectRef?.avatar_url;
-  const displayPhone = (realProfile?.contact_info?.phones && realProfile.contact_info.phones[0]) || prospectRef?.phone || null;
-  const displayWebsite = (realProfile?.websites && realProfile.websites[0]) || prospectRef?.website || null;
-  const displayEmail = prospectRef?.email || null;
-  const displayConnections = realProfile?.connections_count ? `${realProfile.connections_count.toLocaleString()} connections` : '1st Degree Connection';
-  const firstName = displayName.split(' ')[0] || 'there';
+    : (typeof selectedChat?.attendee_profile_url === 'string' ? selectedChat.attendee_profile_url : (typeof prospectRef?.linkedin_url === 'string' ? prospectRef.linkedin_url : null));
+  const displayAvatar = (typeof realProfile?.profile_picture_url_large === 'string' && realProfile.profile_picture_url_large) || 
+    (typeof realProfile?.profile_picture_url === 'string' && realProfile.profile_picture_url) || 
+    (typeof selectedChat?.avatar_url === 'string' && selectedChat.avatar_url) || 
+    (typeof prospectRef?.avatar_url === 'string' && prospectRef.avatar_url) || null;
+  const displayPhone = (Array.isArray(realProfile?.contact_info?.phones) && typeof realProfile.contact_info.phones[0] === 'string' && realProfile.contact_info.phones[0]) || 
+    (typeof prospectRef?.phone === 'string' ? prospectRef.phone : null);
+  const displayWebsite = (Array.isArray(realProfile?.websites) && typeof realProfile.websites[0] === 'string' && realProfile.websites[0]) || 
+    (typeof prospectRef?.website === 'string' ? prospectRef.website : null);
+  const displayEmail = (typeof prospectRef?.email === 'string' ? prospectRef.email : null) || 
+    (Array.isArray(realProfile?.contact_info?.emails) && typeof realProfile.contact_info.emails[0] === 'string' ? realProfile.contact_info.emails[0] : null);
+  const displayConnections = typeof realProfile?.connections_count === 'number' 
+    ? `${realProfile.connections_count.toLocaleString()} connections` 
+    : '1st Degree Connection';
+  const firstName = typeof displayName === 'string' ? (displayName.split(' ')[0] || 'there') : 'there';
 
   return (
     <Layout>
@@ -809,20 +870,35 @@ export default function Inbox() {
                                 {Array.isArray(m.attachments) && m.attachments.length > 0 && (
                                   <div className="mt-2.5 space-y-2 border-t border-white/15 pt-2">
                                     {m.attachments.map((att, idx) => {
-                                      const isImg = att.type?.startsWith('image/') || att.url?.match(/\.(png|jpg|jpeg|gif|webp)/i);
+                                      const resolvedUrl = resolveAttachmentUrl(att);
+                                      const isImg = isImageAttachment(att);
+                                      const sizeLabel = formatAttachmentSize(att.size);
+                                      const attName = typeof att.name === 'string' ? att.name : (typeof att.filename === 'string' ? att.filename : 'Attachment');
+
                                       return (
                                         <div key={idx} className="rounded-xl overflow-hidden border border-white/20 bg-black/25 p-2">
-                                          {isImg && att.url ? (
-                                            <img src={att.url} alt={att.name || 'Attachment'} className="max-w-xs rounded-lg max-h-48 object-cover mb-1" />
+                                          {isImg && resolvedUrl ? (
+                                            <div className="space-y-1">
+                                              <img
+                                                src={resolvedUrl}
+                                                alt={attName}
+                                                className="max-w-xs rounded-lg max-h-56 object-contain bg-black/40 cursor-pointer hover:opacity-95 transition-opacity"
+                                                onClick={() => window.open(resolvedUrl, '_blank')}
+                                                title="Click to view full size"
+                                              />
+                                              {sizeLabel && (
+                                                <span className="text-[10px] text-gray-300 block">{sizeLabel}</span>
+                                              )}
+                                            </div>
                                           ) : (
                                             <div className="flex items-center justify-between gap-2 text-xs">
                                               <div className="flex items-center gap-1.5 min-w-0">
                                                 <FileText size={14} className="text-indigo-300 shrink-0" />
-                                                <span className="truncate font-mono text-[11px] text-white">{att.name || att.filename || 'Document'}</span>
-                                                {att.size && <span className="text-[10px] text-gray-300">({att.size})</span>}
+                                                <span className="truncate font-mono text-[11px] text-white">{attName}</span>
+                                                {sizeLabel && <span className="text-[10px] text-gray-300">({sizeLabel})</span>}
                                               </div>
-                                              {att.url && (
-                                                <a href={att.url} download target="_blank" rel="noreferrer" className="text-[10px] underline text-indigo-300 hover:text-white shrink-0 flex items-center gap-0.5">
+                                              {resolvedUrl && (
+                                                <a href={resolvedUrl} download target="_blank" rel="noreferrer" className="text-[10px] underline text-indigo-300 hover:text-white shrink-0 flex items-center gap-0.5">
                                                   <Download size={11} /> Download
                                                 </a>
                                               )}
