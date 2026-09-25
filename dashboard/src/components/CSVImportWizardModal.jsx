@@ -39,21 +39,21 @@ function autoGuessMapping(header) {
   if (clean.includes('first_name') || clean.includes('firstname') || clean === 'first') return 'first_name';
   if (clean.includes('last_name') || clean.includes('lastname') || clean === 'last') return 'last_name';
   if (clean === 'name' || clean === 'full_name' || clean === 'fullname') return 'name';
-  if (clean.includes('linkedin') || clean.includes('profile_url') || clean === 'url') return 'linkedin_url';
+  if (clean.includes('linkedin') || clean.includes('profile_url') || clean.includes('profile_link') || clean.includes('profile') || clean.includes('link') || clean === 'url' || clean.includes('person_url')) return 'linkedin_url';
   if (clean.includes('email')) return 'email';
   if (clean.includes('company') || clean.includes('organization')) return 'company';
   if (clean.includes('job') || clean.includes('title') || clean.includes('position')) return 'job_title';
   if (clean.includes('headline')) return 'headline';
-  if (clean.includes('location') || clean.includes('city') || clean.includes('country')) return 'location';
+  if (clean.includes('location') || clean.includes('city') || clean.includes('country') || clean.includes('state')) return 'location';
   if (clean.includes('note') || clean.includes('comment')) return 'notes';
   
   if (clean.includes('invite') && clean.includes('note')) return 'invite_note';
   if (clean.includes('initial') || clean.includes('message_1') || clean.includes('first_message')) return 'initial_message';
-  if (clean.includes('followup_1') || clean.includes('follow_up_1') || clean.includes('fu1')) return 'followup_1';
-  if (clean.includes('followup_2') || clean.includes('follow_up_2') || clean.includes('fu2')) return 'followup_2';
-  if (clean.includes('followup_3') || clean.includes('follow_up_3') || clean.includes('fu3')) return 'followup_3';
-  if (clean.includes('followup_4') || clean.includes('follow_up_4') || clean.includes('fu4')) return 'followup_4';
-  if (clean.includes('followup_5') || clean.includes('follow_up_5') || clean.includes('fu5')) return 'followup_5';
+  if (clean.includes('followup_1') || clean.includes('follow_up_1') || clean.includes('fu1') || clean === 'followup1') return 'followup_1';
+  if (clean.includes('followup_2') || clean.includes('follow_up_2') || clean.includes('fu2') || clean === 'followup2') return 'followup_2';
+  if (clean.includes('followup_3') || clean.includes('follow_up_3') || clean.includes('fu3') || clean === 'followup3') return 'followup_3';
+  if (clean.includes('followup_4') || clean.includes('follow_up_4') || clean.includes('fu4') || clean === 'followup4') return 'followup_4';
+  if (clean.includes('followup_5') || clean.includes('follow_up_5') || clean.includes('fu5') || clean === 'followup5') return 'followup_5';
 
   return 'custom_var';
 }
@@ -71,11 +71,20 @@ export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete
   const [loading, setLoading] = useState(false);
   const [validationResult, setValidationResult] = useState(null);
 
-  // Parse CSV text cleanly handling quotes and newlines
+  // Parse CSV text cleanly handling quotes and newlines with delimiter auto-detection
   const parseCSV = (csvText) => {
+    if (!csvText) return [];
     const lines = [];
     let row = [""];
     let inQuotes = false;
+
+    const firstLine = csvText.split(/\r\n|\n|\r/)[0] || '';
+    const commaCount = (firstLine.match(/,/g) || []).length;
+    const semiCount = (firstLine.match(/;/g) || []).length;
+    const tabCount = (firstLine.match(/\t/g) || []).length;
+    let delimiter = ',';
+    if (semiCount > commaCount && semiCount >= tabCount) delimiter = ';';
+    else if (tabCount > commaCount && tabCount > semiCount) delimiter = '\t';
 
     for (let i = 0; i < csvText.length; i++) {
       const char = csvText[i];
@@ -88,7 +97,7 @@ export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete
         } else {
           inQuotes = !inQuotes;
         }
-      } else if (char === ',' && !inQuotes) {
+      } else if (char === delimiter && !inQuotes) {
         row.push("");
       } else if ((char === '\r' || char === '\n') && !inQuotes) {
         if (char === '\r' && nextChar === '\n') {
@@ -116,22 +125,15 @@ export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete
         const text = evt.target?.result || '';
         const parsed = parseCSV(text);
         if (parsed.length <= 1) {
-          toast.error('The selected CSV file appears to be empty.');
+          toast.error('The selected CSV file appears to be empty or could not be parsed.');
           return;
         }
 
         const headers = parsed[0].map(h => h.trim().replace(/^["']|["']$/g, ''));
         const dataRows = parsed.slice(1).filter(r => r.some(Boolean));
 
-        // Strict header validation
         const validation = validateCSVHeaders(headers);
         setValidationResult(validation);
-
-        if (!validation.valid) {
-          toast.error(validation.error);
-          setStep(1); // Block and keep on step 1 with clear warning
-          return;
-        }
 
         setCsvHeaders(headers);
         setSampleRows(dataRows.slice(0, 3));
@@ -593,7 +595,14 @@ export default function CSVImportWizardModal({ isOpen, onClose, onImportComplete
             {step === 2 && (
               <button
                 type="button"
-                onClick={() => setStep(3)}
+                onClick={() => {
+                  const hasUrl = Object.values(columnMapping).some(v => v === 'linkedin_url');
+                  if (!hasUrl) {
+                    toast.error('Please map at least one column to "LinkedIn URL" before proceeding.');
+                    return;
+                  }
+                  setStep(3);
+                }}
                 className="flex items-center gap-2 px-6 py-2.5 bg-[#6366f1] hover:bg-[#4f46e5] text-white text-xs font-bold rounded-xl transition-all shadow-md"
               >
                 Continue to Import Options <ArrowRight size={14} />

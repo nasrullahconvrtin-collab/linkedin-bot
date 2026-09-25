@@ -987,6 +987,46 @@ export const directGetProspects = async (params = {}) => {
   return { prospects: [], total: 0 };
 };
 
+const VALID_PROSPECT_COLUMNS = new Set([
+  'id', 'name', 'first_name', 'last_name', 'company', 'job_title',
+  'email', 'linkedin_url', 'public_identifier', 'provider_id',
+  'member_id', 'status', 'connection_status', 'connection_sent_date',
+  'message_sent_date', 'accepted_at', 'list_id', 'campaign_id',
+  'assigned_account', 'organization_id', 'user_email', 'custom_variables',
+  'created_at', 'updated_at'
+]);
+
+function sanitizeProspectPayload(data, existingCustomVars = {}) {
+  const customVars = {
+    ...existingCustomVars,
+    ...(data.custom_variables || {}),
+  };
+
+  const payload = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (VALID_PROSPECT_COLUMNS.has(key)) {
+      payload[key] = value;
+    } else {
+      if (value !== undefined && value !== null) {
+        customVars[key] = value;
+      }
+    }
+  }
+
+  if (data.title && !payload.job_title) payload.job_title = data.title;
+  if (data.headline && !payload.job_title) payload.job_title = data.headline;
+  if (!payload.name) {
+    payload.name = `${payload.first_name || ''} ${payload.last_name || ''}`.trim() || 'Prospect';
+  }
+  if (!payload.linkedin_url) {
+    payload.linkedin_url = data.profile_url || data.profile_link || data.url || data.person_url || '';
+  }
+
+  payload.custom_variables = customVars;
+  payload.updated_at = new Date().toISOString();
+  return payload;
+}
+
 export const directCreateProspect = async (data) => {
   const firstName = (data.first_name || data.name?.split(' ')[0] || '').trim()
     || (data.linkedin_url ? (data.linkedin_url.split('/in/')[1] || '').split('/')[0].replace(/[-_]/g, ' ') : '')
@@ -995,38 +1035,23 @@ export const directCreateProspect = async (data) => {
   const userAcc = getActiveUserAccount();
   const orgId = getActiveOrganizationId();
   const email = userAcc?.email ? userAcc.email.toLowerCase() : null;
-  const customVars = {
-    ...(data.custom_variables || {}),
-    organization_id: orgId || userAcc?.organization_id || null,
-    user_email: email,
-  };
-  if (data.location) customVars.location = data.location;
-
-  const payload = {
+  const sanitized = sanitizeProspectPayload({
+    ...data,
     first_name: firstName,
-    last_name: (data.last_name || data.name?.split(' ').slice(1).join(' ') || '').trim(),
-    name: data.name || `${firstName} ${data.last_name || ''}`.trim(),
-    company: data.company || '',
-    job_title: data.job_title || data.title || '',
-    headline: data.headline || data.job_title || data.title || '',
-    email: data.email || '',
-    linkedin_url: data.linkedin_url || '',
     status: data.status || 'Not Contacted',
-    campaign_id: data.campaign_id || null,
-    list_id: data.list_id || null,
     organization_id: orgId || userAcc?.organization_id || null,
     user_email: email,
-    custom_variables: customVars,
     created_at: new Date().toISOString(),
-  };
+  });
+
   try {
-    const { data: res, error } = await supabaseDirect.from('prospects').insert([payload]).select();
+    const { data: res, error } = await supabaseDirect.from('prospects').insert([sanitized]).select();
     if (error) console.error('directCreateProspect error:', error);
     if (!error && res && res[0]) return res[0];
   } catch (e) {
     console.warn('directCreateProspect warning:', e);
   }
-  return { id: crypto.randomUUID(), ...payload };
+  return { id: crypto.randomUUID(), ...sanitized };
 };
 
 export const directGetProspect = async (id) => {
@@ -1045,9 +1070,12 @@ export const directGetProspect = async (id) => {
 };
 
 export const directUpdateProspect = async (id, updates) => {
+  const sanitized = sanitizeProspectPayload(updates);
+  delete sanitized.id;
   try {
-    const { data, error } = await supabaseDirect.from('prospects').update(updates).eq('id', id).select();
+    const { data, error } = await supabaseDirect.from('prospects').update(sanitized).eq('id', id).select();
     if (!error && data && data[0]) return data[0];
+    if (error) console.error('directUpdateProspect error:', error);
   } catch (e) {
     console.warn('directUpdateProspect warning:', e);
   }
@@ -1156,6 +1184,8 @@ export const directBulkImportProspects = async (file, columnMapping = null, impo
             campaignOrgId = campData.organization_id;
           }
         }
+
+        const effectiveOrgId = campaignOrgId || (isValidUuid(rawOrgId) ? rawOrgId : null);
 
         // Fetch existing prospects to build maps strictly for this organization
         let existQuery = supabaseDirect
@@ -1408,9 +1438,18 @@ function cleanLinkedinUrl(url) {
 }
 
 function parseCSVText(csvText) {
+  if (!csvText) return [];
   const lines = [];
   let row = [""];
   let inQuotes = false;
+
+  const firstLine = csvText.split(/\r\n|\n|\r/)[0] || '';
+  const commaCount = (firstLine.match(/,/g) || []).length;
+  const semiCount = (firstLine.match(/;/g) || []).length;
+  const tabCount = (firstLine.match(/\t/g) || []).length;
+  let delimiter = ',';
+  if (semiCount > commaCount && semiCount >= tabCount) delimiter = ';';
+  else if (tabCount > commaCount && tabCount > semiCount) delimiter = '\t';
 
   for (let i = 0; i < csvText.length; i++) {
     const char = csvText[i];
@@ -1423,7 +1462,7 @@ function parseCSVText(csvText) {
       } else {
         inQuotes = !inQuotes;
       }
-    } else if (char === ',' && !inQuotes) {
+    } else if (char === delimiter && !inQuotes) {
       row.push("");
     } else if ((char === '\r' || char === '\n') && !inQuotes) {
       if (char === '\r' && nextChar === '\n') i++;
@@ -1444,15 +1483,15 @@ function autoGuessHeader(header) {
   if (clean.includes('first_name') || clean.includes('firstname') || clean === 'first') return 'first_name';
   if (clean.includes('last_name') || clean.includes('lastname') || clean === 'last') return 'last_name';
   if (clean === 'name' || clean === 'full_name' || clean === 'fullname') return 'name';
-  if (clean.includes('linkedin') || clean.includes('profile_url') || clean === 'url') return 'linkedin_url';
+  if (clean.includes('linkedin') || clean.includes('profile_url') || clean.includes('profile_link') || clean.includes('profile') || clean.includes('link') || clean === 'url' || clean.includes('person_url')) return 'linkedin_url';
   if (clean.includes('email')) return 'email';
   if (clean.includes('company') || clean.includes('organization')) return 'company';
-  if (clean.includes('job') || clean.includes('title')) return 'job_title';
+  if (clean.includes('job') || clean.includes('title') || clean.includes('position')) return 'job_title';
   if (clean.includes('headline')) return 'headline';
   if (clean.includes('location') || clean.includes('city') || clean.includes('country') || clean.includes('state')) return 'location';
   if (clean.includes('invite') && clean.includes('note')) return 'invite_note';
-  if (clean.includes('note')) return 'notes';
-  if (clean.includes('initial')) return 'initial_message';
+  if (clean.includes('note') || clean.includes('comment')) return 'notes';
+  if (clean.includes('initial') || clean.includes('message_1') || clean.includes('first_message')) return 'initial_message';
   if (clean.includes('followup_1') || clean.includes('follow_up_1') || clean === 'followup1' || clean === 'fu1') return 'followup_1';
   if (clean.includes('followup_2') || clean.includes('follow_up_2') || clean === 'followup2' || clean === 'fu2') return 'followup_2';
   if (clean.includes('followup_3') || clean.includes('follow_up_3') || clean === 'followup3' || clean === 'fu3') return 'followup_3';
@@ -1515,20 +1554,21 @@ export const validateCSVHeaders = (headers = []) => {
   const cleanHeaders = headers.map(h => (h || '').trim());
   const cleanNorm = cleanHeaders.map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
 
-  // Check required linkedin_url
-  const hasLinkedinUrl = cleanNorm.some(h => h.includes('linkedin') || h.includes('profileurl') || h === 'url');
-  if (!hasLinkedinUrl) {
-    return {
-      valid: false,
-      error: 'Missing required "linkedin_url" column. Every prospect must have a LinkedIn profile URL so the tool can identify them.'
-    };
-  }
+  // Check required linkedin_url (with permissive alias support)
+  const hasLinkedinUrl = cleanNorm.some(h => (
+    h.includes('linkedin') ||
+    h.includes('profileurl') ||
+    h.includes('profilelink') ||
+    h.includes('profile') ||
+    h.includes('link') ||
+    h === 'url' ||
+    h.includes('personurl')
+  ));
 
   const STANDARD_KEYS = new Set([
     'linkedinurl', 'firstname', 'lastname', 'name', 'company', 'jobtitle', 'title',
     'headline', 'location', 'city', 'state', 'country', 'email', 'notes', 'invitenote',
     'initialmessage', 'initial', 'followup1', 'followup2', 'followup3', 'followup4', 'followup5',
-    'followup1', 'followup2', 'followup3', 'followup4', 'followup5',
     'inmailsubject', 'inmailmessage'
   ]);
 
@@ -2484,8 +2524,7 @@ export const directRunFlow = async () => {
 
         if (!isConnected) {
           const pSlug = extractLinkedInSlug(prospect.linkedin_url) || extractLinkedInSlug(prospect.public_identifier);
-          const pName = (prospect.name || `${prospect.first_name || ''} ${prospect.last_name || ''}`).toLowerCase().trim();
-          matchedRel = (pSlug && relSlugs.get(pSlug)) || (prospect.member_id && relMemberIds.get(prospect.member_id)) || (pName && relNames.get(pName));
+          matchedRel = (pSlug && relSlugs.get(pSlug)) || (prospect.member_id && relMemberIds.get(prospect.member_id));
           if (matchedRel) {
             isConnected = true;
           }
@@ -2687,7 +2726,6 @@ export const directRunFlow = async () => {
             continue;
           }
           // PRE-SEND CLAIM: Lock node in DB before typing delay starts so concurrent processes immediately skip this prospect
-          prospect.custom_variables.last_sent_node_id = currentNode.id;
           prospect.custom_variables.send_in_progress_at = new Date().toISOString();
           try {
             await supabaseDirect.from('prospects').update({
@@ -2702,6 +2740,7 @@ export const directRunFlow = async () => {
 
           if (res.duplicateBlocked) {
             console.warn(`[Runner] Duplicate message blocked for ${prospect.name}. Skipping without advancing node.`);
+            delete prospect.custom_variables.send_in_progress_at;
             continue;
           }
 
@@ -2711,6 +2750,7 @@ export const directRunFlow = async () => {
             const isFollowUp = (nodeLabel || '').toLowerCase().includes('follow') || (nodeConfig.message || '').toLowerCase().includes('follow');
             prospect.status = isFollowUp ? 'Following Up' : 'Initial Message Sent';
             prospect.custom_variables.last_sent_node_id = currentNode.id;
+            delete prospect.custom_variables.send_in_progress_at;
             prospect.custom_variables.message_sent_at = new Date().toISOString();
             prospect.custom_variables.last_action_at = new Date().toISOString();
             prospect.custom_variables.history = [
@@ -2728,12 +2768,36 @@ export const directRunFlow = async () => {
             }
           } else {
             console.warn(`Failed to send message: ${res.error}`);
+            delete prospect.custom_variables.last_sent_node_id;
+            delete prospect.custom_variables.send_in_progress_at;
+
+            const errStr = String(res.error || '');
+            const isNotConnected = errStr.toLowerCase().includes('not to be first degree') || errStr.toLowerCase().includes('not a first degree');
+
+            if (isNotConnected) {
+              console.warn(`[Runner] ${prospect.name} is NOT a 1st degree connection. Reverting status to wait for acceptance.`);
+              const hasSentInvite = prospect.connection_sent_date || prospect.custom_variables.invitation_sent_at;
+              if (hasSentInvite) {
+                prospect.status = 'Connection Request Sent';
+                prospect.connection_status = 'invitation_sent';
+                const invNode = Array.from(nodesMap.values()).find(n => (n.data?.nodeType === 'send_invitation' || n.data?.action_type === 'send_invitation'));
+                if (invNode) {
+                  prospect.custom_variables.current_node_id = invNode.id;
+                }
+              } else {
+                prospect.status = 'Needs Review';
+                prospect.connection_status = 'not_connected';
+              }
+            }
+
             prospect.custom_variables.history = [
               ...(prospect.custom_variables.history || []),
               { node_id: currentNode.id, node_type: 'send_message', executed_at: new Date().toISOString(), status: 'failed', error: res.error }
             ];
             try {
               await supabaseDirect.from('prospects').update({
+                status: prospect.status,
+                connection_status: prospect.connection_status,
                 custom_variables: prospect.custom_variables
               }).eq('id', prospect.id);
             } catch (e) {
@@ -2946,8 +3010,7 @@ export const directCheckAcceptances = async () => {
 
       for (const p of prospects) {
         const pSlug = extractLinkedInSlug(p.linkedin_url) || extractLinkedInSlug(p.public_identifier);
-        const pName = (p.name || `${p.first_name || ''} ${p.last_name || ''}`).toLowerCase().trim();
-        const rel = (pSlug && relSlugs.get(pSlug)) || (p.member_id && relMemberIds.get(p.member_id)) || (pName && relNames.get(pName));
+        const rel = (pSlug && relSlugs.get(pSlug)) || (p.member_id && relMemberIds.get(p.member_id));
 
         if (rel) {
           const acceptedAt = rel.created_at ? new Date(rel.created_at).toISOString() : new Date().toISOString();
