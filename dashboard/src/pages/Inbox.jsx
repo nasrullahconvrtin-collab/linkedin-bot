@@ -366,11 +366,22 @@ export default function Inbox() {
 
       fetchedMsgs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
-      // Merge with locally stored sent messages to guarantee persistence
+      // Merge with locally stored sent messages to guarantee persistence (with content & timestamp dedup)
       const localSent = getLocalSentMessages(chatId);
       const existingIds = new Set(fetchedMsgs.map(m => m.id));
       localSent.forEach(lm => {
-        if (!existingIds.has(lm.id)) {
+        if (existingIds.has(lm.id)) return;
+        const normLocal = (lm.text || '').trim().toLowerCase();
+        const lmTime = new Date(lm.timestamp).getTime();
+        // Prevent duplicate bubbles if Unipile already returned the server copy of this message
+        const alreadyInRemote = fetchedMsgs.some(m => {
+          if (m.sender !== lm.sender) return false;
+          const normRemote = (m.text || '').trim().toLowerCase();
+          if (normRemote !== normLocal) return false;
+          const mTime = new Date(m.timestamp).getTime();
+          return Math.abs(lmTime - mTime) < 120_000;
+        });
+        if (!alreadyInRemote) {
           fetchedMsgs.push(lm);
         }
       });

@@ -61,6 +61,8 @@ const getUnipileBaseUrl = () => {
 };
 
 export const unipileFetch = async (endpoint, options = {}) => {
+  const method = (options.method || 'GET').toUpperCase();
+  const isMutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
   const headers = {
     'X-API-KEY': UNIPILE_API_KEY,
     'Content-Type': 'application/json',
@@ -70,7 +72,10 @@ export const unipileFetch = async (endpoint, options = {}) => {
     const primaryUrl = `${getUnipileBaseUrl()}${endpoint}`;
     let res = await fetch(primaryUrl, { ...options, headers });
     
-    if (!res.ok && primaryUrl.startsWith('/api/unipile')) {
+    // Only fall back to external URL for safe, idempotent GET requests.
+    // NEVER retry mutating requests (POST/PUT/DELETE) across endpoints because proxy timeouts
+    // can cause duplicate operations (such as sending messages twice on LinkedIn).
+    if (!res.ok && !isMutating && primaryUrl.startsWith('/api/unipile')) {
       const fallbackUrl = `${UNIPILE_BASE_URL}${endpoint}`;
       res = await fetch(fallbackUrl, { ...options, headers });
     }
@@ -79,18 +84,23 @@ export const unipileFetch = async (endpoint, options = {}) => {
     return { ok: res.ok, status: res.status, data };
   } catch (err) {
     console.error('Direct Unipile fetch error:', err);
-    try {
-      const fallbackUrl = `${UNIPILE_BASE_URL}${endpoint}`;
-      const res = await fetch(fallbackUrl, { ...options, headers });
-      const data = await res.json().catch(() => ({}));
-      return { ok: res.ok, status: res.status, data };
-    } catch (e) {
-      return { ok: false, status: 500, data: null };
+    if (!isMutating) {
+      try {
+        const fallbackUrl = `${UNIPILE_BASE_URL}${endpoint}`;
+        const res = await fetch(fallbackUrl, { ...options, headers });
+        const data = await res.json().catch(() => ({}));
+        return { ok: res.ok, status: res.status, data };
+      } catch (e) {
+        return { ok: false, status: 500, data: null };
+      }
     }
+    return { ok: false, status: 500, data: null };
   }
 };
 
 export const unipileFormFetch = async (endpoint, formData, options = {}) => {
+  const method = (options.method || 'POST').toUpperCase();
+  const isMutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
   const headers = {
     'X-API-KEY': UNIPILE_API_KEY,
     ...(options.headers || {}),
@@ -99,21 +109,24 @@ export const unipileFormFetch = async (endpoint, formData, options = {}) => {
   try {
     const primaryUrl = `${getUnipileBaseUrl()}${endpoint}`;
     let res = await fetch(primaryUrl, { method: 'POST', body: formData, headers, ...options });
-    if (!res.ok && primaryUrl.startsWith('/api/unipile')) {
+    if (!res.ok && !isMutating && primaryUrl.startsWith('/api/unipile')) {
       const fallbackUrl = `${UNIPILE_BASE_URL}${endpoint}`;
       res = await fetch(fallbackUrl, { method: 'POST', body: formData, headers, ...options });
     }
     const data = await res.json().catch(() => ({}));
     return { ok: res.ok, status: res.status, data };
   } catch (err) {
-    try {
-      const fallbackUrl = `${UNIPILE_BASE_URL}${endpoint}`;
-      const res = await fetch(fallbackUrl, { method: 'POST', body: formData, headers, ...options });
-      const data = await res.json().catch(() => ({}));
-      return { ok: res.ok, status: res.status, data };
-    } catch (e) {
-      return { ok: false, status: 500, data: null };
+    if (!isMutating) {
+      try {
+        const fallbackUrl = `${UNIPILE_BASE_URL}${endpoint}`;
+        const res = await fetch(fallbackUrl, { method: 'POST', body: formData, headers, ...options });
+        const data = await res.json().catch(() => ({}));
+        return { ok: res.ok, status: res.status, data };
+      } catch (e) {
+        return { ok: false, status: 500, data: null };
+      }
     }
+    return { ok: false, status: 500, data: null };
   }
 };
 
@@ -1862,7 +1875,7 @@ export const directSendUnipileConnectionInvite = async (prospect, message = '') 
   return { success: false, error: data?.detail || 'Unipile invite failed' };
 };
 
-// In-memory recipient send cache to physically prevent duplicate messages within 3 minutes
+// In-memory recipient send cache to physically prevent duplicate messages
 const recentRecipientSends = new Map();
 
 export const directSendUnipileChatMessage = async (prospect, text = '') => {
@@ -1878,15 +1891,24 @@ export const directSendUnipileChatMessage = async (prospect, text = '') => {
     return { success: false, error: 'EMPTY_MESSAGE: No message configured or resolved for prospect' };
   }
 
-  // Dedup check: physical guarantee against sending the exact same message to the recipient twice within 3 minutes
+  // Dedup check: physical guarantee against sending the exact same message to the recipient twice within 10 minutes
   const contentFingerprint = (messageText || '').replace(/\s+/g, ' ').trim().slice(0, 80).toLowerCase();
-  const sendKey = `${accountId}:${recipientId}:${contentFingerprint}`;
-  const lastSendTime = recentRecipientSends.get(sendKey);
-  if (lastSendTime && (Date.now() - lastSendTime < 180_000)) {
+  const sendKey = `lf_dedup_${accountId}_${recipientId}_${contentFingerprint}`;
+  
+  let lastSendTime = recentRecipientSends.get(sendKey) || 0;
+  try {
+    const storedTime = Number(localStorage.getItem(sendKey) || 0);
+    if (storedTime > lastSendTime) lastSendTime = storedTime;
+  } catch (e) {}
+
+  if (lastSendTime && (Date.now() - lastSendTime < 600_000)) {
     console.warn(`[DEDUP GUARD] Aborting duplicate message to ${recipientId} — identical message already sent ${Math.round((Date.now() - lastSendTime) / 1000)}s ago.`);
-    return { success: false, duplicateBlocked: true, error: 'Identical message was already sent to this recipient within the last 3 minutes.' };
+    return { success: false, duplicateBlocked: true, error: 'Identical message was already sent to this recipient within the last 10 minutes.' };
   }
   recentRecipientSends.set(sendKey, Date.now());
+  try {
+    localStorage.setItem(sendKey, String(Date.now()));
+  } catch (e) {}
 
   // Pre-message human review pause & typing simulation
   await humanPause(10, 22, 'Opening chat window');
@@ -1898,12 +1920,35 @@ export const directSendUnipileChatMessage = async (prospect, text = '') => {
     text: messageText,
   };
 
-  const { ok, data } = await unipileFetch('/chats', {
+  const { ok, data, status } = await unipileFetch('/chats', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
 
-  if (ok) {
+  // Verify delivery: If the POST returned an error or 504 Gateway Timeout from the proxy,
+  // check if Unipile actually received and dispatched the chat before reporting failure!
+  let isDelivered = ok;
+  let deliveryData = data;
+  if (!ok && (status === 504 || status === 502 || status === 500)) {
+    console.warn(`[directSendUnipileChatMessage] POST /chats returned status ${status}. Verifying if message was delivered...`);
+    try {
+      const verifyRes = await unipileFetch(`/chats?account_id=${accountId}&limit=5`);
+      if (verifyRes.ok && Array.isArray(verifyRes.data?.items)) {
+        const recentChat = verifyRes.data.items.find(c => {
+          const chatSnippet = (c.last_message_text || c.snippet || '').trim().toLowerCase();
+          const targetSnippet = contentFingerprint.slice(0, 40);
+          return chatSnippet.includes(targetSnippet);
+        });
+        if (recentChat) {
+          console.log(`[directSendUnipileChatMessage] Message was indeed delivered on Unipile (Chat: ${recentChat.id})! Treating as success.`);
+          isDelivered = true;
+          deliveryData = recentChat;
+        }
+      }
+    } catch (e) {}
+  }
+
+  if (isDelivered) {
     try {
       const nextStatus = prospect.status === 'Following Up' || prospect.status === 'Message Sent' ? prospect.status : 'Initial Message Sent';
       await supabaseDirect.from('prospects').update({
@@ -1914,7 +1959,7 @@ export const directSendUnipileChatMessage = async (prospect, text = '') => {
       console.warn('Supabase update warning:', e);
     }
     await humanPause(15, 30, 'Post-message cooloff');
-    return { success: true, data };
+    return { success: true, data: deliveryData };
   }
   return { success: false, error: data?.detail || 'Unipile chat message failed' };
 };
@@ -2386,6 +2431,13 @@ export const directRunFlow = async () => {
       if (actionsTaken >= effectiveLimit || remainingGlobalQuota <= 0) break;
 
       if (['Completed', 'Failed', 'Replied'].includes(prospect.status)) {
+        continue;
+      }
+
+      // Claim lock check: skip if another runner cycle or tab is currently sending a message to this prospect (5-minute TTL)
+      const inProgressTime = prospect.custom_variables?.send_in_progress_at ? new Date(prospect.custom_variables.send_in_progress_at).getTime() : 0;
+      if (inProgressTime && (Date.now() - inProgressTime < 300_000)) {
+        console.log(`[Runner] Prospect ${prospect.name || prospect.id} has an active send claim in progress (${Math.round((Date.now() - inProgressTime) / 1000)}s ago). Skipping.`);
         continue;
       }
 
