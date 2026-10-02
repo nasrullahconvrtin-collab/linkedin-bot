@@ -1893,22 +1893,37 @@ export const directSendUnipileChatMessage = async (prospect, text = '') => {
 
   // Dedup check: physical guarantee against sending the exact same message to the recipient twice within 10 minutes
   const contentFingerprint = (messageText || '').replace(/\s+/g, ' ').trim().slice(0, 80).toLowerCase();
-  const sendKey = `lf_dedup_${accountId}_${recipientId}_${contentFingerprint}`;
   
-  let lastSendTime = recentRecipientSends.get(sendKey) || 0;
-  try {
-    const storedTime = Number(localStorage.getItem(sendKey) || 0);
-    if (storedTime > lastSendTime) lastSendTime = storedTime;
-  } catch (e) {}
+  // IMMUTABLE PROSPECT IDENTIFIERS:
+  // recipientId can change from vanity slug ('gvaraich') to LinkedIn URN ('ACoAAD...').
+  // Therefore, the dedup key MUST include prospect.id and normalized URL to prevent key mismatch!
+  const normUrl = (prospect.linkedin_url || prospect.custom_variables?.linkedin_url || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const candidateKeys = [
+    prospect.id ? `lf_dedup_${accountId}_${prospect.id}_${contentFingerprint}` : null,
+    recipientId ? `lf_dedup_${accountId}_${recipientId}_${contentFingerprint}` : null,
+    normUrl ? `lf_dedup_url_${accountId}_${normUrl}_${contentFingerprint}` : null
+  ].filter(Boolean);
+
+  let lastSendTime = 0;
+  for (const k of candidateKeys) {
+    const memTime = recentRecipientSends.get(k) || 0;
+    let localTime = 0;
+    try { localTime = Number(localStorage.getItem(k) || 0); } catch (e) {}
+    const maxK = Math.max(memTime, localTime);
+    if (maxK > lastSendTime) lastSendTime = maxK;
+  }
 
   if (lastSendTime && (Date.now() - lastSendTime < 600_000)) {
-    console.warn(`[DEDUP GUARD] Aborting duplicate message to ${recipientId} — identical message already sent ${Math.round((Date.now() - lastSendTime) / 1000)}s ago.`);
+    console.warn(`[DEDUP GUARD] Aborting duplicate message to ${recipientId} (${prospect.name || prospect.id}) — identical message already sent ${Math.round((Date.now() - lastSendTime) / 1000)}s ago.`);
     return { success: false, duplicateBlocked: true, error: 'Identical message was already sent to this recipient within the last 10 minutes.' };
   }
-  recentRecipientSends.set(sendKey, Date.now());
-  try {
-    localStorage.setItem(sendKey, String(Date.now()));
-  } catch (e) {}
+
+  // Pre-set all candidate keys immediately to block concurrent attempts across all tabs
+  const nowTs = Date.now();
+  for (const k of candidateKeys) {
+    recentRecipientSends.set(k, nowTs);
+    try { localStorage.setItem(k, String(nowTs)); } catch (e) {}
+  }
 
   // Pre-message human review pause & typing simulation
   await humanPause(10, 22, 'Opening chat window');
@@ -2275,14 +2290,22 @@ export const directRunFlow = async () => {
   const now = Date.now();
   try {
     const lockVal = Number(localStorage.getItem(LOCK_KEY) || 0);
-    if (lockVal && (now - lockVal < 90_000)) {
-      console.log('[Runner] Another browser tab is currently executing the flow. Skipping.');
+    // Active heartbeat check: If another tab refreshed the lock within the last 30 seconds, it is actively running.
+    if (lockVal && (now - lockVal < 30_000)) {
+      console.log(`[Runner] Another browser tab is actively executing the flow (heartbeat ${Math.round((now - lockVal) / 1000)}s ago). Skipping.`);
       return { success: true, totalExecuted: 0, message: 'Another tab active' };
     }
     localStorage.setItem(LOCK_KEY, String(now));
   } catch (e) {}
 
   isFlowExecutionActive = true;
+  // Heartbeat timer: keep runner lock alive every 10 seconds while this tab executes
+  const heartbeatTimer = setInterval(() => {
+    try {
+      localStorage.setItem(LOCK_KEY, String(Date.now()));
+    } catch (e) {}
+  }, 10_000);
+
   try {
     const appSettings = await directGetAppSettings();
   const hoursCheck = isWithinWorkingHours(appSettings);
@@ -2429,6 +2452,18 @@ export const directRunFlow = async () => {
 
     for (const prospect of prospects) {
       if (actionsTaken >= effectiveLimit || remainingGlobalQuota <= 0) break;
+
+      // Live state refresh: ensure we have the latest status from Supabase to prevent processing a prospect already handled by another cycle
+      try {
+        const { data: liveRow } = await supabaseDirect.from('prospects').select('status, custom_variables, provider_id, member_id, public_identifier').eq('id', prospect.id).maybeSingle();
+        if (liveRow) {
+          prospect.status = liveRow.status;
+          prospect.custom_variables = liveRow.custom_variables || prospect.custom_variables || {};
+          if (liveRow.provider_id) prospect.provider_id = liveRow.provider_id;
+          if (liveRow.member_id) prospect.member_id = liveRow.member_id;
+          if (liveRow.public_identifier) prospect.public_identifier = liveRow.public_identifier;
+        }
+      } catch (e) {}
 
       if (['Completed', 'Failed', 'Replied'].includes(prospect.status)) {
         continue;
@@ -3014,6 +3049,7 @@ export const directRunFlow = async () => {
     };
   } finally {
     isFlowExecutionActive = false;
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
     try {
       localStorage.removeItem('lf_flow_runner_lock');
     } catch (e) {}
