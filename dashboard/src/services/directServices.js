@@ -584,11 +584,9 @@ export const directGetUnipileAccountInfo = async (accountId = null) => {
 };
 
 export const directGetNetworkingConnections = async (overrideAccountId = null) => {
-  const userProfiles = await directGetProfiles();
-  const validAccIds = new Set(userProfiles.map(p => p.unipile_account_id).filter(Boolean));
-
   let targetAccId = overrideAccountId;
-  if (!targetAccId || (!validAccIds.has(targetAccId) && validAccIds.size > 0 && !overrideAccountId)) {
+  if (!targetAccId) {
+    const userProfiles = await directGetProfiles();
     targetAccId = userProfiles[0]?.unipile_account_id;
   }
   if (!targetAccId) {
@@ -611,7 +609,7 @@ export const directGetNetworkingConnections = async (overrideAccountId = null) =
   let allItems = [];
   let cursor = null;
 
-  for (let page = 0; page < 40; page += 1) {
+  for (let page = 0; page < 10; page += 1) {
     let path = `/users/relations?account_id=${targetAccId}&limit=100`;
     if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
     
@@ -682,11 +680,9 @@ export const directGetNetworkingConnections = async (overrideAccountId = null) =
 };
 
 export const directGetNetworkingInvitations = async (overrideAccountId = null) => {
-  const userProfiles = await directGetProfiles();
-  const validAccIds = new Set(userProfiles.map(p => p.unipile_account_id).filter(Boolean));
-
   let targetAccId = overrideAccountId;
-  if (!targetAccId || (!validAccIds.has(targetAccId) && validAccIds.size > 0 && !overrideAccountId)) {
+  if (!targetAccId) {
+    const userProfiles = await directGetProfiles();
     targetAccId = userProfiles[0]?.unipile_account_id;
   }
   if (!targetAccId) {
@@ -697,7 +693,7 @@ export const directGetNetworkingInvitations = async (overrideAccountId = null) =
   let cursor = null;
 
   try {
-    for (let page = 0; page < 40; page += 1) {
+    for (let page = 0; page < 10; page += 1) {
       let path = `/users/invite/sent?account_id=${targetAccId}&limit=100`;
       if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
       

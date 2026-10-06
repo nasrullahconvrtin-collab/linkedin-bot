@@ -116,7 +116,7 @@ export default function Profiles() {
   const [accountInfo, setAccountInfo] = useState(null);
   const [connections, setConnections] = useState([]);
   const [invitations, setInvitations] = useState([]);
-  const [withdrawAge, setWithdrawAge] = useState(90); // Default 90 = 3 months
+  const [withdrawAge, setWithdrawAge] = useState(0); // Default 0 = All Pending Invitations
   const [connSearch, setConnSearch] = useState('');
   const [invSearch, setInvSearch] = useState('');
   const [netLoading, setNetLoading] = useState(false);
@@ -128,46 +128,34 @@ export default function Profiles() {
   const loadNetworkData = async (targetId = null) => {
     setNetLoading(true);
     try {
-      const isSuper = isSuperAdminUser();
       const orgId = getActiveOrganizationId();
-      const validAccIds = new Set((profiles || []).map(p => p.unipile_account_id).filter(Boolean));
-      if (validAccIds.size === 0) {
-        setAccountInfo(null);
-        setConnections([]);
-        setInvitations([]);
-        setSelectedAccId('');
-        if (typeof window !== 'undefined' && window.localStorage) {
-          localStorage.removeItem('lf_selected_account_id');
-          localStorage.removeItem('lf_active_account_id');
-        }
+      let accToUse = targetId || selectedAccId || (typeof window !== 'undefined' ? localStorage.getItem('lf_selected_account_id') : null) || null;
+      if (!accToUse && profiles?.[0]?.unipile_account_id) {
+        accToUse = profiles[0].unipile_account_id;
+      }
+      if (!accToUse) {
         setNetLoading(false);
         return;
       }
 
-      let accToUse = targetId || selectedAccId || (typeof window !== 'undefined' ? localStorage.getItem('lf_selected_account_id') : null) || null;
-      if (accToUse && !validAccIds.has(accToUse)) {
-        accToUse = profiles[0]?.unipile_account_id || null;
-        if (typeof window !== 'undefined' && window.localStorage) {
-          if (accToUse) localStorage.setItem('lf_selected_account_id', accToUse);
-          else localStorage.removeItem('lf_selected_account_id');
+      let prospectsData = [];
+      try {
+        let pQuery = supabaseDirect.from('prospects').select('*');
+        if (orgId) {
+          pQuery = pQuery.eq('organization_id', orgId);
+        } else if (userAcc?.email) {
+          pQuery = pQuery.eq('user_email', userAcc.email.toLowerCase());
         }
-      }
-      if (!accToUse && profiles?.[0]?.unipile_account_id) {
-        accToUse = profiles[0].unipile_account_id;
-      }
-
-      let pQuery = supabaseDirect.from('prospects').select('*');
-      if (orgId) {
-        pQuery = pQuery.eq('organization_id', orgId);
-      } else if (userAcc?.email) {
-        pQuery = pQuery.eq('user_email', userAcc.email.toLowerCase());
+        const pRes = await pQuery;
+        if (pRes?.data) prospectsData = pRes.data;
+      } catch (pErr) {
+        console.warn('Prospects load warning:', pErr);
       }
 
-      const [accRes, connRes, invRes, pRes] = await Promise.all([
+      const [accRes, connRes, invRes] = await Promise.all([
         getUnipileAccountInfo(accToUse).catch(() => null),
         getNetworkingConnections(accToUse).catch(() => ({ connections: [] })),
         getNetworkingInvitations(accToUse).catch(() => ({ invitations: [] })),
-        pQuery.catch(() => ({ data: [] })),
       ]);
 
       if (accRes && accRes.id) {
@@ -184,7 +172,7 @@ export default function Profiles() {
 
       if (connRes?.connections) setConnections(connRes.connections);
       if (invRes?.invitations) setInvitations(invRes.invitations);
-      if (pRes?.data) setProspects(pRes.data);
+      setProspects(prospectsData);
 
     } catch (err) {
       console.error('Failed loading network data:', err);
@@ -218,10 +206,11 @@ export default function Profiles() {
       if (typeof window !== 'undefined' && window.localStorage) {
         try { localStorage.removeItem('lf_account_disconnected'); } catch (e) {}
       }
+      const activeId = selectedAccId || profiles[0]?.unipile_account_id;
       if (!selectedAccId && profiles[0]?.unipile_account_id) {
         setSelectedAccId(profiles[0].unipile_account_id);
-        loadNetworkData(profiles[0].unipile_account_id);
       }
+      loadNetworkData(activeId);
     } else {
       setSelectedAccId('');
       setAccountInfo(null);
