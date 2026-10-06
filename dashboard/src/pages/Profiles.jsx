@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import {
   Clock, Download, ExternalLink, Key, Loader2, Plus, RefreshCw, Trash2, UserCheck, Users, X,
   ShieldCheck, AlertCircle, LogOut, Check, Building, Briefcase, Sparkles, Calendar,
-  UserPlus, MessageSquare, Reply, Eye, Globe, Lock, Code, Mail, Phone, Search, Shield, StopCircle
+  UserPlus, MessageSquare, Reply, Eye, Globe, Lock, Code, Mail, Phone, Search, Shield, StopCircle,
+  FileSpreadsheet, CheckCircle2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
@@ -22,6 +23,7 @@ import {
   pacedWithdrawInvitations,
   createUnipileHostedLink,
   importNewestUnipileAccount,
+  batchEnrichConnections,
 } from '../services/api';
 import { supabaseDirect, directDisconnectProfile, getStoredDisconnectedFlag, directCreateProfile, getActiveOrganizationId, getActiveUserAccount, isSuperAdminUser } from '../services/directServices';
 
@@ -124,6 +126,13 @@ export default function Profiles() {
   const [pacedActive, setPacedActive] = useState(false);
   const [pacedProgress, setPacedProgress] = useState({ current: 0, total: 0, withdrawn_count: 0, currentRecipient: '' });
   const abortControllerRef = useRef(null);
+
+  // Enriched Export modal and pacing state
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [enrichingActive, setEnrichingActive] = useState(false);
+  const [enrichProgress, setEnrichProgress] = useState({ current: 0, total: 0, emailsFound: 0, phonesFound: 0, currentName: '' });
+  const enrichAbortControllerRef = useRef(null);
+  const enrichedResultsRef = useRef([]);
 
   const loadNetworkData = async (targetId = null) => {
     setNetLoading(true);
@@ -558,8 +567,27 @@ export default function Profiles() {
     }
   };
 
-  // CSV Export for Connections with complete enriched contact info (email, phone, company, etc.)
-  const exportConnectionsCSV = () => {
+  // ── CSV Export Engines (Quick Instant vs Deep Enriched 1st-Degree Profile Extraction) ──
+  const escapeCsv = (val) => {
+    if (val === null || val === undefined) return '""';
+    const str = String(val).replace(/"/g, '""');
+    return `"${str}"`;
+  };
+
+  const downloadCSVFile = (content, filename) => {
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // 1. Quick Instant CSV Export
+  const handleQuickExportCSV = () => {
     if (!connections || connections.length === 0) {
       return toast.error('No 1st-degree connections loaded to export');
     }
@@ -578,12 +606,6 @@ export default function Profiles() {
       'provider_id',
     ];
 
-    const escapeCsv = (val) => {
-      if (val === null || val === undefined) return '""';
-      const str = String(val).replace(/"/g, '""');
-      return `"${str}"`;
-    };
-
     const rows = connections.map(c => [
       escapeCsv(c.first_name || c.name?.split(' ')[0] || ''),
       escapeCsv(c.last_name || c.name?.split(' ').slice(1).join(' ') || ''),
@@ -599,15 +621,151 @@ export default function Profiles() {
     ]);
 
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `all_linkedin_connections_${Date.now()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    toast.success(`Exported ${connections.length} 1st-degree connections with enriched contact info to CSV!`);
+    downloadCSVFile(csvContent, `linkedin_connections_quick_${Date.now()}.csv`);
+    setExportModalOpen(false);
+    toast.success(`Exported ${connections.length} connections to CSV!`);
+  };
+
+  // 2. Full Deep Enriched Profile & Contact Export
+  const generateEnrichedCSV = (dataList) => {
+    const headers = [
+      'first_name',
+      'last_name',
+      'full_name',
+      'headline',
+      'current_company',
+      'current_title',
+      'job_location',
+      'email',
+      'phone',
+      'websites',
+      'location',
+      'summary',
+      'past_experience',
+      'education_school',
+      'education_degree',
+      'education_dates',
+      'top_skills',
+      'follower_count',
+      'connections_count',
+      'is_premium',
+      'is_open_profile',
+      'is_creator',
+      'linkedin_url',
+      'connected_date',
+      'member_id',
+    ];
+
+    const rows = dataList.map(c => [
+      escapeCsv(c.first_name || c.name?.split(' ')[0] || ''),
+      escapeCsv(c.last_name || c.name?.split(' ').slice(1).join(' ') || ''),
+      escapeCsv(c.name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || ''),
+      escapeCsv(c.headline || c.title || ''),
+      escapeCsv(c.current_company || c.company || ''),
+      escapeCsv(c.current_title || c.title || c.headline || ''),
+      escapeCsv(c.current_job_location || ''),
+      escapeCsv(c.email || ''),
+      escapeCsv(c.phone || ''),
+      escapeCsv(c.websites || ''),
+      escapeCsv(c.location || ''),
+      escapeCsv(c.summary || ''),
+      escapeCsv(c.past_experience || ''),
+      escapeCsv(c.education_school || ''),
+      escapeCsv(c.education_degree || ''),
+      escapeCsv(c.education_dates || ''),
+      escapeCsv(c.top_skills || ''),
+      escapeCsv(c.follower_count ?? ''),
+      escapeCsv(c.connections_count ?? ''),
+      escapeCsv(c.is_premium || ''),
+      escapeCsv(c.is_open_profile || ''),
+      escapeCsv(c.is_creator || ''),
+      escapeCsv(c.linkedin_url || (c.public_identifier ? `https://www.linkedin.com/in/${c.public_identifier}` : '')),
+      escapeCsv(c.connected_date || ''),
+      escapeCsv(c.member_urn || c.provider_id || c.member_id || c.id || ''),
+    ]);
+
+    return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+  };
+
+  const handleStartDeepEnrichment = async () => {
+    if (!connections || connections.length === 0) {
+      return toast.error('No connections loaded to enrich');
+    }
+
+    const controller = new AbortController();
+    enrichAbortControllerRef.current = controller;
+    enrichedResultsRef.current = [];
+    setEnrichingActive(true);
+    setEnrichProgress({
+      current: 0,
+      total: connections.length,
+      emailsFound: 0,
+      phonesFound: 0,
+      currentName: '',
+    });
+
+    try {
+      const results = await batchEnrichConnections(
+        connections,
+        selectedAccId,
+        (progress) => {
+          setEnrichProgress(progress);
+          if (progress.allEnrichedSoFar) {
+            enrichedResultsRef.current = progress.allEnrichedSoFar;
+          }
+          if (progress.enrichedConnection) {
+            // Live update the table cards so found emails/phones show up immediately on screen!
+            setConnections(prev => {
+              const idx = prev.findIndex(item => (
+                (item.public_identifier && item.public_identifier === progress.enrichedConnection.public_identifier) ||
+                (item.member_id && item.member_id === progress.enrichedConnection.member_id) ||
+                (item.id && item.id === progress.enrichedConnection.id)
+              ));
+              if (idx !== -1) {
+                const next = [...prev];
+                next[idx] = { ...next[idx], ...progress.enrichedConnection };
+                return next;
+              }
+              return prev;
+            });
+          }
+        },
+        controller.signal
+      );
+
+      const finalData = results && results.length > 0 ? results : enrichedResultsRef.current;
+      if (finalData.length > 0) {
+        const csvContent = generateEnrichedCSV(finalData);
+        downloadCSVFile(csvContent, `linkedin_connections_deep_enriched_${Date.now()}.csv`);
+        const emailsCount = finalData.filter(x => x.email).length;
+        const phonesCount = finalData.filter(x => x.phone).length;
+        toast.success(`Deep enrichment complete! Downloaded ${finalData.length} profiles (${emailsCount} emails, ${phonesCount} phones found).`);
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        console.error('Enrichment error:', err);
+        toast.error(err.message || 'Error enriching profiles');
+      }
+    } finally {
+      setEnrichingActive(false);
+      setExportModalOpen(false);
+    }
+  };
+
+  const handleStopEnrichmentAndDownload = () => {
+    if (enrichAbortControllerRef.current) {
+      enrichAbortControllerRef.current.abort();
+    }
+    const soFar = enrichedResultsRef.current;
+    if (soFar && soFar.length > 0) {
+      const csvContent = generateEnrichedCSV(soFar);
+      downloadCSVFile(csvContent, `linkedin_connections_partial_${Date.now()}.csv`);
+      toast.success(`Enrichment paused. Downloaded ${soFar.length} profiles enriched so far.`);
+    } else {
+      toast('Enrichment cancelled.');
+    }
+    setEnrichingActive(false);
+    setExportModalOpen(false);
   };
 
   const handleWithdrawByAge = async () => {
@@ -1063,11 +1221,12 @@ export default function Profiles() {
                 {/* CSV Export & Refresh */}
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={exportConnectionsCSV}
+                    onClick={() => setExportModalOpen(true)}
                     disabled={connections.length === 0}
-                    className="flex items-center justify-center gap-2 px-4 py-2 bg-[#22c55e] hover:bg-[#16a34a] text-white font-bold text-xs rounded-xl transition-all shadow-md disabled:opacity-50 cursor-pointer"
+                    className="flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl transition-all shadow-md disabled:opacity-50 cursor-pointer"
+                    title="Export connections with instant or deep enriched email/phone extraction"
                   >
-                    <Download size={15} /> Export CSV ({connections.length})
+                    <Download size={15} /> Export Contacts ({connections.length})
                   </button>
 
                   <button
@@ -1325,6 +1484,165 @@ export default function Profiles() {
                 </form>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── EXPORT OPTIONS & DEEP ENRICHMENT MODAL ── */}
+      {exportModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#161616] border border-[#2a2a2a] rounded-2xl w-full max-w-xl p-6 shadow-2xl relative space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-[#222222]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                  <Download size={18} />
+                </div>
+                <div>
+                  <h3 className="text-white font-bold text-base">Export 1st-Degree Connections</h3>
+                  <p className="text-[#9ca3af] text-xs">
+                    {connections.length} active LinkedIn connections available
+                  </p>
+                </div>
+              </div>
+              {!enrichingActive && (
+                <button
+                  onClick={() => setExportModalOpen(false)}
+                  className="p-1.5 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white hover:bg-[#222222] transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+
+            {/* If Enriching is in progress */}
+            {enrichingActive ? (
+              <div className="py-2 space-y-4">
+                <div className="p-4 rounded-xl bg-[#111111] border border-[#2a2a2a] space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-indigo-400 font-bold text-xs flex items-center gap-2">
+                      <Loader2 size={15} className="animate-spin text-indigo-400" />
+                      Deep Enriching Profiles & Contacts...
+                    </span>
+                    <span className="text-white font-mono font-bold text-xs">
+                      {enrichProgress.current} / {enrichProgress.total} ({Math.round((enrichProgress.current / (enrichProgress.total || 1)) * 100)}%)
+                    </span>
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="w-full bg-[#1e1e1e] rounded-full h-2.5 overflow-hidden border border-[#2a2a2a]">
+                    <div
+                      className="bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 h-full rounded-full transition-all duration-300"
+                      style={{ width: `${enrichProgress.total > 0 ? (enrichProgress.current / enrichProgress.total) * 100 : 0}%` }}
+                    />
+                  </div>
+
+                  {/* Stat cards */}
+                  <div className="grid grid-cols-2 gap-3 pt-1">
+                    <div className="p-3 rounded-lg bg-[#181818] border border-[#262626]">
+                      <div className="flex items-center gap-2 text-indigo-400 text-xs font-semibold">
+                        <Mail size={13} />
+                        Personal Emails Discovered
+                      </div>
+                      <p className="text-xl font-bold text-white mt-1 font-mono">
+                        {enrichProgress.emailsFound}
+                      </p>
+                    </div>
+
+                    <div className="p-3 rounded-lg bg-[#181818] border border-[#262626]">
+                      <div className="flex items-center gap-2 text-emerald-400 text-xs font-semibold">
+                        <Phone size={13} />
+                        Direct Phone Numbers
+                      </div>
+                      <p className="text-xl font-bold text-white mt-1 font-mono">
+                        {enrichProgress.phonesFound}
+                      </p>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-[#9ca3af] truncate">
+                    Currently inspecting: <span className="text-white font-semibold">{enrichProgress.currentName || 'LinkedIn Member'}</span>
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between gap-3 pt-2">
+                  <button
+                    onClick={handleStopEnrichmentAndDownload}
+                    className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Download size={14} /> Download Available Now ({enrichProgress.current} profiles)
+                  </button>
+                  <button
+                    onClick={handleStopEnrichmentAndDownload}
+                    className="py-2.5 px-4 border border-[#2a2a2a] hover:bg-[#222222] text-[#9ca3af] hover:text-white font-semibold text-xs rounded-xl transition-all cursor-pointer"
+                  >
+                    Stop & Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Options selection view */
+              <div className="space-y-3.5 py-1">
+                
+                {/* Option 1: Quick Export */}
+                <div
+                  onClick={handleQuickExportCSV}
+                  className="p-4 rounded-xl border border-[#2a2a2a] bg-[#111111] hover:border-[#3b82f6] hover:bg-[#141824] transition-all cursor-pointer group flex items-start gap-4"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center shrink-0 mt-0.5 group-hover:scale-105 transition-transform">
+                    <FileSpreadsheet size={20} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <h4 className="text-white font-bold text-sm group-hover:text-blue-400 transition-colors">
+                        Quick Export (Instant)
+                      </h4>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                        1 Second
+                      </span>
+                    </div>
+                    <p className="text-[#9ca3af] text-xs mt-1 leading-relaxed">
+                      Instant CSV download of all {connections.length} connections with standard fields (Name, Headline, Company, LinkedIn URL, Connected Date, and already saved contacts).
+                    </p>
+                  </div>
+                </div>
+
+                {/* Option 2: Deep Enriched Profile Export */}
+                <div
+                  onClick={handleStartDeepEnrichment}
+                  className="p-4 rounded-xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/20 to-[#111111] hover:border-indigo-500/60 hover:from-indigo-950/30 transition-all cursor-pointer group flex items-start gap-4 relative overflow-hidden"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-lg group-hover:scale-105 transition-transform">
+                    <Sparkles size={20} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <h4 className="text-white font-bold text-sm text-indigo-300 group-hover:text-indigo-200 transition-colors flex items-center gap-1.5">
+                        Deep Enriched Export (Extract Emails & Phones)
+                      </h4>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-gradient-to-r from-indigo-500/20 to-purple-500/20 text-indigo-300 border border-indigo-500/30">
+                        Recommended
+                      </span>
+                    </div>
+                    <p className="text-[#9ca3af] text-xs mt-1 leading-relaxed">
+                      Deep queries each 1st-degree connection profile to extract <strong className="text-white">Personal Emails / Gmails</strong>, <strong className="text-white">Direct Phone Numbers</strong>, <strong className="text-white">Work Experience</strong>, <strong className="text-white">Education & Degrees</strong>, <strong className="text-white">Top Skills</strong>, and <strong className="text-white">About Summaries</strong>.
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-indigo-500/10 text-[10px] text-indigo-300/80 font-medium">
+                      <span>✓ 25 Full Columns</span>
+                      <span>•</span>
+                      <span>✓ Safe 300ms Human Pacing</span>
+                      <span>•</span>
+                      <span>✓ Saves to Local DB</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-2 text-center text-[#6b7280] text-[11px]">
+                  All mutations and deep queries use safe pacing to guarantee zero LinkedIn provider limit flags.
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

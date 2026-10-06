@@ -845,6 +845,145 @@ export const directWithdrawOldInvitations = async (maxAgeDays = 90, overrideAcco
   return { success: true, withdrawn_count: count };
 };
 
+// ── Full 1st-Degree Connection Profile Enrichment & Contact Extraction ──
+const profileEnrichmentCache = new Map();
+
+export const directEnrichConnectionProfile = async (identifier, overrideAccountId = null) => {
+  if (!identifier) return null;
+  const cleanId = String(identifier).trim().replace(/^https?:\/\/(www\.)?linkedin\.com\/in\//i, '').replace(/\/$/, '');
+  
+  if (profileEnrichmentCache.has(cleanId)) {
+    return profileEnrichmentCache.get(cleanId);
+  }
+
+  let targetAccId = overrideAccountId;
+  if (!targetAccId) {
+    const userProfiles = await directGetProfiles();
+    targetAccId = userProfiles[0]?.unipile_account_id;
+  }
+  if (!targetAccId) return null;
+
+  try {
+    const { ok, data: p } = await unipileFetch(`/users/${encodeURIComponent(cleanId)}?account_id=${targetAccId}&linkedin_sections=*`);
+    if (!ok || !p) return null;
+
+    const emails = Array.isArray(p.contact_info?.emails)
+      ? p.contact_info.emails
+      : p.contact_info?.email ? [p.contact_info.email] : (p.email ? [p.email] : []);
+    
+    const phones = Array.isArray(p.contact_info?.phones)
+      ? p.contact_info.phones
+      : p.contact_info?.phone ? [p.contact_info.phone] : (p.phone ? [p.phone] : []);
+
+    const websites = Array.isArray(p.websites)
+      ? p.websites.map(w => typeof w === 'string' ? w : (w.url || w.name || '')).filter(Boolean)
+      : [];
+
+    const workExp = Array.isArray(p.work_experience) ? p.work_experience : (p.positions || []);
+    const currentExp = workExp[0] || {};
+    const pastExp = workExp.slice(1, 4).map(w => `${w.position || 'Role'} at ${w.company || 'Company'}`).filter(Boolean);
+
+    const eduList = Array.isArray(p.education) ? p.education : [];
+    const currentEdu = eduList[0] || {};
+
+    const skillsList = Array.isArray(p.skills)
+      ? p.skills.slice(0, 15).map(s => typeof s === 'string' ? s : (s.name || '')).filter(Boolean)
+      : [];
+
+    const enriched = {
+      email: emails.join('; '),
+      phone: phones.join('; '),
+      websites: websites.join('; '),
+      current_company: currentExp.company || '',
+      current_title: currentExp.position || p.headline || '',
+      current_job_location: currentExp.location || '',
+      past_experience: pastExp.join('; '),
+      education_school: currentEdu.school || '',
+      education_degree: currentEdu.degree || '',
+      education_dates: [currentEdu.start, currentEdu.end].filter(Boolean).join(' - '),
+      top_skills: skillsList.join(', '),
+      summary: p.summary || '',
+      location: p.location || '',
+      follower_count: p.follower_count || 0,
+      connections_count: p.connections_count || 0,
+      is_premium: p.is_premium ? 'Yes' : 'No',
+      is_open_profile: p.is_open_profile ? 'Yes' : 'No',
+      is_creator: p.is_creator ? 'Yes' : 'No',
+      member_urn: p.member_urn || p.provider_id || '',
+      profile_picture_url_large: p.profile_picture_url_large || p.profile_picture_url || '',
+    };
+
+    profileEnrichmentCache.set(cleanId, enriched);
+
+    // Save discovered contact info back to database in background
+    if (enriched.email || enriched.phone) {
+      try {
+        const patchData = {};
+        if (enriched.email) patchData.email = enriched.email.split(';')[0].trim();
+        if (enriched.phone) patchData.phone = enriched.phone.split(';')[0].trim();
+        if (enriched.current_company) patchData.company = enriched.current_company;
+        supabaseDirect.from('prospects')
+          .update(patchData)
+          .or(`public_identifier.eq.${cleanId},provider_id.eq.${p.provider_id || cleanId}`)
+          .then(() => {})
+          .catch(() => {});
+      } catch {}
+    }
+
+    return enriched;
+  } catch (err) {
+    console.warn('Profile enrichment error for', cleanId, err);
+    return null;
+  }
+};
+
+export const directBatchEnrichConnections = async (connections, overrideAccountId = null, onProgress = null, abortSignal = null) => {
+  const enrichedList = [];
+  for (let i = 0; i < connections.length; i++) {
+    if (abortSignal && abortSignal.aborted) {
+      break;
+    }
+
+    const c = connections[i];
+    const targetId = c.public_identifier || extractPublicId(c.public_profile_url || c.linkedin_url) || c.member_id || c.provider_id;
+    
+    let enrichedData = null;
+    if (targetId) {
+      enrichedData = await directEnrichConnectionProfile(targetId, overrideAccountId);
+    }
+
+    const merged = {
+      ...c,
+      ...(enrichedData || {}),
+      email: enrichedData?.email || c.email || '',
+      phone: enrichedData?.phone || c.phone || '',
+      company: enrichedData?.current_company || c.company || '',
+      title: enrichedData?.current_title || c.title || c.headline || '',
+      location: enrichedData?.location || c.location || '',
+    };
+    enrichedList.push(merged);
+
+    if (onProgress) {
+      onProgress({
+        current: i + 1,
+        total: connections.length,
+        currentName: c.name || `${c.first_name || ''} ${c.last_name || ''}`,
+        emailsFound: enrichedList.filter(x => x.email).length,
+        phonesFound: enrichedList.filter(x => x.phone).length,
+        enrichedConnection: merged,
+        allEnrichedSoFar: enrichedList,
+      });
+    }
+
+    // Gentle 300ms pacing between profile fetches to stay safe
+    if (i < connections.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+  }
+
+  return enrichedList;
+};
+
 // ── Unipile & Supabase Campaign / Prospect / List Direct Operations ──
 
 export const directGetCampaigns = async () => {

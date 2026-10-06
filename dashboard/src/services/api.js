@@ -39,6 +39,8 @@ import {
   directCreateHostedLink,
   directSubmit2FA,
   directImportNewestUnipileAccount,
+  directEnrichConnectionProfile,
+  directBatchEnrichConnections,
 } from './directServices';
 
 // Strip BOM (U+FEFF) that Windows UTF-8 env files can inject into the value
@@ -331,6 +333,14 @@ export const createUnipileHostedLink = (redirectUrl = null) =>
 
 export const importNewestUnipileAccount = (targetAccountId = null) =>
   directImportNewestUnipileAccount(targetAccountId);
+
+export const enrichConnectionProfile = (identifier, overrideAccountId = null) => {
+  return directEnrichConnectionProfile(identifier, overrideAccountId);
+};
+
+export const batchEnrichConnections = (connections, overrideAccountId = null, onProgress = null, abortSignal = null) => {
+  return directBatchEnrichConnections(connections, overrideAccountId, onProgress, abortSignal);
+};
 
 export default api;
 
