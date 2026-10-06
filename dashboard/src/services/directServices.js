@@ -1698,14 +1698,27 @@ const getLinkedinId = (prospect) => {
   if (prospect.member_id) return prospect.member_id;
 
   const cv = prospect.custom_variables || prospect.custom_fields || {};
-  const rawUrl = prospect.linkedin_url || cv.linkedin_url || cv.linkedinUrl || cv.linkedinurl || cv.url || '';
+  let rawUrl = (prospect.linkedin_url || cv.linkedin_url || cv.linkedinUrl || cv.linkedinurl || cv.url || '').trim();
 
   if (rawUrl) {
-    const parts = rawUrl.split('/in/');
-    if (parts[1]) {
-      return parts[1].split('?')[0].replace(/\//g, '').trim();
+    const liIndex = rawUrl.indexOf('linkedin.com');
+    if (liIndex !== -1) {
+      rawUrl = rawUrl.slice(liIndex);
     }
-    if (!rawUrl.includes('http')) return rawUrl.trim();
+
+    if (rawUrl.includes('/in/')) {
+      const afterIn = rawUrl.split('/in/')[1]?.split('?')[0]?.split('#')[0] || '';
+      const clean = afterIn.replace(/\/(en|fr|de|es|it|pt|nl)$/i, '').replace(/\/$/, '').trim();
+      if (clean) return clean;
+    }
+
+    if (rawUrl.includes('/pub/')) {
+      const afterPub = rawUrl.split('/pub/')[1]?.split('?')[0]?.split('#')[0] || '';
+      const parts = afterPub.split('/').filter(Boolean);
+      if (parts[0]) return parts[0];
+    }
+
+    if (!rawUrl.includes('http') && !rawUrl.includes('/')) return rawUrl.trim();
   }
   return null;
 };
@@ -1779,9 +1792,15 @@ export const getAccountForProspect = async (prospect) => {
 
 export const directResolveLinkedinProfile = async (prospect) => {
   const targetId = getLinkedinId(prospect);
-  if (!targetId) return null;
+  if (!targetId) {
+    prospect._lastResolveError = 'Invalid or missing LinkedIn URL';
+    return null;
+  }
   const accountId = await getAccountForProspect(prospect);
-  if (!accountId) return null;
+  if (!accountId) {
+    prospect._lastResolveError = 'No connected LinkedIn account';
+    return null;
+  }
   const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(targetId)}?account_id=${accountId}`);
   if (ok && data) {
     try {
@@ -1798,6 +1817,7 @@ export const directResolveLinkedinProfile = async (prospect) => {
     }
     return data;
   }
+  prospect._lastResolveError = data?.detail || data?.title || 'Recipient cannot be reached';
   return null;
 };
 
@@ -1806,8 +1826,9 @@ export const directVisitProfile = async (prospect) => {
   if (data) {
     // Simulate a real human viewing & scrolling the prospect's profile page
     await humanPause(15, 35, `Viewing profile of ${prospect.name || 'prospect'}`);
+    return { success: true, data };
   }
-  return { success: Boolean(data), data };
+  return { success: false, error: prospect._lastResolveError || 'Recipient cannot be reached' };
 };
 
 export const directFollowProfile = async (prospect) => {
@@ -3029,8 +3050,21 @@ export const directRunFlow = async () => {
           error: errorMsg,
         };
         prospect.custom_variables.history = [...(prospect.custom_variables.history || []), historyItem];
+
+        const errLower = (errorMsg || '').toLowerCase();
+        const isFatalProfile = errLower.includes('cannot be reached') ||
+                               errLower.includes('invalid_recipient') ||
+                               errLower.includes('not found') ||
+                               errLower.includes('locked') ||
+                               errLower.includes('missing linkedin url');
+        if (isFatalProfile) {
+          prospect.status = 'Needs Review';
+          prospect.custom_variables.review_reason = errorMsg || 'Profile cannot be reached on LinkedIn';
+        }
+
         try {
           await supabaseDirect.from('prospects').update({
+            status: prospect.status,
             custom_variables: prospect.custom_variables,
           }).eq('id', prospect.id);
         } catch (e) {
