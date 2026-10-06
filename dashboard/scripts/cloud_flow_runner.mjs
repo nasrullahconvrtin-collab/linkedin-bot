@@ -225,12 +225,33 @@ async function runCloudFlow() {
         } else {
           console.warn(`[Goal Engine] ⚠️ Invite failed for ${prospect.name}:`, res.data?.detail || res.status);
           const errStr = String(res.data?.detail || res.status);
-          cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', node_label: 'Connection Request Failed', executed_at: nowIso, status: 'failed', error: errStr }];
-          await supabase.from('prospects').update({ custom_variables: cv }).eq('id', prospect.id);
+          const isAlreadyInvited = errStr.toLowerCase().includes('already') || errStr.toLowerCase().includes('recently') || res.data?.type === 'errors/already_invited_recently';
 
-          if (errStr.toLowerCase().includes('provider limit') || errStr.toLowerCase().includes('rate limit') || errStr.includes('429')) {
-            console.warn('[CIRCUIT BREAKER] Halting execution due to rate limit.');
-            return;
+          if (isAlreadyInvited) {
+            console.log(`[Goal Engine] Prospect ${prospect.name} was already invited recently. Marking Connection Request Sent.`);
+            todayConnectionsTotal += 1;
+            cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', node_label: 'Connection Request Sent', executed_at: nowIso, status: 'success' }];
+            if (nextEdge) cv.current_node_id = nextEdge.target;
+
+            await supabase.from('prospects').update({
+              status: 'Connection Request Sent',
+              connection_status: 'invitation_sent',
+              connection_sent_date: prospect.connection_sent_date || nowIso,
+              provider_id: providerId,
+              custom_variables: cv
+            }).eq('id', prospect.id);
+          } else {
+            cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', node_label: 'Connection Request Failed', executed_at: nowIso, status: 'failed', error: errStr }];
+            const patchBody = { custom_variables: cv };
+            if (errStr.toLowerCase().includes('cannot') || errStr.toLowerCase().includes('restricted') || errStr.toLowerCase().includes('not allowed')) {
+              patchBody.status = 'Needs Review';
+            }
+            await supabase.from('prospects').update(patchBody).eq('id', prospect.id);
+
+            if (errStr.toLowerCase().includes('provider limit') || errStr.toLowerCase().includes('rate limit') || errStr.includes('429')) {
+              console.warn('[CIRCUIT BREAKER] Halting execution due to rate limit.');
+              return;
+            }
           }
         }
       }

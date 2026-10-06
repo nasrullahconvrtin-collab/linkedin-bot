@@ -256,10 +256,26 @@ export default async function handler(req, res) {
           });
 
           const nowIso = new Date().toISOString();
-          if (ok) {
+          const errStr = String(data?.detail || data?.title || data?.message || data?.error || "");
+          const isAlreadyInvited = !ok && (
+            errStr.toLowerCase().includes("already") ||
+            errStr.toLowerCase().includes("recently") ||
+            data?.type === "errors/already_invited_recently"
+          );
+
+          if (ok || isAlreadyInvited) {
             totalSentToday += 1;
-            log(`SUCCESS: Connection invite sent to ${pName}!`);
-            cv.history = [...(cv.history || []), { node_type: "send_invitation", node_label: "Connection Request Sent", status: "success", executed_at: nowIso }];
+            log(`SUCCESS: Connection invite ${isAlreadyInvited ? 'already sent previously' : 'sent'} for ${pName}!`);
+            cv.history = [
+              ...(cv.history || []),
+              {
+                node_type: "send_invitation",
+                node_label: "Connection Request Sent",
+                status: "success",
+                executed_at: nowIso,
+                detail: isAlreadyInvited ? "Invitation was already pending on LinkedIn" : undefined
+              }
+            ];
             if (nextEdge) cv.current_node_id = nextEdge.target;
 
             await sbFetch(`prospects?id=eq.${p.id}`, {
@@ -267,15 +283,34 @@ export default async function handler(req, res) {
               body: JSON.stringify({
                 status: "Connection Request Sent",
                 connection_status: "invitation_sent",
-                connection_sent_date: nowIso,
+                connection_sent_date: p.connection_sent_date || nowIso,
                 provider_id: providerId,
                 custom_variables: cv
               })
             });
           } else {
             log(`FAILED invite for ${pName}: ${data?.detail || "Invite failed"}`);
-            cv.history = [...(cv.history || []), { node_type: "send_invitation", node_label: "Connection Request Failed", status: "failed", error: data?.detail || "Invite failed", executed_at: nowIso }];
-            await sbFetch(`prospects?id=eq.${p.id}`, { method: "PATCH", body: JSON.stringify({ custom_variables: cv }) });
+            const isFatal = errStr.toLowerCase().includes("cannot") ||
+                            errStr.toLowerCase().includes("not allowed") ||
+                            errStr.toLowerCase().includes("restricted") ||
+                            errStr.toLowerCase().includes("blocked");
+
+            cv.history = [
+              ...(cv.history || []),
+              {
+                node_type: "send_invitation",
+                node_label: "Connection Request Failed",
+                status: "failed",
+                error: data?.detail || "Invite failed",
+                executed_at: nowIso
+              }
+            ];
+
+            const patchBody = { custom_variables: cv };
+            if (isFatal) {
+              patchBody.status = "Needs Review";
+            }
+            await sbFetch(`prospects?id=eq.${p.id}`, { method: "PATCH", body: JSON.stringify(patchBody) });
           }
         }
       }
