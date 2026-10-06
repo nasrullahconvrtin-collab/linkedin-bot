@@ -1,9 +1,9 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Clock, Download, ExternalLink, Key, Loader2, Plus, RefreshCw, Trash2, UserCheck, Users, X,
   ShieldCheck, AlertCircle, LogOut, Check, Building, Briefcase, Sparkles, Calendar,
-  UserPlus, MessageSquare, Reply, Eye, Globe, Lock, Code
+  UserPlus, MessageSquare, Reply, Eye, Globe, Lock, Code, Mail, Phone, Search, Shield, StopCircle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
@@ -19,6 +19,7 @@ import {
   getUnipileAccountInfo,
   submitUnipile2FA,
   withdrawOldInvitations,
+  pacedWithdrawInvitations,
   createUnipileHostedLink,
   importNewestUnipileAccount,
 } from '../services/api';
@@ -115,9 +116,14 @@ export default function Profiles() {
   const [accountInfo, setAccountInfo] = useState(null);
   const [connections, setConnections] = useState([]);
   const [invitations, setInvitations] = useState([]);
-  const [withdrawAge, setWithdrawAge] = useState(0); // Default 0 = All Pending Invitations
+  const [withdrawAge, setWithdrawAge] = useState(90); // Default 90 = 3 months
+  const [connSearch, setConnSearch] = useState('');
+  const [invSearch, setInvSearch] = useState('');
   const [netLoading, setNetLoading] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
+  const [pacedActive, setPacedActive] = useState(false);
+  const [pacedProgress, setPacedProgress] = useState({ current: 0, total: 0, withdrawn_count: 0, currentRecipient: '' });
+  const abortControllerRef = useRef(null);
 
   const loadNetworkData = async (targetId = null) => {
     setNetLoading(true);
@@ -318,20 +324,43 @@ export default function Profiles() {
     };
   }, [prospects, dateBounds]);
 
-  // Duration Filter for Pending Invitations
+  // Duration & Search Filter for Pending Invitations
   const filteredInvitations = useMemo(() => {
     if (!invitations || invitations.length === 0) return [];
-    if (!withdrawAge || Number(withdrawAge) === 0) return invitations;
+    let list = invitations;
 
-    const cutoffMs = Date.now() - Number(withdrawAge) * 24 * 60 * 60 * 1000;
-    return invitations.filter(inv => {
-      const sentTs = inv.parsed_datetime || inv.sent_at || inv.created_at || inv.timestamp;
-      if (!sentTs) return true;
-      const invMs = new Date(sentTs).getTime();
-      if (isNaN(invMs)) return true;
-      return invMs <= cutoffMs;
+    if (withdrawAge && Number(withdrawAge) > 0) {
+      const cutoffDays = Number(withdrawAge);
+      list = list.filter(inv => (Number(inv.age_days) || 0) >= cutoffDays);
+    }
+
+    if (invSearch.trim()) {
+      const q = invSearch.toLowerCase().trim();
+      list = list.filter(inv => {
+        const name = (inv.recipient_name || inv.invited_user || '').toLowerCase();
+        const headline = (inv.headline || inv.invited_user_description || '').toLowerCase();
+        return name.includes(q) || headline.includes(q);
+      });
+    }
+
+    return list;
+  }, [invitations, withdrawAge, invSearch]);
+
+  // Search Filter for 1st-Degree Network Connections
+  const filteredConnections = useMemo(() => {
+    if (!connections || connections.length === 0) return [];
+    if (!connSearch.trim()) return connections;
+    const q = connSearch.toLowerCase().trim();
+    return connections.filter(c => {
+      const name = (c.name || `${c.first_name || ''} ${c.last_name || ''}`).toLowerCase();
+      const headline = (c.headline || c.title || '').toLowerCase();
+      const company = (c.company || '').toLowerCase();
+      const email = (c.email || '').toLowerCase();
+      const phone = (c.phone || '').toLowerCase();
+      const loc = (c.location || '').toLowerCase();
+      return name.includes(q) || headline.includes(q) || company.includes(q) || email.includes(q) || phone.includes(q) || loc.includes(q);
     });
-  }, [invitations, withdrawAge]);
+  }, [connections, connSearch]);
 
   const handleSaveAccountSettings = async (e) => {
     e.preventDefault();
@@ -540,20 +569,44 @@ export default function Profiles() {
     }
   };
 
-  // CSV Export for Connections
+  // CSV Export for Connections with complete enriched contact info (email, phone, company, etc.)
   const exportConnectionsCSV = () => {
     if (!connections || connections.length === 0) {
       return toast.error('No 1st-degree connections loaded to export');
     }
 
-    const headers = ['first_name', 'last_name', 'name', 'headline', 'linkedin_url', 'provider_id'];
+    const headers = [
+      'first_name',
+      'last_name',
+      'full_name',
+      'headline',
+      'company',
+      'email',
+      'phone',
+      'location',
+      'linkedin_url',
+      'connected_date',
+      'provider_id',
+    ];
+
+    const escapeCsv = (val) => {
+      if (val === null || val === undefined) return '""';
+      const str = String(val).replace(/"/g, '""');
+      return `"${str}"`;
+    };
+
     const rows = connections.map(c => [
-      `"${(c.first_name || c.name?.split(' ')[0] || '').replace(/"/g, '""')}"`,
-      `"${(c.last_name || c.name?.split(' ').slice(1).join(' ') || '').replace(/"/g, '""')}"`,
-      `"${(c.name || `${c.first_name || ''} ${c.last_name || ''}`).trim().replace(/"/g, '""')}"`,
-      `"${(c.headline || c.title || '').replace(/"/g, '""')}"`,
-      `"${c.public_profile_url || `https://www.linkedin.com/in/${c.public_identifier || c.member_id || c.id}`}"`,
-      `"${c.member_id || c.provider_id || c.id || ''}"`,
+      escapeCsv(c.first_name || c.name?.split(' ')[0] || ''),
+      escapeCsv(c.last_name || c.name?.split(' ').slice(1).join(' ') || ''),
+      escapeCsv(c.name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || ''),
+      escapeCsv(c.headline || c.title || ''),
+      escapeCsv(c.company || ''),
+      escapeCsv(c.email || ''),
+      escapeCsv(c.phone || ''),
+      escapeCsv(c.location || ''),
+      escapeCsv(c.linkedin_url || (c.public_identifier ? `https://www.linkedin.com/in/${c.public_identifier}` : '')),
+      escapeCsv(c.connected_date || ''),
+      escapeCsv(c.provider_id || c.member_id || c.id || ''),
     ]);
 
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
@@ -565,7 +618,7 @@ export default function Profiles() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    toast.success(`Exported all ${connections.length} 1st-degree connections to CSV!`);
+    toast.success(`Exported ${connections.length} 1st-degree connections with enriched contact info to CSV!`);
   };
 
   const handleWithdrawByAge = async () => {
@@ -582,6 +635,87 @@ export default function Profiles() {
       toast.error(err.message);
     } finally {
       setWithdrawing(false);
+    }
+  };
+
+  const handleStartPacedWithdraw = async () => {
+    if (filteredInvitations.length === 0) return toast.error('No invitations match selected filter');
+    if (!confirm(`Start safe paced withdrawal of ${filteredInvitations.length} invitations? Each withdrawal will be executed with human pauses (30-45s) to guarantee zero LinkedIn provider limits.`)) return;
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    setPacedActive(true);
+    setPacedProgress({ current: 0, total: filteredInvitations.length, withdrawn_count: 0, currentRecipient: '' });
+
+    try {
+      const res = await pacedWithdrawInvitations(
+        filteredInvitations,
+        selectedAccId,
+        (progress) => setPacedProgress(progress),
+        controller.signal
+      );
+      if (res.stopped) {
+        toast.success(`Paced withdrawal paused. Safely cancelled ${res.withdrawn_count} invitations.`);
+      } else {
+        toast.success(`Completed safe paced withdrawal of ${res.withdrawn_count} invitations!`);
+      }
+      loadNetworkData(selectedAccId);
+    } catch (e) {
+      toast.error(e.message || 'Error during paced withdrawal');
+    } finally {
+      setPacedActive(false);
+      abortControllerRef.current = null;
+    }
+  };
+
+  const handleStopPacedWithdraw = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    setPacedActive(false);
+    toast('Stopping paced withdrawal...');
+  };
+
+  const handleToggleAutoWithdraw = async () => {
+    if (!matchedProfile) return;
+    const isCurrentlyOn = Boolean(matchedProfile.settings?.auto_withdraw_stale_invitations);
+    const newSettings = {
+      ...(matchedProfile.settings || {}),
+      auto_withdraw_stale_invitations: !isCurrentlyOn,
+      withdraw_age_days: matchedProfile.settings?.withdraw_age_days || 90,
+      daily_withdraw_limit: matchedProfile.settings?.daily_withdraw_limit || 15,
+    };
+    try {
+      await directCreateProfile({
+        ...matchedProfile,
+        settings: newSettings,
+      });
+      toast.success(
+        newSettings.auto_withdraw_stale_invitations
+          ? `Auto-withdrawal activated! Stale invites (> ${newSettings.withdraw_age_days}d) will be safely cleaned in the background.`
+          : 'Background auto-withdrawal deactivated.'
+      );
+      await fetchProfiles();
+    } catch (e) {
+      toast.error('Failed to update setting');
+    }
+  };
+
+  const handleChangeAutoWithdrawAge = async (days) => {
+    if (!matchedProfile) return;
+    const newSettings = {
+      ...(matchedProfile.settings || {}),
+      withdraw_age_days: Number(days),
+    };
+    try {
+      await directCreateProfile({
+        ...matchedProfile,
+        settings: newSettings,
+      });
+      toast.success(`Threshold updated to ${days} days`);
+      await fetchProfiles();
+    } catch (e) {
+      toast.error('Failed to update setting');
     }
   };
 
@@ -711,75 +845,212 @@ export default function Profiles() {
                 <div>
                   <h3 className="text-white font-bold text-lg flex items-center gap-2">
                     <Clock size={20} className="text-[#6366f1]" />
-                    Pending Sent Invitations ({filteredInvitations.length})
+                    Pending Sent Invitations ({filteredInvitations.length}{invitations.length !== filteredInvitations.length ? ` of ${invitations.length}` : ''})
                   </h3>
                   <p className="text-[#6b7280] text-xs mt-1">
-                    Outbound connection requests waiting for acceptance on LinkedIn. Select duration to filter and withdraw.
+                    Outbound connection requests waiting for acceptance on LinkedIn. Filter by age or search to clean up stale requests safely.
                   </p>
                 </div>
 
-                {/* Age Selection Duration Dropdown & Bulk Withdraw Button */}
-                <div className="flex items-center gap-3">
+                {/* Age Selection Duration Dropdown & Paced Withdraw Button */}
+                <div className="flex flex-wrap items-center gap-3">
                   <select
                     value={withdrawAge}
                     onChange={e => setWithdrawAge(Number(e.target.value))}
                     className="bg-[#111111] border border-[#2a2a2a] rounded-xl px-3 py-2 text-white text-xs font-medium focus:outline-none focus:border-[#6366f1]"
                   >
-                    <option value={0}>All Pending Invitations ({invitations.length})</option>
-                    <option value={7}>Older than 7 days</option>
-                    <option value={14}>Older than 14 days</option>
-                    <option value={30}>Older than 30 days</option>
-                    <option value={60}>Older than 60 days</option>
-                    <option value={90}>Older than 90 days</option>
+                    <option value={0}>All Pending ({invitations.length})</option>
+                    <option value={30}>Older than 30 days (1 mo)</option>
+                    <option value={60}>Older than 60 days (2 mo)</option>
+                    <option value={90}>Older than 90 days (3 mo - Recommended)</option>
+                    <option value={180}>Older than 180 days (6 mo)</option>
+                    <option value={365}>Older than 1 year (365d)</option>
                   </select>
 
+                  {pacedActive ? (
+                    <button
+                      onClick={handleStopPacedWithdraw}
+                      className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white border border-red-500 text-xs font-bold rounded-xl transition-all shadow-lg animate-pulse"
+                    >
+                      <StopCircle size={14} /> Stop Paced Cleanup
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleStartPacedWithdraw}
+                      disabled={withdrawing || filteredInvitations.length === 0}
+                      className="flex items-center gap-2 px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-semibold rounded-xl transition-all disabled:opacity-50"
+                      title="Safely withdraw with 30-45s human pauses to prevent provider limits"
+                    >
+                      <Shield size={14} className="text-indigo-400" />
+                      Start Paced Cleanup ({filteredInvitations.length})
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Background Auto-Withdrawal Banner */}
+              <div className="p-4 rounded-xl bg-[#111111] border border-[#2a2a2a] flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
+                    <Shield size={18} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-white text-xs font-bold">Automated Background Hygiene</span>
+                      {matchedProfile?.settings?.auto_withdraw_stale_invitations ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          Active (15/day safe pace)
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-neutral-800 text-neutral-400 border border-neutral-700">
+                          Inactive
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[#9ca3af] text-[11px] mt-0.5">
+                      Automatically withdraws 1 stale request per runner cycle in the background with human spacing to keep your account safe from limits.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 text-xs text-[#9ca3af]">
+                    <span>Threshold:</span>
+                    <select
+                      value={matchedProfile?.settings?.withdraw_age_days || 90}
+                      onChange={e => handleChangeAutoWithdrawAge(Number(e.target.value))}
+                      className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-2.5 py-1.5 text-white text-xs font-medium focus:outline-none focus:border-[#6366f1]"
+                    >
+                      <option value={30}>30 days (1 mo)</option>
+                      <option value={60}>60 days (2 mo)</option>
+                      <option value={90}>90 days (3 mo)</option>
+                      <option value={180}>180 days (6 mo)</option>
+                      <option value={365}>365 days (1 yr)</option>
+                    </select>
+                  </div>
+
                   <button
-                    onClick={handleWithdrawByAge}
-                    disabled={withdrawing || filteredInvitations.length === 0}
-                    className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-xs font-semibold rounded-xl transition-all disabled:opacity-50"
+                    type="button"
+                    onClick={handleToggleAutoWithdraw}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      matchedProfile?.settings?.auto_withdraw_stale_invitations ? 'bg-[#6366f1]' : 'bg-[#2a2a2a]'
+                    }`}
                   >
-                    {withdrawing ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                    Withdraw Selected ({filteredInvitations.length})
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        matchedProfile?.settings?.auto_withdraw_stale_invitations ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
                   </button>
                 </div>
               </div>
 
+              {/* Active Paced Withdrawal Progress Indicator */}
+              {pacedActive && (
+                <div className="p-4 rounded-xl bg-indigo-950/40 border border-indigo-500/40 space-y-2.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-indigo-300 font-bold flex items-center gap-2">
+                      <Loader2 size={14} className="animate-spin text-indigo-400" />
+                      Safe Paced Withdrawal in Progress...
+                    </span>
+                    <span className="text-white font-mono font-semibold">
+                      {pacedProgress.current} / {pacedProgress.total} ({pacedProgress.withdrawn_count} cancelled)
+                    </span>
+                  </div>
+                  <div className="w-full bg-[#111111] rounded-full h-2 overflow-hidden border border-indigo-500/20">
+                    <div
+                      className="bg-gradient-to-r from-indigo-500 to-purple-500 h-full rounded-full transition-all duration-300"
+                      style={{ width: `${pacedProgress.total > 0 ? (pacedProgress.current / pacedProgress.total) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <p className="text-[11px] text-indigo-200/80">
+                    Currently withdrawing: <span className="font-semibold text-white">{pacedProgress.currentRecipient || 'LinkedIn Member'}</span> with 30-45s human delay to protect your account.
+                  </p>
+                </div>
+              )}
+
+              {/* Search Bar for Pending Invitations */}
+              <div className="relative">
+                <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#6b7280]" />
+                <input
+                  type="text"
+                  placeholder="Filter pending invitations by recipient name, title..."
+                  value={invSearch}
+                  onChange={e => setInvSearch(e.target.value)}
+                  className="w-full bg-[#111111] border border-[#2a2a2a] rounded-xl pl-10 pr-4 py-2 text-white text-xs placeholder-[#6b7280] focus:outline-none focus:border-[#6366f1]"
+                />
+              </div>
+
               {filteredInvitations.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-[#2a2a2a] bg-[#111111] p-10 text-center">
-                  <p className="text-[#6b7280] text-sm">No pending invitations match the selected duration filter.</p>
+                  <p className="text-[#6b7280] text-sm">No pending invitations match the selected duration or search filter.</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[420px] overflow-y-auto pr-1">
                   {filteredInvitations.map((inv, i) => {
                     const invId = inv.id || inv.invitation_id || `inv_${i}`;
-                    const name = inv.invited_user || inv.recipient_name || 'LinkedIn Member';
-                    const title = inv.invited_user_description || inv.headline || 'Pending Invitation';
-                    const photo = inv.invited_user_profile_picture_url;
-                    const dateStr = inv.date || (inv.parsed_datetime ? new Date(inv.parsed_datetime).toLocaleDateString() : '');
+                    const name = inv.recipient_name || inv.invited_user || 'LinkedIn Member';
+                    const title = inv.headline || inv.invited_user_description || 'Pending Invitation';
+                    const photo = inv.photo || inv.invited_user_profile_picture_url;
+                    const dateStr = inv.sent_at ? new Date(inv.sent_at).toLocaleDateString() : (inv.date || '');
+                    const ageDays = Number(inv.age_days) || 0;
 
                     return (
                       <div key={invId} className="p-4 rounded-xl border border-[#2a2a2a] bg-[#111111] flex items-center justify-between gap-3">
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-10 h-10 rounded-full bg-[#6366f1]/20 border border-[#6366f1]/30 flex items-center justify-center font-bold text-white text-xs shrink-0">
+                          <div className="w-10 h-10 rounded-full bg-[#6366f1]/20 border border-[#6366f1]/30 flex items-center justify-center font-bold text-white text-xs shrink-0 overflow-hidden">
                             {photo ? (
-                              <img src={photo} alt={name} className="w-full h-full rounded-full object-cover" />
+                              <img src={photo} alt={name} className="w-full h-full object-cover" />
                             ) : (
                               name.slice(0, 2).toUpperCase()
                             )}
                           </div>
                           <div className="min-w-0">
-                            <p className="text-white font-bold text-sm truncate">{name}</p>
-                            <p className="text-[#9ca3af] text-xs truncate">{title}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-white font-bold text-sm truncate">{name}</p>
+                              {ageDays >= 365 ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-500/10 text-red-400 border border-red-500/20 shrink-0">
+                                  {Math.floor(ageDays / 365)}+ yr old
+                                </span>
+                              ) : ageDays >= 90 ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20 shrink-0">
+                                  {Math.floor(ageDays / 30)} mo old
+                                </span>
+                              ) : ageDays >= 30 ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">
+                                  {Math.floor(ageDays / 30)} mo old
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-neutral-800 text-neutral-400 border border-neutral-700 shrink-0">
+                                  {ageDays}d old
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[#9ca3af] text-xs truncate mt-0.5">{title}</p>
                             {dateStr && <p className="text-[#6b7280] text-[10px] mt-0.5">Sent {dateStr}</p>}
                           </div>
                         </div>
 
-                        <button
-                          onClick={() => handleCancelSingleInvite(invId)}
-                          className="px-3 py-1.5 rounded-lg border border-red-500/20 bg-red-500/10 text-red-400 hover:bg-red-500/20 text-xs font-semibold shrink-0 transition-colors"
-                        >
-                          Withdraw
-                        </button>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {inv.linkedin_url && (
+                            <a
+                              href={inv.linkedin_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="p-1.5 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white hover:border-[#6366f1]"
+                              title="View LinkedIn Profile"
+                            >
+                              <ExternalLink size={13} />
+                            </a>
+                          )}
+                          <button
+                            onClick={() => handleCancelSingleInvite(invId)}
+                            className="px-3 py-1.5 rounded-lg border border-red-500/20 bg-red-500/10 text-red-400 hover:bg-red-500/20 text-xs font-semibold transition-colors"
+                          >
+                            Withdraw
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
@@ -787,25 +1058,25 @@ export default function Profiles() {
               )}
             </div>
 
-            {/* 1st-Degree Connections List Section (With CSV Export Button along header) */}
+            {/* 1st-Degree Connections List Section (With Rich Contact Badges & CSV Export) */}
             <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-6 space-y-4 shadow-xl">
-              <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                   <h3 className="text-white font-bold text-lg flex items-center gap-2">
                     <UserCheck size={20} className="text-emerald-400" />
-                    1st-Degree Network Connections ({connections.length})
+                    1st-Degree Network Connections ({filteredConnections.length}{connections.length !== filteredConnections.length ? ` of ${connections.length}` : ''})
                   </h3>
                   <p className="text-[#6b7280] text-xs mt-1">
-                    Active 1st-degree connections synced from your connected LinkedIn profile.
+                    Active 1st-degree connections synced from your profile with phone, email, and company data.
                   </p>
                 </div>
 
-                {/* CSV Export Button alongside connection section header */}
+                {/* CSV Export & Refresh */}
                 <div className="flex items-center gap-3">
                   <button
                     onClick={exportConnectionsCSV}
                     disabled={connections.length === 0}
-                    className="flex items-center justify-center gap-2 px-4 py-2 bg-[#22c55e] hover:bg-[#16a34a] text-white font-bold text-xs rounded-xl transition-all shadow-md disabled:opacity-50"
+                    className="flex items-center justify-center gap-2 px-4 py-2 bg-[#22c55e] hover:bg-[#16a34a] text-white font-bold text-xs rounded-xl transition-all shadow-md disabled:opacity-50 cursor-pointer"
                   >
                     <Download size={15} /> Export CSV ({connections.length})
                   </button>
@@ -821,47 +1092,88 @@ export default function Profiles() {
                 </div>
               </div>
 
+              {/* Search Bar for Connections */}
+              <div className="relative">
+                <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#6b7280]" />
+                <input
+                  type="text"
+                  placeholder="Search connections by name, company, email, phone, title..."
+                  value={connSearch}
+                  onChange={e => setConnSearch(e.target.value)}
+                  className="w-full bg-[#111111] border border-[#2a2a2a] rounded-xl pl-10 pr-4 py-2 text-white text-xs placeholder-[#6b7280] focus:outline-none focus:border-[#6366f1]"
+                />
+              </div>
+
               {netLoading ? (
                 <div className="flex justify-center py-12">
                   <Loader2 size={24} className="animate-spin text-[#6366f1]" />
                 </div>
               ) : connections.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-[#2a2a2a] bg-[#111111] p-10 text-center">
-                  <p className="text-[#6b7280] text-sm">No 1st-degree connections loaded yet.</p>
+                  <p className="text-[#6b7280] text-sm">No 1st-degree connections loaded yet. Click Refresh to sync from LinkedIn.</p>
+                </div>
+              ) : filteredConnections.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-[#2a2a2a] bg-[#111111] p-10 text-center">
+                  <p className="text-[#6b7280] text-sm">No connections match "{connSearch}".</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[500px] overflow-y-auto pr-1">
-                  {connections.map((c, i) => {
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[540px] overflow-y-auto pr-1">
+                  {filteredConnections.map((c, i) => {
                     const cName = c.name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || 'LinkedIn Member';
                     const cTitle = c.headline || c.title || '1st-Degree Connection';
-                    const cLink = c.public_profile_url || `https://www.linkedin.com/in/${c.public_identifier || c.member_id || c.id}`;
+                    const cLink = c.linkedin_url || c.public_profile_url || `https://www.linkedin.com/in/${c.public_identifier || c.member_id || c.id}`;
                     const photo = c.profile_picture_url || c.avatar_url;
 
                     return (
-                      <div key={c.id || i} className="p-3.5 rounded-xl border border-[#2a2a2a] bg-[#111111] flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-9 h-9 rounded-full bg-[#6366f1]/20 border border-[#6366f1]/30 flex items-center justify-center font-bold text-white text-xs shrink-0">
-                            {photo ? (
-                              <img src={photo} alt={cName} className="w-full h-full rounded-full object-cover" />
-                            ) : (
-                              cName.slice(0, 2).toUpperCase()
-                            )}
+                      <div key={c.id || i} className="p-3.5 rounded-xl border border-[#2a2a2a] bg-[#111111] flex flex-col justify-between gap-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-10 h-10 rounded-full bg-[#6366f1]/20 border border-[#6366f1]/30 flex items-center justify-center font-bold text-white text-xs shrink-0 overflow-hidden">
+                              {photo ? (
+                                <img src={photo} alt={cName} className="w-full h-full object-cover" />
+                              ) : (
+                                cName.slice(0, 2).toUpperCase()
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-white font-bold text-xs truncate">{cName}</p>
+                              <p className="text-[#9ca3af] text-[11px] truncate">{cTitle}</p>
+                              {c.company && (
+                                <p className="text-[#6b7280] text-[10px] truncate flex items-center gap-1 mt-0.5">
+                                  <Building size={10} /> {c.company}
+                                </p>
+                              )}
+                            </div>
                           </div>
-                          <div className="min-w-0">
-                            <p className="text-white font-bold text-xs truncate">{cName}</p>
-                            <p className="text-[#9ca3af] text-[11px] truncate">{cTitle}</p>
-                          </div>
+
+                          <a
+                            href={cLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="p-1.5 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white hover:border-[#6366f1] shrink-0"
+                            title="View LinkedIn Profile"
+                          >
+                            <ExternalLink size={13} />
+                          </a>
                         </div>
 
-                        <a
-                          href={cLink}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="p-1.5 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white hover:border-[#6366f1] shrink-0"
-                          title="View LinkedIn Profile"
-                        >
-                          <ExternalLink size={13} />
-                        </a>
+                        {/* Contact info badges (Email, Phone) */}
+                        {(c.email || c.phone) && (
+                          <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-[#1f1f1f]">
+                            {c.email && (
+                              <span className="inline-flex items-center gap-1 text-[10px] text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-md border border-indigo-500/20 font-mono truncate max-w-full" title={c.email}>
+                                <Mail size={10} className="shrink-0" />
+                                <span className="truncate">{c.email}</span>
+                              </span>
+                            )}
+                            {c.phone && (
+                              <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20 font-mono shrink-0" title={c.phone}>
+                                <Phone size={10} />
+                                {c.phone}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })}

@@ -33,6 +33,7 @@ import {
   directUpdateProspect,
   directUpdateProspectList,
   directWithdrawOldInvitations,
+  directPacedWithdrawBatch,
   directConnectCookie,
   directConnectDirect,
   directCreateHostedLink,
@@ -306,6 +307,10 @@ export const cancelNetworkingInvitation = async (invitation_id, accountId = null
 
 export const withdrawOldInvitations = async (max_age_days = 90, accountId = null) => {
   return directWithdrawOldInvitations(max_age_days, accountId);
+};
+
+export const pacedWithdrawInvitations = async (invitations, accountId = null, onProgress = null, abortSignal = null) => {
+  return directPacedWithdrawBatch(invitations, accountId, onProgress, abortSignal);
 };
 
 export const getUnipileAccountInfo = async (account_id) => {

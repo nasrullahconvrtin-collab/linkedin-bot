@@ -588,17 +588,30 @@ export const directGetNetworkingConnections = async (overrideAccountId = null) =
   const validAccIds = new Set(userProfiles.map(p => p.unipile_account_id).filter(Boolean));
 
   let targetAccId = overrideAccountId;
-  if (!targetAccId || !validAccIds.has(targetAccId)) {
+  if (!targetAccId || (!validAccIds.has(targetAccId) && validAccIds.size > 0 && !overrideAccountId)) {
     targetAccId = userProfiles[0]?.unipile_account_id;
   }
   if (!targetAccId) {
     return { success: true, connections: [], total: 0 };
   }
 
+  // Pre-fetch Supabase prospects in parallel to enrich connections with email, phone, company
+  const prospectsPromise = (async () => {
+    try {
+      const orgId = getActiveOrganizationId();
+      let q = supabaseDirect.from('prospects').select('name, first_name, last_name, email, phone, company, title, location, linkedin_url, provider_id, created_at');
+      if (isValidUuid(orgId)) q = q.eq('organization_id', orgId);
+      const { data } = await q;
+      return data || [];
+    } catch {
+      return [];
+    }
+  })();
+
   let allItems = [];
   let cursor = null;
 
-  for (let page = 0; page < 50; page += 1) {
+  for (let page = 0; page < 40; page += 1) {
     let path = `/users/relations?account_id=${targetAccId}&limit=100`;
     if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
     
@@ -614,10 +627,57 @@ export const directGetNetworkingConnections = async (overrideAccountId = null) =
     if (!cursor || items.length === 0) break;
   }
 
+  const dbProspects = await prospectsPromise;
+  const prospectMap = new Map();
+  const slugMap = new Map();
+  const nameMap = new Map();
+
+  for (const p of dbProspects) {
+    if (p.provider_id) prospectMap.set(p.provider_id, p);
+    const slug = extractPublicId(p.linkedin_url);
+    if (slug) slugMap.set(slug.toLowerCase().trim(), p);
+    const fullName = (p.name || `${p.first_name || ''} ${p.last_name || ''}`).toLowerCase().trim();
+    if (fullName) nameMap.set(fullName, p);
+  }
+
+  // Enrich every connection with available contact info
+  const enrichedConnections = allItems.map((c, idx) => {
+    const slug = (c.public_identifier || extractPublicId(c.public_profile_url) || '').toLowerCase().trim();
+    const fullName = (c.name || `${c.first_name || ''} ${c.last_name || ''}`).toLowerCase().trim();
+    const match = (c.member_id && prospectMap.get(c.member_id)) ||
+                  (c.provider_id && prospectMap.get(c.provider_id)) ||
+                  (slug && slugMap.get(slug)) ||
+                  (fullName && nameMap.get(fullName)) || null;
+
+    const email = c.email || match?.email || '';
+    const phone = c.phone || match?.phone || '';
+    const company = c.company || match?.company || '';
+    const location = c.location || match?.location || '';
+    const title = c.headline || c.title || match?.title || '';
+    const linkedin_url = c.public_profile_url || match?.linkedin_url || (c.public_identifier ? `https://www.linkedin.com/in/${c.public_identifier}` : '');
+    const connected_date = c.created_at || c.connected_at || match?.created_at || '';
+
+    return {
+      ...c,
+      id: c.id || c.member_id || `conn_${idx}`,
+      first_name: c.first_name || match?.first_name || c.name?.split(' ')[0] || '',
+      last_name: c.last_name || match?.last_name || c.name?.split(' ').slice(1).join(' ') || '',
+      name: c.name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || match?.name || 'LinkedIn Member',
+      headline: title,
+      title,
+      company,
+      email,
+      phone,
+      location,
+      linkedin_url,
+      connected_date,
+    };
+  });
+
   return {
     success: true,
-    connections: allItems,
-    total: allItems.length,
+    connections: enrichedConnections,
+    total: enrichedConnections.length,
   };
 };
 
@@ -626,7 +686,7 @@ export const directGetNetworkingInvitations = async (overrideAccountId = null) =
   const validAccIds = new Set(userProfiles.map(p => p.unipile_account_id).filter(Boolean));
 
   let targetAccId = overrideAccountId;
-  if (!targetAccId || !validAccIds.has(targetAccId)) {
+  if (!targetAccId || (!validAccIds.has(targetAccId) && validAccIds.size > 0 && !overrideAccountId)) {
     targetAccId = userProfiles[0]?.unipile_account_id;
   }
   if (!targetAccId) {
@@ -637,7 +697,7 @@ export const directGetNetworkingInvitations = async (overrideAccountId = null) =
   let cursor = null;
 
   try {
-    for (let page = 0; page < 50; page += 1) {
+    for (let page = 0; page < 40; page += 1) {
       let path = `/users/invite/sent?account_id=${targetAccId}&limit=100`;
       if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
       
@@ -656,10 +716,38 @@ export const directGetNetworkingInvitations = async (overrideAccountId = null) =
     console.warn('Unipile fetch invitations error:', e);
   }
 
+  const now = Date.now();
+  const normalizedInvitations = allItems.map((inv, idx) => {
+    const sentTs = inv.parsed_datetime || inv.sent_at || inv.created_at || inv.date || inv.timestamp;
+    const invMs = sentTs ? new Date(sentTs).getTime() : 0;
+    const ageDays = invMs > 0 ? Math.floor((now - invMs) / (1000 * 60 * 60 * 24)) : 0;
+
+    const recipientName = inv.invited_user || inv.recipient_name || inv.name || `${inv.first_name || ''} ${inv.last_name || ''}`.trim() || 'LinkedIn Member';
+    const recipientHeadline = inv.invited_user_description || inv.headline || inv.title || '';
+    const recipientPhoto = inv.invited_user_profile_picture_url || inv.profile_picture_url || inv.avatar_url || '';
+    const recipientSlug = inv.public_identifier || inv.invited_user_public_id || '';
+    const recipientUrl = inv.public_profile_url || (recipientSlug ? `https://www.linkedin.com/in/${recipientSlug}` : '');
+
+    return {
+      ...inv,
+      id: inv.id || inv.invitation_id || `inv_${idx}`,
+      invitation_id: inv.id || inv.invitation_id || `inv_${idx}`,
+      recipient_name: recipientName,
+      headline: recipientHeadline,
+      photo: recipientPhoto,
+      linkedin_url: recipientUrl,
+      sent_at: sentTs,
+      age_days: ageDays,
+    };
+  });
+
+  // Sort by oldest first so old stale invitations are immediately visible
+  normalizedInvitations.sort((a, b) => (b.age_days || 0) - (a.age_days || 0));
+
   return {
     success: true,
-    invitations: allItems,
-    total: allItems.length,
+    invitations: normalizedInvitations,
+    total: normalizedInvitations.length,
   };
 };
 
@@ -677,6 +765,68 @@ export const directCancelNetworkingInvitation = async (invitationId, overrideAcc
   return { success: ok };
 };
 
+// Safe, Paced batch cancellation with human randomized pauses (30-45s) to guarantee zero provider limits
+export const directPacedWithdrawBatch = async (invitationsToWithdraw, overrideAccountId = null, onProgress = null, abortSignal = null) => {
+  let count = 0;
+  let targetAccId = overrideAccountId;
+  if (!targetAccId) {
+    const userProfiles = await directGetProfiles();
+    targetAccId = userProfiles[0]?.unipile_account_id;
+  }
+  if (!targetAccId || !invitationsToWithdraw || invitationsToWithdraw.length === 0) {
+    return { success: true, withdrawn_count: 0, stopped: false };
+  }
+
+  for (let i = 0; i < invitationsToWithdraw.length; i++) {
+    if (abortSignal && abortSignal.aborted) {
+      return { success: true, withdrawn_count: count, stopped: true };
+    }
+
+    const inv = invitationsToWithdraw[i];
+    const invId = inv.id || inv.invitation_id;
+    if (invId) {
+      const { success } = await directCancelNetworkingInvitation(invId, targetAccId);
+      if (success) {
+        count += 1;
+        try {
+          const userAcc = getActiveUserAccount();
+          const orgId = getActiveOrganizationId();
+          await supabaseDirect.from('activity_logs').insert([{
+            organization_id: orgId || null,
+            user_email: userAcc?.email || null,
+            campaign_name: 'Paced Account Hygiene',
+            action_type: 'invitation_withdrawn',
+            status: 'success',
+            details: `Withdrew invitation sent ${inv.age_days || 0} days ago to ${inv.recipient_name || 'LinkedIn Member'}`,
+            linkedin_url: inv.linkedin_url || null,
+            created_at: new Date().toISOString()
+          }]);
+        } catch {}
+      }
+    }
+
+    if (onProgress) {
+      onProgress({
+        current: i + 1,
+        total: invitationsToWithdraw.length,
+        withdrawn_count: count,
+        currentRecipient: inv.recipient_name,
+      });
+    }
+
+    // Safety pause: 30s to 45s human delay between withdrawals to protect account reputation
+    if (i < invitationsToWithdraw.length - 1) {
+      if (abortSignal && abortSignal.aborted) {
+        return { success: true, withdrawn_count: count, stopped: true };
+      }
+      const pauseMs = Math.floor(Math.random() * 15000) + 30000;
+      await new Promise(resolve => setTimeout(resolve, pauseMs));
+    }
+  }
+
+  return { success: true, withdrawn_count: count, stopped: false };
+};
+
 export const directWithdrawOldInvitations = async (maxAgeDays = 90, overrideAccountId = null) => {
   const { invitations } = await directGetNetworkingInvitations(overrideAccountId);
   const cutoffMs = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
@@ -691,6 +841,8 @@ export const directWithdrawOldInvitations = async (maxAgeDays = 90, overrideAcco
       if (invId) {
         const { success } = await directCancelNetworkingInvitation(invId, overrideAccountId);
         if (success) count += 1;
+        // Human pacing pause between cancellations
+        await new Promise(resolve => setTimeout(resolve, 5000));
       }
     }
   }
@@ -2220,6 +2372,9 @@ export const DEFAULT_APP_SETTINGS = {
   random_jitter: true,
   auto_warmup: true,
   runner_interval_ms: 60000,
+  auto_withdraw_stale_invitations: false,
+  withdraw_age_days: 90,
+  daily_withdraw_limit: 15,
 };
 
 export const directGetAppSettings = async () => {

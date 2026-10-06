@@ -316,6 +316,90 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── Safe Background Auto-Withdrawal of Stale Invitations ──
+    for (const profile of profiles || []) {
+      if (!profile.unipile_account_id) continue;
+      const pSettings = profile.settings || {};
+      if (!pSettings.auto_withdraw_stale_invitations) continue;
+
+      const withdrawAgeDays = Number(pSettings.withdraw_age_days) || 90;
+      const dailyWithdrawLimit = Number(pSettings.daily_withdraw_limit) || 15;
+      const cutoffMs = Date.now() - withdrawAgeDays * 24 * 60 * 60 * 1000;
+
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const todayIso = todayStart.toISOString();
+
+      let withdrawnTodayCount = 0;
+      try {
+        let actLogsQuery = `activity_logs?action_type=eq.invitation_withdrawn&created_at=gte.${todayIso}&select=id`;
+        if (profile.organization_id) {
+          actLogsQuery += `&organization_id=eq.${profile.organization_id}`;
+        }
+        const todayLogs = await sbFetch(actLogsQuery);
+        withdrawnTodayCount = Array.isArray(todayLogs) ? todayLogs.length : 0;
+      } catch (e) {
+        withdrawnTodayCount = 0;
+      }
+
+      if (withdrawnTodayCount >= dailyWithdrawLimit) {
+        log(`Profile '${profile.display_name}' reached daily withdrawal cap (${withdrawnTodayCount}/${dailyWithdrawLimit}). Skipping.`);
+        continue;
+      }
+
+      const { ok: invOk, data: invData } = await unipileFetch(`/users/invite/sent?account_id=${profile.unipile_account_id}&limit=50`);
+      const sentInvites = (invOk && invData && (invData.items || invData.invitations)) || [];
+
+      let staleToCancel = null;
+      let oldestAgeDays = 0;
+      for (const inv of sentInvites) {
+        const sentTs = inv.parsed_datetime || inv.sent_at || inv.created_at || inv.date || inv.timestamp;
+        const invMs = sentTs ? new Date(sentTs).getTime() : 0;
+        if (invMs > 0 && invMs <= cutoffMs) {
+          const ageDays = Math.floor((Date.now() - invMs) / (1000 * 60 * 60 * 24));
+          if (!staleToCancel || ageDays > oldestAgeDays) {
+            staleToCancel = inv;
+            oldestAgeDays = ageDays;
+          }
+        }
+      }
+
+      if (staleToCancel) {
+        const invId = staleToCancel.id || staleToCancel.invitation_id;
+        const recName = staleToCancel.invited_user || staleToCancel.recipient_name || staleToCancel.name || 'LinkedIn Member';
+        const recSlug = staleToCancel.public_identifier || staleToCancel.invited_user_public_id || '';
+        const recUrl = staleToCancel.public_profile_url || (recSlug ? `https://www.linkedin.com/in/${recSlug}` : '');
+
+        log(`Auto-withdrawing 1 stale invitation (${oldestAgeDays} days old) for ${recName} on account '${profile.display_name}'...`);
+        const { ok: cancelOk } = await unipileFetch(`/users/invite/sent/${invId}?account_id=${profile.unipile_account_id}`, {
+          method: 'DELETE',
+        });
+
+        if (cancelOk) {
+          log(`Successfully withdrawn stale invitation for ${recName}.`);
+          try {
+            await sbFetch('activity_logs', {
+              method: 'POST',
+              body: JSON.stringify({
+                organization_id: profile.organization_id || null,
+                user_email: profile.user_email || null,
+                campaign_name: 'Safe Account Hygiene',
+                action_type: 'invitation_withdrawn',
+                status: 'success',
+                details: `Safely auto-withdrew stale invitation sent ${oldestAgeDays} days ago to ${recName}`,
+                linkedin_url: recUrl || null,
+                created_at: new Date().toISOString()
+              })
+            });
+          } catch (e) {
+            log(`Failed recording activity log for withdrawal: ${e.message}`);
+          }
+        } else {
+          log(`Failed withdrawing stale invitation for ${recName}.`);
+        }
+      }
+    }
+
     if (res && res.status) {
       return res.status(200).json({ success: true, timestamp: new Date().toISOString(), totalSentToday, logs });
     }

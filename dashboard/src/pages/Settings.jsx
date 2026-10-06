@@ -499,6 +499,65 @@ export default function Settings() {
           </div>
         </Section>
 
+        {/* ── CONNECTION HYGIENE & AUTO-WITHDRAWAL ──────────────────────────────── */}
+        <Section title="Connection Hygiene & Safe Auto-Withdrawal" icon={Shield} description="Safely clean up old, unaccepted connection requests in the background with human pacing.">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between p-4 rounded-xl bg-[#111111] border border-[#2a2a2a]">
+              <div>
+                <p className="text-white text-xs font-bold">Auto-Withdraw Stale Invitations</p>
+                <p className="text-[#9ca3af] text-[11px] mt-0.5">
+                  Automatically cancel sent connection requests older than your threshold in the background (1 per run cycle).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleChange('auto_withdraw_stale_invitations', !settings.auto_withdraw_stale_invitations)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  settings.auto_withdraw_stale_invitations ? 'bg-[#6366f1]' : 'bg-[#2a2a2a]'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    settings.auto_withdraw_stale_invitations ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {settings.auto_withdraw_stale_invitations && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl bg-indigo-950/20 border border-indigo-500/20">
+                <div>
+                  <label className="block text-xs font-semibold text-[#9ca3af] mb-1.5">Withdraw Invitations Older Than</label>
+                  <select
+                    value={settings.withdraw_age_days || 90}
+                    onChange={e => handleChange('withdraw_age_days', Number(e.target.value))}
+                    className="w-full bg-[#111111] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+                  >
+                    <option value={30}>Older than 30 days (1 Month)</option>
+                    <option value={60}>Older than 60 days (2 Months)</option>
+                    <option value={90}>Older than 90 days (3 Months - Recommended)</option>
+                    <option value={180}>Older than 180 days (6 Months)</option>
+                    <option value={365}>Older than 365 days (1 Year)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[#9ca3af] mb-1.5">Daily Safety Withdrawal Cap</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={settings.daily_withdraw_limit || 15}
+                    onChange={e => handleChange('daily_withdraw_limit', Number(e.target.value))}
+                    className="w-full bg-[#111111] border border-[#2a2a2a] rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-[#6366f1]"
+                  />
+                  <p className="text-[10px] text-[#6b7280] mt-1">Recommended: 15/day to stay completely safe from LinkedIn limits.</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </Section>
+
         {/* ── 3. AUTOMATION FLOW RUNNER EXECUTION FREQUENCY ──────────────────── */}
         <Section title="Automation Engine & Frequency" icon={Sliders} description="Configure background campaign execution frequency.">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
