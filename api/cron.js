@@ -87,7 +87,10 @@ export default async function handler(req, res) {
 
     let totalSentToday = 0;
     for (const c of campaigns || []) {
-      const profile = profileMap.get(c.profile_key);
+      let profile = profileMap.get(c.profile_key);
+      if (!profile && c.organization_id) {
+        profile = (profiles || []).find(p => p.organization_id === c.organization_id && p.unipile_account_id);
+      }
       if (!profile || !profile.unipile_account_id) continue;
 
       const dailyConnectionLimit = Number(profile.settings?.daily_connection_limit || 15);
@@ -270,13 +273,21 @@ export default async function handler(req, res) {
 
         // 3. Send Invite Immediately
         if (nodeType === 'send_invitation') {
+          const cooldownUntil = profile.settings?.provider_limit_cooldown_until;
+          if (cooldownUntil && new Date(cooldownUntil).getTime() > Date.now()) {
+            log(`[Safety Guard] Account '${profile.display_name}' is under LinkedIn provider limit cooldown until ${cooldownUntil}. Skipping connection invites.`);
+            continue;
+          }
+
           if (totalSentToday >= dailyConnectionLimit) continue;
 
           let providerId = p.provider_id;
           if (!providerId) {
             const pubId = extractPublicId(p.linkedin_url);
-            const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(pubId)}?account_id=${accId}`);
-            if (ok && data) providerId = data.provider_id || data.id;
+            if (pubId) {
+              const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(pubId)}?account_id=${accId}`);
+              if (ok && data) providerId = data.provider_id || data.id;
+            }
           }
 
           if (!providerId) continue;
@@ -328,6 +339,10 @@ export default async function handler(req, res) {
                             errStr.toLowerCase().includes("restricted") ||
                             errStr.toLowerCase().includes("blocked");
 
+            const isProviderLimit = errStr.toLowerCase().includes("provider limit") ||
+                                    errStr.toLowerCase().includes("rate limit") ||
+                                    errStr.toLowerCase().includes("too many requests");
+
             cv.history = [
               ...(cv.history || []),
               {
@@ -344,6 +359,17 @@ export default async function handler(req, res) {
               patchBody.status = "Needs Review";
             }
             await sbFetch(`prospects?id=eq.${p.id}`, { method: "PATCH", body: JSON.stringify(patchBody) });
+
+            if (isProviderLimit) {
+              log(`[CIRCUIT BREAKER] LinkedIn provider limit reached for '${profile.display_name}'. Setting 24h cooldown.`);
+              const cooldownDate = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+              const pSettings = { ...(profile.settings || {}), provider_limit_cooldown_until: cooldownDate };
+              await sbFetch(`profiles?id=eq.${profile.id}`, {
+                method: "PATCH",
+                body: JSON.stringify({ settings: pSettings })
+              });
+              break;
+            }
           }
         }
 

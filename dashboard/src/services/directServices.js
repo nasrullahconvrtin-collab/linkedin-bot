@@ -3005,6 +3005,11 @@ export const directRunFlow = async () => {
         }
 
         if (!isConnected && prospect.status !== 'Connection Request Sent') {
+          if (appSettings.provider_limit_cooldown_until && new Date(appSettings.provider_limit_cooldown_until).getTime() > Date.now()) {
+            console.warn(`[Safety Guard] Account is under LinkedIn temporary provider limit cooldown until ${appSettings.provider_limit_cooldown_until}. Skipping connection invitation for ${prospect.name}.`);
+            continue;
+          }
+
           if (todayConnectionsTotal >= dailyConnectionLimit) {
             console.log(`Daily connection limit reached (${todayConnectionsTotal}/${dailyConnectionLimit}). Skipping connection invitation for ${prospect.name}.`);
             continue;
@@ -3082,7 +3087,15 @@ export const directRunFlow = async () => {
 
               // CIRCUIT BREAKER: If LinkedIn hit a rate/provider limit, IMMEDIATELY halt further campaign attempts
               if (isProviderLimitError(res.error)) {
-                console.warn(`[CIRCUIT BREAKER ACTIVATED] LinkedIn provider limit reached (${res.error}). Halting remaining prospect processing for campaign.`);
+                console.warn(`[CIRCUIT BREAKER ACTIVATED] LinkedIn provider limit reached (${res.error}). Halting remaining prospect processing for campaign and setting 24h cooldown.`);
+                const cooldownUntil = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+                try {
+                  const targetProfileKey = campaign.profile_key || 'profile_1';
+                  const updatedSettings = { ...appSettings, provider_limit_cooldown_until: cooldownUntil };
+                  await supabaseDirect.from('profiles').update({ settings: updatedSettings }).eq('profile_key', targetProfileKey);
+                } catch (e) {
+                  console.warn('Failed to save provider limit cooldown to Supabase:', e);
+                }
                 break;
               }
             }
