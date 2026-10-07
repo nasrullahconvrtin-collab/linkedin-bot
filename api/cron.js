@@ -48,6 +48,31 @@ function extractPublicId(url) {
   return String(url).replace(/^https?:\/\//, "").replace("www.linkedin.com/in/", "").replace(/\/$/, "").trim();
 }
 
+function renderTemplate(templateText, prospect) {
+  if (!templateText) return "";
+  let text = String(templateText);
+  const matches = text.match(/\{\{\s*([a-zA-Z0-9_\-\s]+)\s*\}\}/g) || [];
+  for (const m of matches) {
+    const varName = m.replace(/\{\{\s*|\s*\}\}/g, "").trim();
+    const norm = (v) => v.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const normVar = norm(varName);
+    let resolvedValue = "";
+    if (normVar === "firstname" || normVar === "first_name") {
+      resolvedValue = prospect.first_name || prospect.custom_variables?.first_name || (prospect.name ? prospect.name.split(" ")[0] : "");
+    } else if (normVar === "lastname" || normVar === "last_name") {
+      resolvedValue = prospect.last_name || prospect.custom_variables?.last_name || (prospect.name ? prospect.name.split(" ").slice(1).join(" ") : "");
+    } else if (normVar === "company") {
+      resolvedValue = prospect.company || prospect.custom_variables?.company || "";
+    } else if (normVar === "title" || normVar === "jobtitle") {
+      resolvedValue = prospect.job_title || prospect.custom_variables?.job_title || prospect.custom_variables?.title || "";
+    } else {
+      resolvedValue = prospect[varName] || prospect.custom_variables?.[varName] || "";
+    }
+    text = text.replace(m, resolvedValue || "");
+  }
+  return text;
+}
+
 export default async function handler(req, res) {
   const logs = [];
   const log = (msg) => logs.push(`[${new Date().toISOString()}] ${msg}`);
@@ -172,7 +197,6 @@ export default async function handler(req, res) {
           }
         }
 
-        if (totalSentToday >= dailyConnectionLimit) break;
         if (["Connection Request Sent", "Connection Sent", "Completed", "Failed", "Replied"].includes(p.status)) continue;
 
         let currentNodeId = cv.current_node_id || startNode.id;
@@ -246,6 +270,8 @@ export default async function handler(req, res) {
 
         // 3. Send Invite Immediately
         if (nodeType === 'send_invitation') {
+          if (totalSentToday >= dailyConnectionLimit) continue;
+
           let providerId = p.provider_id;
           if (!providerId) {
             const pubId = extractPublicId(p.linkedin_url);
@@ -319,6 +345,92 @@ export default async function handler(req, res) {
             }
             await sbFetch(`prospects?id=eq.${p.id}`, { method: "PATCH", body: JSON.stringify(patchBody) });
           }
+        }
+
+        // 4. Send Message (Direct chat messaging for connected prospects)
+        if (nodeType === 'send_message') {
+          let recipientId = p.provider_id || p.member_id;
+          if (!recipientId) {
+            const pubId = extractPublicId(p.linkedin_url);
+            if (pubId) {
+              const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(pubId)}?account_id=${accId}`);
+              if (ok && data) recipientId = data.provider_id || data.id;
+            }
+          }
+
+          if (recipientId) {
+            const rawMsg = nodeConfig.message || '';
+            const msgText = renderTemplate(rawMsg, p).trim();
+            if (msgText) {
+              const pName = p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim();
+              log(`Sending message to ${pName}...`);
+              const { ok, data } = await unipileFetch("/chats", {
+                method: "POST",
+                body: JSON.stringify({
+                  account_id: accId,
+                  attendees_ids: [recipientId],
+                  text: msgText
+                })
+              });
+
+              const nowIso = new Date().toISOString();
+              if (ok) {
+                log(`SUCCESS: Message sent to ${pName}!`);
+                cv.history = [
+                  ...(cv.history || []),
+                  {
+                    node_id: currentNode.id,
+                    node_type: "send_message",
+                    node_label: currentNode.data?.label || "Send Message",
+                    status: "success",
+                    executed_at: nowIso
+                  }
+                ];
+                cv.last_sent_node_id = currentNode.id;
+                cv.message_sent_at = nowIso;
+                cv.last_action_at = nowIso;
+                if (nextEdge) cv.current_node_id = nextEdge.target;
+
+                const isFollowUp = (currentNode.data?.label || '').toLowerCase().includes('follow') || rawMsg.toLowerCase().includes('follow');
+                await sbFetch(`prospects?id=eq.${p.id}`, {
+                  method: "PATCH",
+                  body: JSON.stringify({
+                    status: isFollowUp ? "Following Up" : "Initial Message Sent",
+                    message_sent_date: nowIso,
+                    custom_variables: cv
+                  })
+                });
+              } else {
+                log(`FAILED send message to ${pName}: ${data?.detail || "Send message failed"}`);
+                cv.history = [
+                  ...(cv.history || []),
+                  {
+                    node_id: currentNode.id,
+                    node_type: "send_message",
+                    node_label: currentNode.data?.label || "Send Message",
+                    status: "failed",
+                    error: data?.detail || "Send message failed",
+                    executed_at: nowIso
+                  }
+                ];
+                await sbFetch(`prospects?id=eq.${p.id}`, {
+                  method: "PATCH",
+                  body: JSON.stringify({ custom_variables: cv })
+                });
+              }
+            }
+          }
+        }
+
+        // 5. Completed Node
+        if (nodeType === 'completed') {
+          await sbFetch(`prospects?id=eq.${p.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              status: "Completed",
+              custom_variables: cv
+            })
+          });
         }
       }
     }
