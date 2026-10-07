@@ -1,12 +1,19 @@
 const ENV_URL = process.env.VITE_SUPABASE_URL;
-const SUPABASE_URL = (ENV_URL && !ENV_URL.includes('mjwganpjawthnowemabt') && !ENV_URL.includes('lupbvrgmkovpohjnbddf'))
-  ? ENV_URL
-  : 'https://mhzvxnbnaytirrgiwsnv.supabase.co';
-
 const ENV_KEY = process.env.VITE_SUPABASE_ANON_KEY;
-const SUPABASE_KEY = (ENV_KEY && !ENV_KEY.includes('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1qd2dhbnBqYXd0aG5vd2VtYWJ0'))
-  ? ENV_KEY
-  : 'sb_publishable_gn93SdRFAAvpnH6faute9g_n8DiwZ_j';
+
+const isCronIntegri = (process.env.VERCEL_GIT_REPO_SLUG && process.env.VERCEL_GIT_REPO_SLUG.includes('integri')) ||
+                      (process.env.VERCEL_PROJECT_PRODUCTION_URL && process.env.VERCEL_PROJECT_PRODUCTION_URL.includes('integri')) ||
+                      (process.env.VERCEL_URL && process.env.VERCEL_URL.includes('integri')) ||
+                      (ENV_URL && ENV_URL.includes('mhzvxnbnaytirrgiwsnv'));
+
+const SUPABASE_URL = isCronIntegri
+  ? (ENV_URL || 'https://mhzvxnbnaytirrgiwsnv.supabase.co')
+  : (ENV_URL || 'https://mjwganpjawthnowemabt.supabase.co');
+
+const SUPABASE_KEY = isCronIntegri
+  ? (ENV_KEY || 'sb_publishable_gn93SdRFAAvpnH6faute9g_n8DiwZ_j')
+  : (ENV_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1qd2dhbnBqYXd0aG5vd2VtYWJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzMDczMTUsImV4cCI6MjEwMTg4MzMxNX0.OwKeHoH2DH-jS7-_XRf6Vkx4bNZPKgbL9WOr5oSd27c');
+
 const UNIPILE_API_KEY = process.env.VITE_UNIPILE_API_KEY || "vpftWHjq.lC9ACICdkDlLNupo90avQybHg2UjAtAkMssKHxsEw9o=";
 const UNIPILE_URL = "https://api63.unipile.com:19339/api/v1";
 

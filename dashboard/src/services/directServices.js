@@ -1,14 +1,27 @@
 import { createClient } from '@supabase/supabase-js';
 
-const ENV_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_URL = (ENV_URL && !ENV_URL.includes('mhzvxnbnaytirrgiwsnv') && !ENV_URL.includes('lupbvrgmkovpohjnbddf'))
-  ? ENV_URL
-  : 'https://mjwganpjawthnowemabt.supabase.co';
+const isIntegriHost = typeof window !== 'undefined' && (
+  window.location.hostname.includes('integrileads') ||
+  window.location.hostname.includes('integri')
+);
 
+const ENV_URL = import.meta.env.VITE_SUPABASE_URL;
 const ENV_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const SUPABASE_ANON_KEY = (ENV_KEY && !ENV_KEY.includes('sb_publishable_gn93SdRFAAvpnH6faute9g_n8DiwZ_j') && !ENV_KEY.includes('sb_publishable_Ybu1D-FMVkpgJ-Z4y6KoIQ_A5Eo-M24'))
-  ? ENV_KEY
-  : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1qd2dhbnBqYXd0aG5vd2VtYWJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzMDczMTUsImV4cCI6MjEwMTg4MzMxNX0.OwKeHoH2DH-jS7-_XRf6Vkx4bNZPKgbL9WOr5oSd27c';
+
+// Detect whether this deployment is IntegriLeads (by domain or environment setting)
+const isUsingIntegriDb = isIntegriHost || (ENV_URL && ENV_URL.includes('mhzvxnbnaytirrgiwsnv'));
+
+const SUPABASE_URL = isUsingIntegriDb
+  ? (ENV_URL || 'https://mhzvxnbnaytirrgiwsnv.supabase.co')
+  : ((ENV_URL && !ENV_URL.includes('mhzvxnbnaytirrgiwsnv') && !ENV_URL.includes('lupbvrgmkovpohjnbddf'))
+      ? ENV_URL
+      : 'https://mjwganpjawthnowemabt.supabase.co');
+
+const SUPABASE_ANON_KEY = isUsingIntegriDb
+  ? (ENV_KEY || 'sb_publishable_gn93SdRFAAvpnH6faute9g_n8DiwZ_j')
+  : ((ENV_KEY && !ENV_KEY.includes('sb_publishable_gn93SdRFAAvpnH6faute9g_n8DiwZ_j') && !ENV_KEY.includes('sb_publishable_Ybu1D-FMVkpgJ-Z4y6KoIQ_A5Eo-M24'))
+      ? ENV_KEY
+      : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1qd2dhbnBqYXd0aG5vd2VtYWJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzMDczMTUsImV4cCI6MjEwMTg4MzMxNX0.OwKeHoH2DH-jS7-_XRf6Vkx4bNZPKgbL9WOr5oSd27c');
 
 const UNIPILE_API_KEY = 'vpftWHjq.lC9ACICdkDlLNupo90avQybHg2UjAtAkMssKHxsEw9o=';
 const UNIPILE_BASE_URL = 'https://api63.unipile.com:19339/api/v1';
