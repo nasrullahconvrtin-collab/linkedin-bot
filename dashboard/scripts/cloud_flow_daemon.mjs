@@ -156,7 +156,7 @@ async function runCloudFlow() {
         console.log(`[Railway 24/7 Daemon] 🎯 Goal Reached: Sent daily target of ${todayConnectionsTotal}/${dailyConnectionLimit} connections today for ${campaign.name}!`);
         break;
       }
-      if (['Completed', 'Failed', 'Replied', 'Connection Request Sent'].includes(prospect.status)) continue;
+      if (['Completed', 'Failed', 'Replied', 'Connection Request Sent', 'Needs Review', 'Needs Attention'].includes(prospect.status)) continue;
       if (prospect.connection_status === 'invitation_sent' || prospect.connection_status === 'connected') continue;
 
       const cv = prospect.custom_variables || {};
@@ -289,7 +289,11 @@ async function runCloudFlow() {
             }).eq('id', prospect.id);
           } else {
             cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', node_label: 'Connection Request Failed', executed_at: nowIso, status: 'failed', error: errStr }];
-            await supabase.from('prospects').update({ custom_variables: cv }).eq('id', prospect.id);
+            const patchBody = { custom_variables: cv };
+            if (errStr.toLowerCase().includes('cannot') || errStr.toLowerCase().includes('restricted') || errStr.toLowerCase().includes('not allowed') || errStr.toLowerCase().includes('recipient id is valid') || errStr.toLowerCase().includes('locked')) {
+              patchBody.status = 'Needs Review';
+            }
+            await supabase.from('prospects').update(patchBody).eq('id', prospect.id);
 
             if (errStr.toLowerCase().includes('provider limit') || errStr.toLowerCase().includes('rate limit') || errStr.includes('429')) {
               console.warn(`[Railway 24/7 Daemon] 🛑 LinkedIn Provider/Rate Limit hit for "${campaign.name}". Entering 12-hour cooldown.`);

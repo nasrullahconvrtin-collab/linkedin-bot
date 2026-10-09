@@ -105,7 +105,7 @@ async function runCloudFlow() {
         console.log(`🎯 Goal Reached: Sent daily target of ${todayConnectionsTotal}/${dailyConnectionLimit} connection requests today for ${campaign.name}!`);
         break;
       }
-      if (['Completed', 'Failed', 'Replied', 'Connection Request Sent'].includes(prospect.status)) continue;
+      if (['Completed', 'Failed', 'Replied', 'Connection Request Sent', 'Needs Review', 'Needs Attention'].includes(prospect.status)) continue;
       if (prospect.connection_status === 'invitation_sent' || prospect.connection_status === 'connected') continue;
 
       const cv = prospect.custom_variables || {};
@@ -194,7 +194,12 @@ async function runCloudFlow() {
           if (ok && data) providerId = data.provider_id || data.id;
         }
 
-        if (!providerId) continue;
+        if (!providerId) {
+          console.warn(`[Goal Engine] Could not resolve providerId for ${prospect.name || prospect.id}. Marking Needs Review.`);
+          cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', node_label: 'Profile Not Found', executed_at: new Date().toISOString(), status: 'failed', error: 'Invalid LinkedIn URL or profile locked' }];
+          await supabase.from('prospects').update({ status: 'Needs Review', custom_variables: cv }).eq('id', prospect.id);
+          continue;
+        }
 
         const hasNoteToggle = nodeConfig.add_note || nodeConfig.include_note || nodeConfig.send_note;
         const noteText = hasNoteToggle ? (nodeConfig.note || '').replace(/\{\{\s*first_name\s*\}\}/gi, prospect.first_name || '') : '';
@@ -243,7 +248,7 @@ async function runCloudFlow() {
           } else {
             cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', node_label: 'Connection Request Failed', executed_at: nowIso, status: 'failed', error: errStr }];
             const patchBody = { custom_variables: cv };
-            if (errStr.toLowerCase().includes('cannot') || errStr.toLowerCase().includes('restricted') || errStr.toLowerCase().includes('not allowed')) {
+            if (errStr.toLowerCase().includes('cannot') || errStr.toLowerCase().includes('restricted') || errStr.toLowerCase().includes('not allowed') || errStr.toLowerCase().includes('recipient id is valid') || errStr.toLowerCase().includes('locked')) {
               patchBody.status = 'Needs Review';
             }
             await supabase.from('prospects').update(patchBody).eq('id', prospect.id);

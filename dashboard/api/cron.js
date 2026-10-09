@@ -200,7 +200,7 @@ export default async function handler(req, res) {
           }
         }
 
-        if (["Connection Request Sent", "Connection Sent", "Completed", "Failed", "Replied"].includes(p.status)) continue;
+        if (["Connection Request Sent", "Connection Sent", "Completed", "Failed", "Replied", "Needs Review", "Needs Attention"].includes(p.status)) continue;
 
         let currentNodeId = cv.current_node_id || startNode.id;
         let currentNode = nodesMap.get(currentNodeId);
@@ -290,7 +290,12 @@ export default async function handler(req, res) {
             }
           }
 
-          if (!providerId) continue;
+          if (!providerId) {
+            log(`Could not resolve providerId for ${pName || p.id}. Marking Needs Review.`);
+            cv.history = [...(cv.history || []), { node_type: "send_invitation", node_label: "Profile Not Found", status: "failed", error: "Invalid LinkedIn URL or profile locked", executed_at: new Date().toISOString() }];
+            await sbFetch(`prospects?id=eq.${p.id}`, { method: "PATCH", body: JSON.stringify({ status: "Needs Review", custom_variables: cv }) });
+            continue;
+          }
 
           const pName = p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim();
           log(`Sending connection invite to ${pName}...`);
@@ -337,7 +342,9 @@ export default async function handler(req, res) {
             const isFatal = errStr.toLowerCase().includes("cannot") ||
                             errStr.toLowerCase().includes("not allowed") ||
                             errStr.toLowerCase().includes("restricted") ||
-                            errStr.toLowerCase().includes("blocked");
+                            errStr.toLowerCase().includes("blocked") ||
+                            errStr.toLowerCase().includes("recipient id is valid") ||
+                            errStr.toLowerCase().includes("locked");
 
             const isProviderLimit = errStr.toLowerCase().includes("provider limit") ||
                                     errStr.toLowerCase().includes("rate limit") ||
