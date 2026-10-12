@@ -437,14 +437,47 @@ export default function Inbox() {
               attachments: m.attachments || [],
             }));
             newMsgs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
             setMessages(prev => {
-              const prevIds = new Set(prev.map(p => p.id));
-              const additions = newMsgs.filter(nm => !prevIds.has(nm.id));
-              if (additions.length > 0) {
-                const merged = [...prev, ...additions];
-                merged.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+              let updated = [...prev];
+              let hasChanges = false;
+
+              newMsgs.forEach(nm => {
+                const normServerText = (nm.text || '').trim().toLowerCase();
+                const serverTime = new Date(nm.timestamp).getTime();
+
+                // 1. Check if this server message matches an optimistic local message (sent_...)
+                const optIndex = updated.findIndex(p =>
+                  p.id && String(p.id).startsWith('sent_') &&
+                  p.sender === nm.sender &&
+                  (p.text || '').trim().toLowerCase() === normServerText &&
+                  Math.abs(new Date(p.timestamp).getTime() - serverTime) < 180_000
+                );
+
+                if (optIndex !== -1) {
+                  // Replace optimistic temporary message with the confirmed server message
+                  updated[optIndex] = nm;
+                  hasChanges = true;
+                } else {
+                  // 2. Check if already present by exact ID or identical content + close timestamp
+                  const alreadyExists = updated.some(p =>
+                    p.id === nm.id ||
+                    (p.sender === nm.sender &&
+                     (p.text || '').trim().toLowerCase() === normServerText &&
+                     Math.abs(new Date(p.timestamp).getTime() - serverTime) < 120_000)
+                  );
+
+                  if (!alreadyExists) {
+                    updated.push(nm);
+                    hasChanges = true;
+                  }
+                }
+              });
+
+              if (hasChanges) {
+                updated.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
                 setTimeout(scrollToBottom, 50);
-                return merged;
+                return updated;
               }
               return prev;
             });
@@ -491,6 +524,7 @@ export default function Inbox() {
   // 5. Live Message Sending with File Attachments & LocalStorage Persistence
   const handleSendMessage = async (e) => {
     if (e) e.preventDefault();
+    if (sending) return;
     if ((!inputText.trim() && attachedFiles.length === 0) || !selectedChat) return;
 
     const messageText = inputText.trim();
