@@ -141,9 +141,66 @@ export default async function handler(req, res) {
         if (fullName) relNames.set(fullName, r);
       });
 
+      // Pre-fetch recent messages to detect inbound prospect replies (is_sender === 0)
+      const { ok: msgOk, data: msgData } = await unipileFetch(`/messages?account_id=${accId}&limit=200`);
+      const recentMsgs = (msgOk && msgData && msgData.items) || [];
+      const inboundBySender = new Map();
+      recentMsgs.forEach(m => {
+        if (m.is_sender === 0 && m.sender_id) {
+          if (!inboundBySender.has(m.sender_id) || (m.timestamp || '') > (inboundBySender.get(m.sender_id).timestamp || '')) {
+            inboundBySender.set(m.sender_id, m);
+          }
+        }
+      });
+
       for (const p of prospects || []) {
         const st = p.status || "Not Contacted";
         const cv = p.custom_variables || {};
+
+        // ── 0. INBOUND REPLY RECONCILIATION ──
+        const pProviderId = p.provider_id || p.member_id;
+        const inboundMsg = pProviderId ? inboundBySender.get(pProviderId) : null;
+        if (inboundMsg) {
+          const outreachDate = p.message_sent_date || p.connection_sent_date || p.created_at;
+          const msgTime = inboundMsg.timestamp || '';
+          if (!outreachDate || msgTime > outreachDate) {
+            const replyText = inboundMsg.text || 'Inbound reply';
+            if (p.status !== 'Replied' || cv.reply_date !== msgTime) {
+              log(`[Reply Engine] Inbound reply detected from ${p.name || p.id}: "${replyText.slice(0, 60)}"`);
+              p.status = 'Replied';
+              cv.reply_date = msgTime;
+              cv.last_message = replyText;
+              const hist = cv.history || [];
+              if (!hist.some(h => h.node_type === 'reply_detected' && h.executed_at === msgTime)) {
+                hist.push({
+                  node_type: 'reply_detected',
+                  node_label: 'Prospect Replied',
+                  status: 'replied',
+                  reply_text: replyText,
+                  executed_at: msgTime
+                });
+              }
+              cv.history = hist;
+
+              await sbFetch(`prospects?id=eq.${p.id}`, {
+                method: 'PATCH',
+                body: JSON.stringify({
+                  status: 'Replied',
+                  custom_variables: cv
+                })
+              });
+
+              await sbFetch(`campaign_enrollments?prospect_id=eq.${p.id}`, {
+                method: 'PATCH',
+                body: JSON.stringify({
+                  status: 'replied',
+                  updated_at: new Date().toISOString()
+                })
+              });
+            }
+            continue; // Prospect replied! Immediately stop further sequence progression
+          }
+        }
 
         // Acceptance reconciliation
         if (st === 'Connection Request Sent' || st === 'Connection Sent' || p.connection_status === 'invitation_sent') {
@@ -200,7 +257,7 @@ export default async function handler(req, res) {
           }
         }
 
-        if (["Connection Request Sent", "Connection Sent", "Completed", "Failed", "Replied", "Needs Review", "Needs Attention"].includes(p.status)) continue;
+        if (["Connection Request Sent", "Connection Sent", "Completed", "Failed", "Replied", "Needs Review", "Needs Attention"].includes(p.status) || cv.reply_date) continue;
 
         let currentNodeId = cv.current_node_id || startNode.id;
         let currentNode = nodesMap.get(currentNodeId);

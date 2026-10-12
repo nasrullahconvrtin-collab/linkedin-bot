@@ -31,7 +31,7 @@ export default function Replies() {
       // 2. Fetch prospects filtered by user organization
       const { directGetProspects } = await import('../services/directServices');
       const { prospects: pData } = await directGetProspects({ limit: 1000 });
-      const repliedProspects = (pData || []).filter(p => p.campaign_id && (['replied', 'replied'].includes(p.status?.toLowerCase()) || p.reply_date));
+      const repliedProspects = (pData || []).filter(p => p.campaign_id && (p.status?.toLowerCase() === 'replied' || p.reply_date || p.custom_variables?.reply_date));
       setProspects(repliedProspects);
     } catch (err) {
       console.error('Error loading replies:', err);
@@ -51,7 +51,8 @@ export default function Replies() {
     return prospects.filter(p =>
       (p.name && p.name.toLowerCase().includes(q)) ||
       (p.company && p.company.toLowerCase().includes(q)) ||
-      (p.last_message && p.last_message.toLowerCase().includes(q))
+      (p.last_message && p.last_message.toLowerCase().includes(q)) ||
+      (p.custom_variables?.last_message && p.custom_variables.last_message.toLowerCase().includes(q))
     );
   }, [prospects, search]);
 
@@ -87,8 +88,8 @@ export default function Replies() {
       `"${p.company || ''}"`,
       `"${p.linkedin_url || ''}"`,
       `"${campaignsMap[p.campaign_id] || 'Direct Outreach'}"`,
-      `"${(p.last_message || 'Replied to campaign').replace(/"/g, '""')}"`,
-      `"${p.reply_date || p.updated_at || ''}"`
+      `"${(p.custom_variables?.last_message || p.last_message || 'Replied to campaign').replace(/"/g, '""')}"`,
+      `"${p.custom_variables?.reply_date || p.reply_date || p.updated_at || ''}"`
     ]);
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
@@ -273,7 +274,7 @@ export default function Replies() {
                           in
                         </span>
                         <p className="text-[#d1d5db] text-xs truncate leading-relaxed">
-                          {p.last_message || 'Replied to campaign invitation/message'}
+                          {p.custom_variables?.last_message || p.last_message || 'Replied to campaign invitation/message'}
                         </p>
                       </div>
                     </td>
@@ -287,7 +288,7 @@ export default function Replies() {
 
                     {/* Date */}
                     <td className="py-4 px-4 whitespace-nowrap text-xs text-[#9ca3af]">
-                      {formatDate(p.reply_date || p.updated_at)}
+                      {formatDate(p.custom_variables?.reply_date || p.reply_date || p.updated_at)}
                     </td>
 
                     {/* Quick Actions */}
