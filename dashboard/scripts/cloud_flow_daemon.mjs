@@ -55,6 +55,61 @@ function getProfileDateStr(dateOrIso, timezone) {
   }
 }
 
+function extractCompanyFromHeadline(headline) {
+  if (!headline) return '';
+  const atMatch = String(headline).match(/(?:@|at)\s+([A-Za-z0-9&.\-'\s]+?)(?:\s*(?:\(|\||-|,|\/|$))/i);
+  if (atMatch && atMatch[1].trim()) return atMatch[1].trim();
+  return '';
+}
+
+function renderTemplate(templateText, prospect) {
+  if (!templateText) return '';
+  let text = String(templateText);
+  const cv = prospect.custom_variables || {};
+  const cf = prospect.custom_fields || {};
+
+  const matches = text.match(/\{\{\s*([a-zA-Z0-9_\-\s|]+)\s*\}\}/g) || [];
+  for (const m of matches) {
+    const rawInner = m.replace(/\{\{\s*|\s*\}\}/g, '').trim();
+    let [varName, fallback] = rawInner.split('|').map(s => s.trim());
+    const normVar = (varName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    let resolvedValue = '';
+    if (normVar === 'firstname' || normVar === 'first_name') {
+      resolvedValue = prospect.first_name || cv.first_name || (prospect.name ? prospect.name.split(' ')[0] : '');
+    } else if (normVar === 'lastname' || normVar === 'last_name') {
+      resolvedValue = prospect.last_name || cv.last_name || (prospect.name ? prospect.name.split(' ').slice(1).join(' ') : '');
+    } else if (normVar === 'company' || normVar === 'companyname') {
+      resolvedValue = prospect.company || cv.company || cf.company || '';
+      if (!resolvedValue && (prospect.headline || cv.headline)) {
+        resolvedValue = extractCompanyFromHeadline(prospect.headline || cv.headline);
+      }
+      if (!resolvedValue) {
+        resolvedValue = fallback || 'your company';
+      }
+    } else if (normVar === 'jobtitle' || normVar === 'title' || normVar === 'position') {
+      resolvedValue = prospect.job_title || cv.job_title || cv.title || cf.job_title || '';
+      if (!resolvedValue) resolvedValue = fallback || '';
+    } else if (normVar === 'location' || normVar === 'city') {
+      resolvedValue = prospect.location || cv.location || cf.location || '';
+      if (!resolvedValue) resolvedValue = fallback || '';
+    } else if (normVar === 'email') {
+      resolvedValue = prospect.email || cv.email || cf.email || '';
+      if (!resolvedValue) resolvedValue = fallback || '';
+    } else {
+      resolvedValue = prospect[varName] || cv[varName] || cf[varName] || fallback || '';
+    }
+
+    text = text.replace(m, resolvedValue !== undefined && resolvedValue !== null ? String(resolvedValue) : '');
+  }
+
+  if (text.includes('\\n') || text.includes('\\r')) {
+    text = text.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\r/g, '\n');
+  }
+
+  return text;
+}
+
 async function runCloudFlow() {
   const { data: campaigns, error: campErr } = await supabase.from('campaigns').select('*').eq('status', 'running');
   if (campErr) {
@@ -370,6 +425,20 @@ async function runCloudFlow() {
           const providerId = (ok && data) ? (data.provider_id || data.id) : prospect.provider_id;
           prospect.provider_id = providerId || prospect.provider_id;
 
+          if (ok && data) {
+            if (data.headline && !prospect.headline) {
+              prospect.headline = data.headline;
+              cv.headline = data.headline;
+            }
+            if (!prospect.company && !cv.company) {
+              const comp = data.company || extractCompanyFromHeadline(data.headline);
+              if (comp) {
+                prospect.company = comp;
+                cv.company = comp;
+              }
+            }
+          }
+
           const nowIso = new Date().toISOString();
           cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'visit_profile', node_label: 'Visit Profile', executed_at: nowIso, status: 'success' }];
           cv.visited_at = nowIso;
@@ -386,7 +455,10 @@ async function runCloudFlow() {
             cv.current_node_id = currentNodeId;
           }
 
-          await supabase.from('prospects').update({ provider_id: prospect.provider_id, custom_variables: cv }).eq('id', prospect.id);
+          const patchObj = { provider_id: prospect.provider_id, custom_variables: cv };
+          if (prospect.company) patchObj.company = prospect.company;
+          if (prospect.headline) patchObj.headline = prospect.headline;
+          await supabase.from('prospects').update(patchObj).eq('id', prospect.id);
         }
       }
 
@@ -457,7 +529,7 @@ async function runCloudFlow() {
         }
 
         const hasNoteToggle = nodeConfig.add_note || nodeConfig.include_note || nodeConfig.send_note;
-        const noteText = hasNoteToggle ? (nodeConfig.note || '').replace(/\{\{\s*first_name\s*\}\}/gi, prospect.first_name || '') : '';
+        const noteText = hasNoteToggle ? renderTemplate(nodeConfig.note || '', prospect) : '';
 
         console.log(`[Railway 24/7 Daemon] Dispatched Connection Invite #${todayConnectionsTotal + 1} to ${prospect.first_name || ''} ${prospect.last_name || ''}...`);
         const res = await unipileFetch('/users/invite', {
@@ -549,7 +621,7 @@ async function runCloudFlow() {
 
         if (recipientId) {
           const rawMsg = nodeConfig.message || '';
-          const msgText = (rawMsg || '').replace(/\{\{\s*first_name\s*\}\}/gi, prospect.first_name || '').trim();
+          const msgText = renderTemplate(rawMsg, prospect).trim();
           if (msgText) {
             console.log(`[Railway 24/7 Daemon] Sending message to ${prospect.first_name || ''} ${prospect.last_name || ''}...`);
             const res = await unipileFetch('/chats', {
@@ -648,7 +720,7 @@ async function runCloudFlow() {
               formData.append('voice_message', audioBlob, voiceFileName);
 
               if (nodeConfig.companion_text) {
-                const compText = (nodeConfig.companion_text || '').replace(/\{\{\s*first_name\s*\}\}/gi, prospect.first_name || '').trim();
+                const compText = renderTemplate(nodeConfig.companion_text || '', prospect).trim();
                 if (compText) formData.append('text', compText);
               }
 

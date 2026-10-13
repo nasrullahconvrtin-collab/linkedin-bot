@@ -48,28 +48,58 @@ function extractPublicId(url) {
   return String(url).replace(/^https?:\/\//, "").replace("www.linkedin.com/in/", "").replace(/\/$/, "").trim();
 }
 
+function extractCompanyFromHeadline(headline) {
+  if (!headline) return '';
+  const atMatch = String(headline).match(/(?:@|at)\s+([A-Za-z0-9&.\-'\s]+?)(?:\s*(?:\(|\||-|,|\/|$))/i);
+  if (atMatch && atMatch[1].trim()) return atMatch[1].trim();
+  return '';
+}
+
 function renderTemplate(templateText, prospect) {
   if (!templateText) return "";
   let text = String(templateText);
-  const matches = text.match(/\{\{\s*([a-zA-Z0-9_\-\s]+)\s*\}\}/g) || [];
+  const cv = prospect.custom_variables || {};
+  const cf = prospect.custom_fields || {};
+
+  const matches = text.match(/\{\{\s*([a-zA-Z0-9_\-\s|]+)\s*\}\}/g) || [];
   for (const m of matches) {
-    const varName = m.replace(/\{\{\s*|\s*\}\}/g, "").trim();
+    const rawInner = m.replace(/\{\{\s*|\s*\}\}/g, "").trim();
+    let [varName, fallback] = rawInner.split('|').map(s => s.trim());
     const norm = (v) => v.toLowerCase().replace(/[^a-z0-9]/g, "");
-    const normVar = norm(varName);
+    const normVar = norm(varName || '');
+
     let resolvedValue = "";
     if (normVar === "firstname" || normVar === "first_name") {
-      resolvedValue = prospect.first_name || prospect.custom_variables?.first_name || (prospect.name ? prospect.name.split(" ")[0] : "");
+      resolvedValue = prospect.first_name || cv.first_name || (prospect.name ? prospect.name.split(" ")[0] : "");
     } else if (normVar === "lastname" || normVar === "last_name") {
-      resolvedValue = prospect.last_name || prospect.custom_variables?.last_name || (prospect.name ? prospect.name.split(" ").slice(1).join(" ") : "");
-    } else if (normVar === "company") {
-      resolvedValue = prospect.company || prospect.custom_variables?.company || "";
-    } else if (normVar === "title" || normVar === "jobtitle") {
-      resolvedValue = prospect.job_title || prospect.custom_variables?.job_title || prospect.custom_variables?.title || "";
+      resolvedValue = prospect.last_name || cv.last_name || (prospect.name ? prospect.name.split(" ").slice(1).join(" ") : "");
+    } else if (normVar === "company" || normVar === "companyname") {
+      resolvedValue = prospect.company || cv.company || cf.company || "";
+      if (!resolvedValue && (prospect.headline || cv.headline)) {
+        resolvedValue = extractCompanyFromHeadline(prospect.headline || cv.headline);
+      }
+      if (!resolvedValue) {
+        resolvedValue = fallback || "your company";
+      }
+    } else if (normVar === "title" || normVar === "jobtitle" || normVar === "position") {
+      resolvedValue = prospect.job_title || cv.job_title || cv.title || cf.job_title || "";
+      if (!resolvedValue) resolvedValue = fallback || "";
+    } else if (normVar === "location" || normVar === "city") {
+      resolvedValue = prospect.location || cv.location || cf.location || "";
+      if (!resolvedValue) resolvedValue = fallback || "";
+    } else if (normVar === "email") {
+      resolvedValue = prospect.email || cv.email || cf.email || "";
+      if (!resolvedValue) resolvedValue = fallback || "";
     } else {
-      resolvedValue = prospect[varName] || prospect.custom_variables?.[varName] || "";
+      resolvedValue = prospect[varName] || cv[varName] || cf[varName] || fallback || "";
     }
-    text = text.replace(m, resolvedValue || "");
+    text = text.replace(m, resolvedValue !== undefined && resolvedValue !== null ? String(resolvedValue) : "");
   }
+
+  if (text.includes('\\n') || text.includes('\\r')) {
+    text = text.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\r/g, '\n');
+  }
+
   return text;
 }
 
@@ -313,6 +343,20 @@ export default async function handler(req, res) {
           const providerId = (ok && data) ? (data.provider_id || data.id) : p.provider_id;
           p.provider_id = providerId || p.provider_id;
 
+          if (ok && data) {
+            if (data.headline && !p.headline) {
+              p.headline = data.headline;
+              cv.headline = data.headline;
+            }
+            if (!p.company && !cv.company) {
+              const comp = data.company || extractCompanyFromHeadline(data.headline);
+              if (comp) {
+                p.company = comp;
+                cv.company = comp;
+              }
+            }
+          }
+
           const nowIso = new Date().toISOString();
           cv.history = [...(cv.history || []), { node_type: "visit_profile", node_label: "Visit Profile", status: "success", executed_at: nowIso }];
 
@@ -326,9 +370,12 @@ export default async function handler(req, res) {
             cv.current_node_id = currentNodeId;
           }
 
+          const patchObj = { provider_id: p.provider_id, custom_variables: cv };
+          if (p.company) patchObj.company = p.company;
+          if (p.headline) patchObj.headline = p.headline;
           await sbFetch(`prospects?id=eq.${p.id}`, {
             method: "PATCH",
-            body: JSON.stringify({ provider_id: p.provider_id, custom_variables: cv })
+            body: JSON.stringify(patchObj)
           });
         }
 
@@ -387,10 +434,13 @@ export default async function handler(req, res) {
           }
 
           const pName = p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim();
+          const hasNoteToggle = nodeConfig.add_note || nodeConfig.include_note || nodeConfig.send_note;
+          const noteText = hasNoteToggle ? renderTemplate(nodeConfig.note || '', p) : '';
+
           log(`Sending connection invite to ${pName}...`);
           const { ok, data } = await unipileFetch("/users/invite", {
             method: "POST",
-            body: JSON.stringify({ account_id: accId, provider_id: providerId, message: "" })
+            body: JSON.stringify({ account_id: accId, provider_id: providerId, message: noteText || "" })
           });
 
           const nowIso = new Date().toISOString();
