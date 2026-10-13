@@ -51,12 +51,18 @@ async function runCloudFlow() {
     if (!accountId) continue;
 
     const settings = profile?.settings || {};
-    const dailyConnectionLimit = Number(settings.daily_connection_limit || 20);
-    const globalDailyLimit = Number(settings.global_daily_limit || 40);
+    const dailyConnectionLimit = Number(settings.daily_connection_limit || 25);
+    const dailyMessageLimit = Number(settings.daily_message_limit || 140);
+    const dailyVisitLimit = Number(settings.daily_visit_limit || 30);
+    const configuredGlobalLimit = Number(settings.global_daily_limit || 0);
+    const sumOfLimits = dailyConnectionLimit + dailyMessageLimit + dailyVisitLimit;
+    const globalDailyLimit = configuredGlobalLimit > 0 ? Math.max(configuredGlobalLimit, sumOfLimits) : sumOfLimits;
 
     // Calculate today's executed actions count across all prospects for this organization
     let todayActionsTotal = 0;
     let todayConnectionsTotal = 0;
+    let todayMessagesTotal = 0;
+    let todayVisitsTotal = 0;
     try {
       let query = supabase.from('prospects').select('custom_variables');
       if (orgId) query = query.eq('organization_id', orgId);
@@ -66,21 +72,13 @@ async function runCloudFlow() {
         history.forEach(h => {
           if (h.executed_at && h.executed_at.startsWith(todayDateStr)) {
             todayActionsTotal += 1;
-            if (h.node_type === 'send_invitation') todayConnectionsTotal += 1;
+            if (h.node_type === 'send_invitation' && h.status === 'success') todayConnectionsTotal += 1;
+            if ((h.node_type === 'send_message' || h.node_type === 'send_voice_message') && h.status === 'success') todayMessagesTotal += 1;
+            if (h.node_type === 'visit_profile' && h.status === 'success') todayVisitsTotal += 1;
           }
         });
       });
     } catch (e) {}
-
-    if (todayConnectionsTotal >= dailyConnectionLimit) {
-      console.log(`[Campaign: ${campaign.name}] Daily connection limit reached (${todayConnectionsTotal}/${dailyConnectionLimit}). Skipping.`);
-      continue;
-    }
-
-    if (todayActionsTotal >= globalDailyLimit) {
-      console.log(`[Campaign: ${campaign.name}] Global daily actions limit reached (${todayActionsTotal}/${globalDailyLimit}). Skipping.`);
-      continue;
-    }
 
     const flowSequence = campaign.sequence_config?.flow_sequence;
     if (!flowSequence || !Array.isArray(flowSequence.nodes) || flowSequence.nodes.length === 0) continue;
@@ -97,6 +95,22 @@ async function runCloudFlow() {
     if (!startNode) continue;
 
     const { data: prospects } = await supabase.from('prospects').select('*').eq('campaign_id', campaign.id);
+
+    // Pre-fetch 1st-degree relations to detect accepted connection requests
+    const { ok: relOk, data: relData } = await unipileFetch(`/users/relations?account_id=${accountId}&limit=100`);
+    const relations = (relOk && relData && (relData.items || relData.relations)) || [];
+    const relSlugs = new Set();
+    const relMemberIds = new Set();
+    const relNames = new Map();
+    relations.forEach(r => {
+      if (r.public_identifier) relSlugs.add(r.public_identifier.toLowerCase().trim());
+      const pubUrlSlug = extractPublicId(r.public_profile_url);
+      if (pubUrlSlug) relSlugs.add(pubUrlSlug.toLowerCase().trim());
+      if (r.member_id) relMemberIds.add(r.member_id);
+      const fullName = `${r.first_name || ''} ${r.last_name || ''}`.toLowerCase().trim();
+      if (fullName) relNames.set(fullName, r);
+    });
+
     // Pre-fetch recent messages from Unipile to detect inbound prospect replies
     const { ok: msgOk, data: msgData } = await unipileFetch(`/messages?account_id=${accountId}&limit=200`);
     const recentMsgs = (msgOk && msgData && msgData.items) || [];
@@ -109,8 +123,8 @@ async function runCloudFlow() {
       }
     });
 
-    // Process prospects one-by-one focusing directly on today's connection request goal
-    for (const prospect of prospects) {
+    // Process prospects one-by-one focusing directly on today's goals
+    for (const prospect of prospects || []) {
       const cv = prospect.custom_variables || {};
 
       // ── 0. INBOUND REPLY RECONCILIATION ──
@@ -152,12 +166,57 @@ async function runCloudFlow() {
         }
       }
 
-      if (todayConnectionsTotal >= dailyConnectionLimit) {
-        console.log(`🎯 Goal Reached: Sent daily target of ${todayConnectionsTotal}/${dailyConnectionLimit} connection requests today for ${campaign.name}!`);
-        break;
+      // ── 0b. ACCEPTANCE RECONCILIATION ──
+      const isPendingInvite = prospect.status === 'Connection Request Sent' || prospect.status === 'Connection Sent' || prospect.connection_status === 'invitation_sent';
+      const pPubId = extractPublicId(prospect.linkedin_url);
+      const pName = (prospect.name || `${prospect.first_name || ''} ${prospect.last_name || ''}`).toLowerCase().trim();
+      const isAccepted = (pPubId && relSlugs.has(pPubId.toLowerCase().trim())) ||
+                         (prospect.member_id && relMemberIds.has(prospect.member_id)) ||
+                         (pName && relNames.has(pName));
+
+      if (isPendingInvite && isAccepted) {
+        const relObj = pName && relNames.get(pName);
+        const acceptedAt = relObj?.created_at ? new Date(relObj.created_at).toISOString() : new Date().toISOString();
+        console.log(`[Runner] 🤝 Connection acceptance detected for ${prospect.name || prospect.id}! Transitioning to Connection Accepted.`);
+        prospect.status = 'Connection Accepted';
+        prospect.connection_status = 'connected';
+        prospect.accepted_at = acceptedAt;
+
+        const hist = cv.history || [];
+        if (!hist.some(h => (h.node_type || '').includes('accept'))) {
+          hist.push({
+            node_type: 'connection_accepted',
+            node_label: 'Connection Accepted',
+            status: 'success',
+            executed_at: acceptedAt
+          });
+        }
+        cv.history = hist;
+        cv.accepted_at = acceptedAt;
+
+        let cNodeId = cv.current_node_id || startNode.id;
+        let cEdges = sourceEdgesMap.get(cNodeId) || [];
+        let cNextEdge = cEdges.find(e => !e.data?.condition || e.data.condition === 'default') || cEdges[0];
+        if (cNextEdge?.target) {
+          cv.current_node_id = cNextEdge.target;
+        }
+
+        await supabase.from('prospects').update({
+          status: 'Connection Accepted',
+          connection_status: 'connected',
+          accepted_at: acceptedAt,
+          custom_variables: cv
+        }).eq('id', prospect.id);
+
+        await supabase.from('campaign_enrollments').update({
+          status: 'connected',
+          updated_at: new Date().toISOString()
+        }).eq('prospect_id', prospect.id);
+      } else if (isPendingInvite && !isAccepted) {
+        continue; // Still waiting for prospect to accept invitation
       }
-      if (['Completed', 'Failed', 'Replied', 'Connection Request Sent', 'Needs Review', 'Needs Attention'].includes(prospect.status) || cv.reply_date) continue;
-      if (prospect.connection_status === 'invitation_sent' || prospect.connection_status === 'connected') continue;
+
+      if (['Completed', 'Failed', 'Replied', 'Needs Review', 'Needs Attention'].includes(prospect.status) || cv.reply_date) continue;
       let currentNodeId = cv.current_node_id || startNode.id;
       let currentNode = nodesMap.get(currentNodeId);
 
@@ -236,6 +295,28 @@ async function runCloudFlow() {
 
       // ── Step 3: SEND INVITATION (Achieving Today's Goal Immediately) ─────
       if (nodeType === 'send_invitation') {
+        const isAlreadyConnected = prospect.connection_status === 'connected' ||
+          prospect.status === 'Connection Accepted' ||
+          (pPubId && relSlugs.has(pPubId.toLowerCase().trim())) ||
+          (prospect.member_id && relMemberIds.has(prospect.member_id));
+
+        if (isAlreadyConnected) {
+          console.log(`[Runner] Prospect ${prospect.name || prospect.id} is already connected. Advancing past invite step.`);
+          prospect.connection_status = 'connected';
+          if (nextEdge) {
+            currentNodeId = nextEdge.target;
+            currentNode = nodesMap.get(currentNodeId);
+            nodeType = currentNode?.data?.nodeType || currentNode?.type;
+            nodeConfig = currentNode?.data?.config || {};
+            edges = sourceEdgesMap.get(currentNode?.id) || [];
+            nextEdge = edges.find(e => !e.data?.condition || e.data.condition === 'default') || edges[0];
+            cv.current_node_id = currentNodeId;
+            await supabase.from('prospects').update({ connection_status: 'connected', custom_variables: cv }).eq('id', prospect.id);
+          }
+        } else if (todayConnectionsTotal >= dailyConnectionLimit) {
+          console.log(`[Runner] 🎯 Connection Limit Reached: Sent daily target of ${todayConnectionsTotal}/${dailyConnectionLimit} connections. Skipping invite for ${prospect.name || prospect.id}.`);
+          continue;
+        } else {
         let providerId = prospect.provider_id;
         if (!providerId) {
           const pubId = extractPublicId(prospect.linkedin_url);
@@ -259,11 +340,11 @@ async function runCloudFlow() {
           body: JSON.stringify({ account_id: accountId, provider_id: providerId, message: noteText })
         });
 
-        todayActionsTotal += 1;
-        todayConnectionsTotal += 1;
         const nowIso = new Date().toISOString();
 
         if (res.ok) {
+          todayActionsTotal += 1;
+          todayConnectionsTotal += 1;
           console.log(`[Goal Engine] ✅ Connection Invite #${todayConnectionsTotal} SENT to ${prospect.name}`);
           cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', node_label: 'Connection Request Sent', executed_at: nowIso, status: 'success' }];
           cv.invitation_sent_at = nowIso;
@@ -308,10 +389,16 @@ async function runCloudFlow() {
             }
           }
         }
+        }
       }
 
       // ── Step 4: Send Message ─────────────────────────────────────────────
       if (nodeType === 'send_message') {
+        if (todayMessagesTotal >= dailyMessageLimit) {
+          console.log(`[Runner] 🎯 Message Limit Reached: Sent daily target of ${todayMessagesTotal}/${dailyMessageLimit} messages. Skipping message for ${prospect.name || prospect.id}.`);
+          continue;
+        }
+
         let recipientId = prospect.provider_id || prospect.member_id;
         if (!recipientId) {
           const pubId = extractPublicId(prospect.linkedin_url);
@@ -337,6 +424,8 @@ async function runCloudFlow() {
 
             const nowIso = new Date().toISOString();
             if (res.ok) {
+              todayActionsTotal += 1;
+              todayMessagesTotal += 1;
               console.log(`[Runner] ✅ Message SENT to ${prospect.first_name || ''} ${prospect.last_name || ''}`);
               cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_message', node_label: currentNode.data?.label || 'Send Message', executed_at: nowIso, status: 'success' }];
               cv.last_sent_node_id = currentNode.id;
@@ -361,6 +450,11 @@ async function runCloudFlow() {
 
       // ── Step 5: Send Voice Message (Native LinkedIn Voice Note) ──────────
       if (nodeType === 'send_voice_message') {
+        if (todayMessagesTotal >= dailyMessageLimit) {
+          console.log(`[Runner] 🎯 Message/Voice Limit Reached: Sent daily target of ${todayMessagesTotal}/${dailyMessageLimit} messages/voice notes. Skipping voice note for ${prospect.name || prospect.id}.`);
+          continue;
+        }
+
         let recipientId = prospect.provider_id || prospect.member_id;
         if (!recipientId) {
           const pubId = extractPublicId(prospect.linkedin_url);
@@ -408,6 +502,8 @@ async function runCloudFlow() {
 
               const nowIso = new Date().toISOString();
               if (ok) {
+                todayActionsTotal += 1;
+                todayMessagesTotal += 1;
                 console.log(`[Runner] ✅ Voice note SENT to ${prospect.first_name || ''} ${prospect.last_name || ''}`);
                 cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_voice_message', node_label: currentNode.data?.label || 'Send Voice Note', executed_at: nowIso, status: 'success' }];
                 cv.last_sent_node_id = currentNode.id;
