@@ -2334,6 +2334,81 @@ export const directSendUnipileChatMessageWithAttachments = async (chatId, text =
   }
 };
 
+export const directSendUnipileVoiceMessageInChat = async (chatId, audioBlobOrFile, companionText = '', overrideAccountId = null) => {
+  try {
+    let accountId = overrideAccountId;
+    if (!accountId) {
+      const userProfiles = await directGetProfiles();
+      accountId = userProfiles?.[0]?.unipile_account_id;
+    }
+    if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
+
+    const formData = new FormData();
+    formData.append('account_id', accountId);
+
+    // LinkedIn expects voice note attachments with .m4a extension and 'voice_message' form key
+    const fileName = (audioBlobOrFile && audioBlobOrFile.name && audioBlobOrFile.name.endsWith('.m4a'))
+      ? audioBlobOrFile.name
+      : 'voice_message.m4a';
+    formData.append('voice_message', audioBlobOrFile, fileName);
+
+    if (companionText && companionText.trim()) {
+      formData.append('text', companionText.trim());
+    }
+
+    const { ok, data } = await unipileFormFetch(`/chats/${encodeURIComponent(chatId)}/messages`, formData);
+    return { success: ok, data };
+  } catch (err) {
+    console.error('directSendUnipileVoiceMessageInChat error:', err);
+    return { success: false, error: err.message };
+  }
+};
+
+export const directSendUnipileVoiceMessage = async (prospect, audioBlobOrFile, companionText = '', overrideAccountId = null) => {
+  try {
+    const recipientId = getLinkedinId(prospect);
+    let accountId = overrideAccountId;
+    if (!accountId) {
+      const userProfiles = await directGetProfiles();
+      accountId = userProfiles?.[0]?.unipile_account_id;
+    }
+    if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
+
+    await humanPause(5, 12, 'Preparing voice note');
+
+    const formData = new FormData();
+    formData.append('account_id', accountId);
+    formData.append('attendees_ids', recipientId);
+
+    const fileName = (audioBlobOrFile && audioBlobOrFile.name && audioBlobOrFile.name.endsWith('.m4a'))
+      ? audioBlobOrFile.name
+      : 'voice_message.m4a';
+    formData.append('voice_message', audioBlobOrFile, fileName);
+
+    const textToInclude = companionText || prospect.voice_companion_text || prospect.custom_variables?.voice_companion_text || '';
+    if (textToInclude && textToInclude.trim()) {
+      formData.append('text', textToInclude.trim());
+    }
+
+    const { ok, data } = await unipileFormFetch('/chats', formData);
+    if (ok) {
+      try {
+        const nextStatus = prospect.status === 'Following Up' || prospect.status === 'Message Sent' ? prospect.status : 'Initial Message Sent';
+        await supabaseDirect.from('prospects').update({
+          status: nextStatus,
+          message_sent_date: new Date().toISOString(),
+        }).eq('id', prospect.id);
+      } catch (e) {
+        console.warn('Supabase update warning:', e);
+      }
+    }
+    return { success: ok, data };
+  } catch (err) {
+    console.error('directSendUnipileVoiceMessage error:', err);
+    return { success: false, error: err.message };
+  }
+};
+
 export const directSendUnipileInMail = async (prospect, subject = '', text = '', overrideAccountId = null) => {
   const recipientId = getLinkedinId(prospect);
   let accountId = overrideAccountId;

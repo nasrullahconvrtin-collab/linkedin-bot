@@ -309,6 +309,133 @@ async function runCloudFlow() {
           }
         }
       }
+
+      // ── Step 4: Send Message ─────────────────────────────────────────────
+      if (nodeType === 'send_message') {
+        let recipientId = prospect.provider_id || prospect.member_id;
+        if (!recipientId) {
+          const pubId = extractPublicId(prospect.linkedin_url);
+          if (pubId) {
+            const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(pubId)}?account_id=${accountId}`);
+            if (ok && data) recipientId = data.provider_id || data.id;
+          }
+        }
+
+        if (recipientId) {
+          const rawMsg = nodeConfig.message || '';
+          const msgText = (rawMsg || '').replace(/\{\{\s*first_name\s*\}\}/gi, prospect.first_name || '').trim();
+          if (msgText) {
+            console.log(`[Runner] Sending message to ${prospect.first_name || ''} ${prospect.last_name || ''}...`);
+            const res = await unipileFetch('/chats', {
+              method: 'POST',
+              body: JSON.stringify({
+                account_id: accountId,
+                attendees_ids: [recipientId],
+                text: msgText
+              })
+            });
+
+            const nowIso = new Date().toISOString();
+            if (res.ok) {
+              console.log(`[Runner] ✅ Message SENT to ${prospect.first_name || ''} ${prospect.last_name || ''}`);
+              cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_message', node_label: currentNode.data?.label || 'Send Message', executed_at: nowIso, status: 'success' }];
+              cv.last_sent_node_id = currentNode.id;
+              cv.message_sent_at = nowIso;
+              cv.last_action_at = nowIso;
+              if (nextEdge) cv.current_node_id = nextEdge.target;
+
+              const isFollowUp = (currentNode.data?.label || '').toLowerCase().includes('follow') || rawMsg.toLowerCase().includes('follow');
+              await supabase.from('prospects').update({
+                status: isFollowUp ? 'Following Up' : 'Initial Message Sent',
+                message_sent_date: nowIso,
+                custom_variables: cv
+              }).eq('id', prospect.id);
+            } else {
+              console.warn(`[Runner] ⚠️ Message failed for ${prospect.first_name || ''}:`, res.data?.detail || res.status);
+              cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_message', node_label: currentNode.data?.label || 'Send Message', executed_at: nowIso, status: 'failed', error: res.data?.detail || 'Failed' }];
+              await supabase.from('prospects').update({ custom_variables: cv }).eq('id', prospect.id);
+            }
+          }
+        }
+      }
+
+      // ── Step 5: Send Voice Message (Native LinkedIn Voice Note) ──────────
+      if (nodeType === 'send_voice_message') {
+        let recipientId = prospect.provider_id || prospect.member_id;
+        if (!recipientId) {
+          const pubId = extractPublicId(prospect.linkedin_url);
+          if (pubId) {
+            const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(pubId)}?account_id=${accountId}`);
+            if (ok && data) recipientId = data.provider_id || data.id;
+          }
+        }
+
+        if (recipientId && nodeConfig.voice_url) {
+          try {
+            let audioBlob = null;
+            if (nodeConfig.voice_url.startsWith('data:audio/')) {
+              const commaIdx = nodeConfig.voice_url.indexOf(',');
+              const base64Str = commaIdx !== -1 ? nodeConfig.voice_url.slice(commaIdx + 1) : nodeConfig.voice_url;
+              const buffer = Buffer.from(base64Str, 'base64');
+              audioBlob = new Blob([buffer], { type: 'audio/mp4' });
+            } else if (nodeConfig.voice_url.startsWith('http://') || nodeConfig.voice_url.startsWith('https://')) {
+              const aRes = await fetch(nodeConfig.voice_url);
+              audioBlob = await aRes.blob();
+            }
+
+            if (audioBlob) {
+              console.log(`[Runner] Sending voice note to ${prospect.first_name || ''} ${prospect.last_name || ''}...`);
+              const formData = new FormData();
+              formData.append('account_id', accountId);
+              formData.append('attendees_ids', recipientId);
+              const voiceFileName = nodeConfig.voice_file_name && nodeConfig.voice_file_name.endsWith('.m4a')
+                ? nodeConfig.voice_file_name
+                : 'voice_note.m4a';
+              formData.append('voice_message', audioBlob, voiceFileName);
+
+              if (nodeConfig.companion_text) {
+                const compText = (nodeConfig.companion_text || '').replace(/\{\{\s*first_name\s*\}\}/gi, prospect.first_name || '').trim();
+                if (compText) formData.append('text', compText);
+              }
+
+              const vRes = await fetch(`${UNIPILE_BASE_URL}/chats`, {
+                method: 'POST',
+                headers: { 'X-API-KEY': UNIPILE_API_KEY },
+                body: formData
+              });
+              const ok = vRes.ok;
+              const vData = await vRes.json().catch(() => ({}));
+
+              const nowIso = new Date().toISOString();
+              if (ok) {
+                console.log(`[Runner] ✅ Voice note SENT to ${prospect.first_name || ''} ${prospect.last_name || ''}`);
+                cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_voice_message', node_label: currentNode.data?.label || 'Send Voice Note', executed_at: nowIso, status: 'success' }];
+                cv.last_sent_node_id = currentNode.id;
+                cv.message_sent_at = nowIso;
+                cv.last_action_at = nowIso;
+                if (nextEdge) cv.current_node_id = nextEdge.target;
+
+                await supabase.from('prospects').update({
+                  status: 'Initial Message Sent',
+                  message_sent_date: nowIso,
+                  custom_variables: cv
+                }).eq('id', prospect.id);
+              } else {
+                console.warn(`[Runner] ⚠️ Voice note failed for ${prospect.first_name || ''}:`, vData?.detail || vRes.status);
+                cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_voice_message', node_label: currentNode.data?.label || 'Send Voice Note', executed_at: nowIso, status: 'failed', error: vData?.detail || 'Failed' }];
+                await supabase.from('prospects').update({ custom_variables: cv }).eq('id', prospect.id);
+              }
+            }
+          } catch (err) {
+            console.error(`[Runner] Error dispatching voice note:`, err);
+          }
+        }
+      }
+
+      // ── Step 6: Completed Node ───────────────────────────────────────────
+      if (nodeType === 'completed') {
+        await supabase.from('prospects').update({ status: 'Completed', custom_variables: cv }).eq('id', prospect.id);
+      }
     }
   }
 

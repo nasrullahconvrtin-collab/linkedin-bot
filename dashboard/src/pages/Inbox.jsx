@@ -5,7 +5,8 @@ import {
   Paperclip, FileText, Trash2, Archive, Check, Sparkles, User,
   Building, MapPin, Briefcase, Mail, RefreshCw, ThumbsUp, HelpCircle, PlayCircle,
   Phone, Globe, Users as UsersIcon, Download, Eye, X, CheckCheck, Clock, Calendar,
-  CornerDownLeft, MessageCircle, Copy, CheckCircle2, ShieldCheck, Tag
+  CornerDownLeft, MessageCircle, Copy, CheckCircle2, ShieldCheck, Tag,
+  Mic, Square, Play, Pause, Volume2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
@@ -13,6 +14,7 @@ import {
   supabaseDirect,
   directSendUnipileChatMessage,
   directSendUnipileChatMessageWithAttachments,
+  directSendUnipileVoiceMessageInChat,
   directGetUnipileChats,
   directGetChatMessages,
   directGetUnipileUserProfile
@@ -102,10 +104,12 @@ function getDateDividerLabel(isoStr) {
 }
 
 function resolveAttachmentUrl(att) {
-  if (!att?.url) return null;
-  if (typeof att.url === 'string' && att.url.startsWith('att://')) {
+  if (!att) return null;
+  const rawUrl = att.url || att.file_url || att.download_url || att.src;
+  if (!rawUrl) return null;
+  if (typeof rawUrl === 'string' && rawUrl.startsWith('att://')) {
     try {
-      const parts = att.url.split('/');
+      const parts = rawUrl.split('/');
       const encoded = parts[parts.length - 1];
       const decoded = atob(decodeURIComponent(encoded));
       if (decoded.startsWith('http://') || decoded.startsWith('https://')) {
@@ -115,7 +119,7 @@ function resolveAttachmentUrl(att) {
       // Fallback
     }
   }
-  return typeof att.url === 'string' ? att.url : null;
+  return typeof rawUrl === 'string' ? rawUrl : null;
 }
 
 function isImageAttachment(att) {
@@ -125,6 +129,105 @@ function isImageAttachment(att) {
   if (att.sticker) return true;
   const url = resolveAttachmentUrl(att) || '';
   return /\.(png|jpe?g|gif|webp|svg)(\?.*)?$/i.test(url);
+}
+
+function isAudioAttachment(att) {
+  if (!att) return false;
+  if (att.type === 'voice_message' || att.type === 'audio' || (typeof att.type === 'string' && att.type.startsWith('audio/'))) return true;
+  if (typeof att.mimetype === 'string' && att.mimetype.startsWith('audio/')) return true;
+  if (typeof att.mime_type === 'string' && att.mime_type.startsWith('audio/')) return true;
+  const name = att.name || att.filename || att.file_name || '';
+  const url = resolveAttachmentUrl(att) || '';
+  return /\.(m4a|mp3|wav|ogg|aac|webm)(\?.*)?$/i.test(name) || /\.(m4a|mp3|wav|ogg|aac|webm)(\?.*)?$/i.test(url);
+}
+
+function AudioMessagePlayer({ src, fileName, isMe }) {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [totalDuration, setTotalDuration] = useState(0);
+  const audioRef = useRef(null);
+
+  const togglePlay = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+    } else {
+      audioRef.current.play().catch(e => console.warn('Audio play error:', e));
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    if (audioRef.current) {
+      setCurrentTime(audioRef.current.currentTime);
+    }
+  };
+
+  const handleLoadedMetadata = () => {
+    if (audioRef.current) {
+      setTotalDuration(audioRef.current.duration || 0);
+    }
+  };
+
+  const formatTime = (secs) => {
+    if (!secs || isNaN(secs) || !isFinite(secs)) return '0:00';
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+
+  const progress = totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0;
+
+  return (
+    <div className={`flex items-center gap-2.5 p-2 rounded-xl border ${isMe ? 'bg-black/25 border-white/20' : 'bg-black/40 border-[#333]'}`}>
+      <audio
+        ref={audioRef}
+        src={src}
+        onTimeUpdate={handleTimeUpdate}
+        onLoadedMetadata={handleLoadedMetadata}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onEnded={() => { setIsPlaying(false); setCurrentTime(0); }}
+        preload="metadata"
+      />
+      <button
+        type="button"
+        onClick={togglePlay}
+        className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow transition-all cursor-pointer ${
+          isMe ? 'bg-white text-indigo-600 hover:scale-105' : 'bg-indigo-600 text-white hover:bg-indigo-500'
+        }`}
+        title={isPlaying ? 'Pause voice note' : 'Play voice note'}
+      >
+        {isPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" className="ml-0.5" />}
+      </button>
+      <div className="flex-1 min-w-[140px]">
+        {/* Waveform visualizer */}
+        <div className="flex items-center gap-0.5 h-5 mb-1">
+          {[40, 75, 30, 90, 50, 80, 45, 65, 85, 35, 75, 55, 95, 60, 40, 80, 60, 45, 90, 50].map((h, i) => {
+            const barProgress = (i / 20) * 100;
+            const isPlayed = barProgress <= progress;
+            return (
+              <div
+                key={i}
+                className={`flex-1 rounded-full transition-all ${
+                  isPlayed 
+                    ? (isMe ? 'bg-white' : 'bg-indigo-400') 
+                    : (isMe ? 'bg-white/30' : 'bg-[#444]')
+                }`}
+                style={{ height: `${h}%` }}
+              />
+            );
+          })}
+        </div>
+        <div className="flex justify-between items-center text-[10px] opacity-80 font-mono">
+          <span>{formatTime(currentTime)}</span>
+          <span className="flex items-center gap-1">
+            <Volume2 size={10} />
+            {totalDuration > 0 ? formatTime(totalDuration) : (fileName || 'Voice Note')}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function formatAttachmentSize(size) {
@@ -510,6 +613,123 @@ export default function Inbox() {
   const [attachedFiles, setAttachedFiles] = useState([]);
   const fileInputRef = useRef(null);
 
+  // ── Voice Recording State & Handlers ──
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [recordedAudioBlob, setRecordedAudioBlob] = useState(null);
+  const [recordedAudioUrl, setRecordedAudioUrl] = useState(null);
+  const [isPlayingPreview, setIsPlayingPreview] = useState(false);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const recordingTimerRef = useRef(null);
+  const streamRef = useRef(null);
+  const previewAudioRef = useRef(null);
+
+  const startVoiceRecording = async () => {
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        toast.error('Voice recording is not supported in this browser.');
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+
+      let mimeType = 'audio/webm;codecs=opus';
+      if (typeof MediaRecorder.isTypeSupported === 'function') {
+        if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          mimeType = 'audio/mp4';
+        } else if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+          mimeType = 'audio/webm;codecs=opus';
+        } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+          mimeType = 'audio/webm';
+        } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+          mimeType = 'audio/ogg';
+        }
+      }
+
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType || 'audio/mp4' });
+        audioBlob.name = 'voice_message.m4a';
+        setRecordedAudioBlob(audioBlob);
+        const url = URL.createObjectURL(audioBlob);
+        setRecordedAudioUrl(url);
+        setIsRecording(false);
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => track.stop());
+          streamRef.current = null;
+        }
+      };
+
+      recorder.start(200);
+      setIsRecording(true);
+      setRecordingDuration(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration(prev => {
+          if (prev >= 120) {
+            stopVoiceRecording();
+            return prev;
+          }
+          return prev + 1;
+        });
+      }, 1000);
+    } catch (err) {
+      console.error('Error accessing microphone:', err);
+      toast.error('Could not access microphone. Please check browser permissions.');
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+  };
+
+  const cancelVoiceRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.onstop = null;
+      mediaRecorderRef.current.stop();
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    audioChunksRef.current = [];
+    setIsRecording(false);
+    setRecordingDuration(0);
+    clearRecordedAudio();
+  };
+
+  const clearRecordedAudio = () => {
+    if (recordedAudioUrl) {
+      URL.revokeObjectURL(recordedAudioUrl);
+    }
+    setRecordedAudioBlob(null);
+    setRecordedAudioUrl(null);
+    setIsPlayingPreview(false);
+  };
+
   const handleFileSelect = (e) => {
     const selected = Array.from(e.target.files || []);
     if (selected.length === 0) return;
@@ -521,20 +741,61 @@ export default function Inbox() {
     setAttachedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  // 5. Live Message Sending with File Attachments & LocalStorage Persistence
+  // 5. Live Message Sending with Voice Notes, File Attachments & LocalStorage Persistence
   const handleSendMessage = async (e) => {
     if (e) e.preventDefault();
     if (sending) return;
-    if ((!inputText.trim() && attachedFiles.length === 0) || !selectedChat) return;
+    if ((!inputText.trim() && attachedFiles.length === 0 && !recordedAudioBlob) || !selectedChat) return;
 
     const messageText = inputText.trim();
     const filesToSend = [...attachedFiles];
+    const voiceBlobToSend = recordedAudioBlob;
+    const voiceUrlToSend = recordedAudioUrl;
     const chatId = selectedChat.id;
 
     setInputText('');
     setAttachedFiles([]);
+    clearRecordedAudio();
     setSending(true);
 
+    // If sending a recorded voice note
+    if (voiceBlobToSend) {
+      const localAttachments = [{
+        name: 'voice_message.m4a',
+        size: (voiceBlobToSend.size / 1024).toFixed(1) + ' KB',
+        type: 'audio/mp4',
+        url: voiceUrlToSend
+      }];
+
+      const newMsg = {
+        id: `sent_${Date.now()}`,
+        text: messageText,
+        attachments: localAttachments,
+        sender: 'me',
+        timestamp: new Date().toISOString(),
+      };
+
+      setMessages(prev => [...prev, newMsg]);
+      setTimeout(scrollToBottom, 50);
+      saveLocalSentMessage(chatId, newMsg);
+
+      try {
+        const res = await directSendUnipileVoiceMessageInChat(chatId, voiceBlobToSend, messageText);
+        if (res.success) {
+          toast.success('Voice message delivered!');
+          setChats(prev => prev.map(c => c.id === chatId ? { ...c, last_message_text: messageText || '🎙️ Sent voice note', timestamp: new Date().toISOString() } : c));
+        } else {
+          toast.error(res.error || 'Failed to send voice message');
+        }
+      } catch (err) {
+        toast.error('Error sending voice message');
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
+
+    // Standard message with file attachments
     const localAttachments = filesToSend.map(f => ({
       name: f.name,
       size: (f.size / 1024).toFixed(1) + ' KB',
@@ -920,6 +1181,20 @@ export default function Inbox() {
                                       const sizeLabel = formatAttachmentSize(att.size);
                                       const attName = typeof att.name === 'string' ? att.name : (typeof att.filename === 'string' ? att.filename : 'Attachment');
 
+                                      const isAudio = isAudioAttachment(att);
+
+                                      if (isAudio && resolvedUrl) {
+                                        return (
+                                          <div key={idx} className="mt-1">
+                                            <AudioMessagePlayer
+                                              src={resolvedUrl}
+                                              fileName={attName}
+                                              isMe={isMe}
+                                            />
+                                          </div>
+                                        );
+                                      }
+
                                       return (
                                         <div key={idx} className="rounded-xl overflow-hidden border border-white/20 bg-black/25 p-2">
                                           {isImg && resolvedUrl ? (
@@ -1026,6 +1301,87 @@ export default function Inbox() {
               {/* Live Modern Message Composer Form */}
               <form onSubmit={handleSendMessage} className="p-3 bg-[#131313] border-t border-[#242424]">
                 <div className="relative rounded-xl border border-[#2d2d2d] bg-[#1a1a1a] focus-within:border-[#6366f1] focus-within:ring-1 focus-within:ring-[#6366f1] transition-all">
+                  {/* Live Voice Recording Status */}
+                  {isRecording ? (
+                    <div className="p-3 bg-red-950/20 rounded-t-xl border-b border-red-500/20 flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
+                        <span className="text-xs font-semibold text-red-300">Recording Voice Note...</span>
+                        <span className="text-xs font-mono bg-black/50 px-2 py-0.5 rounded text-white border border-red-500/30">
+                          {Math.floor(recordingDuration / 60)}:{String(recordingDuration % 60).padStart(2, '0')}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={stopVoiceRecording}
+                          className="px-2.5 py-1 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition-all cursor-pointer shadow"
+                        >
+                          <Square size={11} fill="currentColor" />
+                          <span>Stop & Review</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={cancelVoiceRecording}
+                          className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
+                          title="Cancel recording"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* Recorded Audio Preview */}
+                  {recordedAudioBlob && !isRecording ? (
+                    <div className="p-2.5 bg-indigo-950/30 rounded-t-xl border-b border-indigo-500/20 flex items-center justify-between">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow">
+                          <Mic size={13} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold text-white">Voice Note Ready</span>
+                            <span className="text-[10px] text-indigo-300 font-mono">
+                              ({(recordedAudioBlob.size / 1024).toFixed(1)} KB)
+                            </span>
+                          </div>
+                          <audio
+                            ref={previewAudioRef}
+                            src={recordedAudioUrl}
+                            onPlay={() => setIsPlayingPreview(true)}
+                            onPause={() => setIsPlayingPreview(false)}
+                            onEnded={() => setIsPlayingPreview(false)}
+                            className="hidden"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!previewAudioRef.current) return;
+                              if (isPlayingPreview) {
+                                previewAudioRef.current.pause();
+                              } else {
+                                previewAudioRef.current.play();
+                              }
+                            }}
+                            className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-medium cursor-pointer mt-0.5"
+                          >
+                            {isPlayingPreview ? <Pause size={10} fill="currentColor" /> : <Play size={10} fill="currentColor" />}
+                            <span>{isPlayingPreview ? 'Pause' : 'Play preview'}</span>
+                          </button>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={clearRecordedAudio}
+                        className="p-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
+                        title="Discard voice note"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ) : null}
+
                   <textarea
                     value={inputText}
                     onChange={e => setInputText(e.target.value)}
@@ -1035,7 +1391,13 @@ export default function Inbox() {
                         handleSendMessage();
                       }
                     }}
-                    placeholder={`Write a message to ${displayName}...`}
+                    placeholder={
+                      recordedAudioBlob
+                        ? 'Add an optional companion text message...'
+                        : isRecording
+                        ? 'Speaking...'
+                        : `Write a message to ${displayName}...`
+                    }
                     className="w-full bg-transparent px-3.5 py-2.5 text-xs text-white placeholder-[#6b7280] focus:outline-none resize-none h-16"
                   />
 
@@ -1067,6 +1429,20 @@ export default function Inbox() {
                       </button>
                       <button
                         type="button"
+                        onClick={isRecording ? stopVoiceRecording : startVoiceRecording}
+                        className={`p-1.5 rounded-lg border transition-all relative cursor-pointer ${
+                          isRecording
+                            ? 'border-red-500 bg-red-600 text-white animate-pulse'
+                            : recordedAudioBlob
+                            ? 'border-indigo-500 bg-indigo-600/30 text-indigo-300'
+                            : 'border-[#2a2a2a] text-[#9ca3af] hover:text-white hover:bg-[#242424]'
+                        }`}
+                        title={isRecording ? 'Stop Recording' : 'Record LinkedIn Voice Note'}
+                      >
+                        <Mic size={13} />
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => setShowTemplatesModal(true)}
                         className="p-1.5 rounded-lg border border-[#2a2a2a] text-[#9ca3af] hover:text-white hover:bg-[#242424] transition-all cursor-pointer"
                         title="Insert Message Template"
@@ -1080,11 +1456,11 @@ export default function Inbox() {
 
                     <button
                       type="submit"
-                      disabled={sending || (!inputText.trim() && attachedFiles.length === 0)}
+                      disabled={sending || (!inputText.trim() && attachedFiles.length === 0 && !recordedAudioBlob)}
                       className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold transition-all shadow-md disabled:opacity-40 cursor-pointer"
                     >
                       {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-                      <span>Send</span>
+                      <span>{recordedAudioBlob ? 'Send Voice Note' : 'Send'}</span>
                     </button>
                   </div>
                 </div>

@@ -512,6 +512,106 @@ export default async function handler(req, res) {
           }
         }
 
+        // 4b. Send Voice Message (Native LinkedIn Voice Note with waveform)
+        if (nodeType === 'send_voice_message') {
+          let recipientId = p.provider_id || p.member_id;
+          if (!recipientId) {
+            const pubId = extractPublicId(p.linkedin_url);
+            if (pubId) {
+              const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(pubId)}?account_id=${accId}`);
+              if (ok && data) recipientId = data.provider_id || data.id;
+            }
+          }
+
+          if (recipientId && nodeConfig.voice_url) {
+            try {
+              let audioBlob = null;
+              if (nodeConfig.voice_url.startsWith('data:audio/')) {
+                const commaIdx = nodeConfig.voice_url.indexOf(',');
+                const base64Str = commaIdx !== -1 ? nodeConfig.voice_url.slice(commaIdx + 1) : nodeConfig.voice_url;
+                const buffer = Buffer.from(base64Str, 'base64');
+                audioBlob = new Blob([buffer], { type: 'audio/mp4' });
+              } else if (nodeConfig.voice_url.startsWith('http://') || nodeConfig.voice_url.startsWith('https://')) {
+                const aRes = await fetch(nodeConfig.voice_url);
+                audioBlob = await aRes.blob();
+              }
+
+              if (audioBlob) {
+                const pName = p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim();
+                log(`Sending voice note to ${pName}...`);
+
+                const formData = new FormData();
+                formData.append('account_id', accId);
+                formData.append('attendees_ids', recipientId);
+                const voiceFileName = nodeConfig.voice_file_name && nodeConfig.voice_file_name.endsWith('.m4a')
+                  ? nodeConfig.voice_file_name
+                  : 'voice_note.m4a';
+                formData.append('voice_message', audioBlob, voiceFileName);
+
+                if (nodeConfig.companion_text) {
+                  const compText = renderTemplate(nodeConfig.companion_text, p).trim();
+                  if (compText) formData.append('text', compText);
+                }
+
+                const vRes = await fetch(`${UNIPILE_BASE_URL}/chats`, {
+                  method: 'POST',
+                  headers: { 'X-API-KEY': UNIPILE_API_KEY },
+                  body: formData
+                });
+                const ok = vRes.ok;
+                const vData = await vRes.json().catch(() => ({}));
+
+                const nowIso = new Date().toISOString();
+                if (ok) {
+                  log(`SUCCESS: Voice note sent to ${pName}!`);
+                  cv.history = [
+                    ...(cv.history || []),
+                    {
+                      node_id: currentNode.id,
+                      node_type: "send_voice_message",
+                      node_label: currentNode.data?.label || "Send Voice Note",
+                      status: "success",
+                      executed_at: nowIso
+                    }
+                  ];
+                  cv.last_sent_node_id = currentNode.id;
+                  cv.message_sent_at = nowIso;
+                  cv.last_action_at = nowIso;
+                  if (nextEdge) cv.current_node_id = nextEdge.target;
+
+                  await sbFetch(`prospects?id=eq.${p.id}`, {
+                    method: "PATCH",
+                    body: JSON.stringify({
+                      status: "Initial Message Sent",
+                      message_sent_date: nowIso,
+                      custom_variables: cv
+                    })
+                  });
+                } else {
+                  log(`FAILED send voice note to ${pName}: ${vData?.detail || "Send voice note failed"}`);
+                  cv.history = [
+                    ...(cv.history || []),
+                    {
+                      node_id: currentNode.id,
+                      node_type: "send_voice_message",
+                      node_label: currentNode.data?.label || "Send Voice Note",
+                      status: "failed",
+                      error: vData?.detail || "Send voice note failed",
+                      executed_at: nowIso
+                    }
+                  ];
+                  await sbFetch(`prospects?id=eq.${p.id}`, {
+                    method: "PATCH",
+                    body: JSON.stringify({ custom_variables: cv })
+                  });
+                }
+              }
+            } catch (err) {
+              log(`ERROR sending voice note: ${err.message}`);
+            }
+          }
+        }
+
         // 5. Completed Node
         if (nodeType === 'completed') {
           await sbFetch(`prospects?id=eq.${p.id}`, {

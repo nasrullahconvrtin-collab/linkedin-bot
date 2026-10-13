@@ -15,6 +15,7 @@ import {
   MousePointer2, Plus, Save, Send, Settings, Trash2,
   UserCheck, UserPlus, X, XCircle, Zap, AlertTriangle,
   Database, AtSign, Flag, ThumbsUp, LayoutTemplate, Sparkles, ArrowRight,
+  Mic, Square, Play, Pause, Upload,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { EDGE_CONDITIONS, EDGE_COLORS } from '../data/flowEdgeConditions';
@@ -30,6 +31,7 @@ export const NODE_TYPES_DEF = [
   { type: 'endorse_profile',      label: 'Endorse Profile',       icon: ThumbsUp,       color: '#f59e0b', category: 'action',   description: 'Visit profile and endorse a top skill' },
   { type: 'send_invitation',      label: 'Connection Request',    icon: UserCheck,    color: '#7c3aed', category: 'action',   description: 'Sends invitation, checks if already connected, and waits for acceptance automatically' },
   { type: 'send_message',         label: 'Send Message',          icon: MessageSquare,  color: '#7c3aed', category: 'action',   description: 'Delivers a message and checks if they reply automatically' },
+  { type: 'send_voice_message',   label: 'Send Voice Note',       icon: Mic,            color: '#ec4899', category: 'action',   description: 'Delivers a native LinkedIn voice note with audio waveform and optional companion text' },
   // Delays
   { type: 'wait',                 label: 'Wait / Delay',          icon: Clock,          color: '#475569', category: 'delay',    description: 'Pause for a number of days before the next step' },
   // Control
@@ -106,6 +108,9 @@ function FlowNode({ id, data, selected }) {
             )}
             {(data.nodeType === 'send_message' || data.nodeType === 'send_inmail') && data.config.message && (
               <p className="truncate">💬 {data.config.message.slice(0, 40)}…</p>
+            )}
+            {data.nodeType === 'send_voice_message' && (
+              <p className="truncate">🎙️ {data.config?.voice_file_name || 'Voice Note (.m4a)'}{data.config?.companion_text ? ` + "${data.config.companion_text.slice(0, 20)}…"` : ''}</p>
             )}
             {data.nodeType === 'wait_acceptance' && (
               <p>🔁 Checks {describeCheckFrequency(data.config.check_frequency_hours || 24)}, gives up after {data.config.max_wait_days || 30}d</p>
@@ -185,6 +190,266 @@ function VarChips({ onInsert, vars }) {
           className="text-[10px] px-2 py-1 rounded bg-[#6366f1] text-white hover:bg-[#4f46e5]">
           + insert
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Voice Note config sub-panel ──────────────────────────────────────────────
+
+function VoiceNoteNodeConfig({ cfg, set, availableVars }) {
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [isPlayingPreview, setIsPlayingPreview] = useState(false);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const timerRef = useRef(null);
+  const streamRef = useRef(null);
+  const audioPreviewRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  const startRecording = async () => {
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        toast.error('Voice recording is not supported in this browser.');
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+
+      let mimeType = 'audio/webm;codecs=opus';
+      if (typeof MediaRecorder.isTypeSupported === 'function') {
+        if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4';
+        else if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) mimeType = 'audio/webm;codecs=opus';
+        else if (MediaRecorder.isTypeSupported('audio/webm')) mimeType = 'audio/webm';
+      }
+
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: mimeType || 'audio/mp4' });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64data = reader.result;
+          set('voice_url', base64data);
+          set('voice_file_name', `voice_note_${Date.now()}.m4a`);
+          set('voice_file_size', `${(blob.size / 1024).toFixed(1)} KB`);
+          toast.success('Voice note recorded and attached!');
+        };
+        reader.readAsDataURL(blob);
+
+        setIsRecording(false);
+        if (timerRef.current) clearInterval(timerRef.current);
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(t => t.stop());
+          streamRef.current = null;
+        }
+      };
+
+      recorder.start(200);
+      setIsRecording(true);
+      setRecordingDuration(0);
+      timerRef.current = setInterval(() => {
+        setRecordingDuration(prev => {
+          if (prev >= 120) {
+            stopRecording();
+            return prev;
+          }
+          return prev + 1;
+        });
+      }, 1000);
+    } catch (err) {
+      console.error('Error starting recording:', err);
+      toast.error('Microphone access denied or unavailable.');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const cancelRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.onstop = null;
+      mediaRecorderRef.current.stop();
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setIsRecording(false);
+    setRecordingDuration(0);
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      set('voice_url', reader.result);
+      set('voice_file_name', file.name.endsWith('.m4a') ? file.name : `${file.name.replace(/\.[^/.]+$/, '')}.m4a`);
+      set('voice_file_size', `${(file.size / 1024).toFixed(1)} KB`);
+      toast.success(`Attached audio file "${file.name}"!`);
+    };
+    reader.readAsDataURL(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const removeVoice = () => {
+    set('voice_url', '');
+    set('voice_file_name', '');
+    set('voice_file_size', '');
+    setIsPlayingPreview(false);
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[11px] text-[#6b7280] -mt-1 leading-relaxed">
+        Delivers a native LinkedIn voice note with interactive audio waveform to the prospect.
+      </p>
+
+      {/* Audio configuration & source */}
+      <div>
+        <label className="text-xs text-[#9ca3af] block mb-1.5 font-medium">Voice Audio (.m4a)</label>
+
+        {cfg.voice_url ? (
+          <div className="p-3 bg-[#1e1e2e] border border-pink-500/30 rounded-xl space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-7 h-7 rounded-lg bg-pink-600/20 text-pink-400 flex items-center justify-center shrink-0">
+                  <Mic size={14} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-white font-medium truncate">{cfg.voice_file_name || 'voice_note.m4a'}</p>
+                  {cfg.voice_file_size && <p className="text-[10px] text-[#9ca3af]">{cfg.voice_file_size}</p>}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={removeVoice}
+                className="p-1 rounded text-[#9ca3af] hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+                title="Remove audio"
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+
+            <audio
+              ref={audioPreviewRef}
+              src={cfg.voice_url}
+              onPlay={() => setIsPlayingPreview(true)}
+              onPause={() => setIsPlayingPreview(false)}
+              onEnded={() => setIsPlayingPreview(false)}
+              className="hidden"
+            />
+
+            <div className="flex items-center gap-2 pt-1 border-t border-[#2a2a3e]">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!audioPreviewRef.current) return;
+                  if (isPlayingPreview) audioPreviewRef.current.pause();
+                  else audioPreviewRef.current.play();
+                }}
+                className="text-xs text-pink-400 hover:text-pink-300 flex items-center gap-1.5 font-medium cursor-pointer"
+              >
+                {isPlayingPreview ? <Pause size={12} fill="currentColor" /> : <Play size={12} fill="currentColor" />}
+                <span>{isPlayingPreview ? 'Pause audio' : 'Play audio preview'}</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {isRecording ? (
+              <div className="p-3 bg-red-950/30 border border-red-500/40 rounded-xl flex items-center justify-between animate-pulse">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
+                  <span className="text-xs font-semibold text-red-300">Recording Voice Note...</span>
+                  <span className="text-xs font-mono bg-black/50 px-2 py-0.5 rounded text-white border border-red-500/30">
+                    {Math.floor(recordingDuration / 60)}:{String(recordingDuration % 60).padStart(2, '0')}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={stopRecording}
+                    className="px-2.5 py-1 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition-all cursor-pointer"
+                  >
+                    <Square size={11} fill="currentColor" />
+                    <span>Done</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={cancelRecording}
+                    className="p-1 rounded text-gray-400 hover:text-white cursor-pointer"
+                    title="Cancel"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={startRecording}
+                  className="p-2.5 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] hover:bg-[#252525] text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-all hover:border-pink-500/50 cursor-pointer"
+                >
+                  <Mic size={13} className="text-pink-400" />
+                  <span>Record Note</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-2.5 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] hover:bg-[#252525] text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-all hover:border-indigo-500/50 cursor-pointer"
+                >
+                  <Upload size={13} className="text-indigo-400" />
+                  <span>Upload .m4a</span>
+                </button>
+              </div>
+            )}
+
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              accept="audio/*,.m4a,.mp3,.wav,.aac,.ogg"
+              className="hidden"
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Companion Message Text */}
+      <div>
+        <label className="text-xs text-[#9ca3af] block mb-1">Companion Text (optional)</label>
+        <p className="text-[10px] text-[#6b7280] mb-1">
+          A text note delivered alongside the voice message (e.g. "Left a quick 20s voice note above, {"{{first_name}}"}!").
+        </p>
+        <textarea
+          rows={3}
+          value={cfg.companion_text || ''}
+          onChange={e => set('companion_text', e.target.value)}
+          placeholder="Hi {{first_name}}, dropped a quick voice note for you above!"
+          className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-pink-500 resize-none"
+        />
+        <VarChips vars={availableVars} onInsert={(v) => set('companion_text', (cfg.companion_text || '') + v)} />
       </div>
     </div>
   );
@@ -340,6 +605,15 @@ function NodeConfigPanel({ node, onChange, onClose, onDelete, availableVars }) {
             />
             <VarChips vars={availableVars} onInsert={(v) => set('message', (cfg.message || '') + v)} />
           </div>
+        )}
+
+        {/* Send Voice Note config */}
+        {(node.data.nodeType === 'send_voice_message') && (
+          <VoiceNoteNodeConfig
+            cfg={cfg}
+            set={set}
+            availableVars={availableVars}
+          />
         )}
 
         {/* Send InMail config */}

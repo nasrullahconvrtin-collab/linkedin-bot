@@ -147,7 +147,37 @@ function nurtureExistingConnections() {
   };
 }
 
+function voiceNoteOutreach() {
+  const visit   = mkNode('visit_profile', 'Visit Profile', {}, COL.TRUNK, 0);
+  const connect = mkNode('send_invitation', 'Connection Request', { add_note: false }, COL.TRUNK, 1);
+  const voice   = mkNode('send_voice_message', 'Send Voice Note', {
+    companion_text: "Hi {{first_name}}, left a quick voice note above for you!",
+    voice_file_name: 'voice_note.m4a'
+  }, COL.TRUNK, 2);
+  const wait1   = mkNode('wait', 'Wait 3 days', { days: 3 }, COL.TRUNK, 3);
+  const msg2    = mkNode('send_message', 'Follow-up 1', { message: "Hi {{first_name}}, following up on my voice note — did you have a chance to take a listen?" }, COL.TRUNK, 4);
+  const done    = mkNode('completed', 'Completed', {}, COL.TRUNK, 5);
+
+  return {
+    nodes: [visit, connect, voice, wait1, msg2, done],
+    edges: [
+      mkEdge(visit.id, connect.id),
+      mkEdge(connect.id, voice.id),
+      mkEdge(voice.id, wait1.id),
+      mkEdge(wait1.id, msg2.id),
+      mkEdge(msg2.id, done.id),
+    ],
+  };
+}
+
 export const SEQUENCE_TEMPLATES = [
+  {
+    id: 'voice_note_outreach',
+    name: 'Voice Note Outreach (Highest Reply Rate)',
+    description: 'Ultra high-converting flow: visit, connect, deliver native LinkedIn voice note with audio waveform once accepted, followed by a gentle text nudge.',
+    tags: ['High reply rate', 'Voice outreach', 'Interactive'],
+    build: voiceNoteOutreach,
+  },
   {
     id: 'classic_connect_followup',
     name: 'Connect + 2 Follow-ups',
@@ -179,6 +209,7 @@ export const SEQUENCE_TEMPLATES = [
 ];
 
 export function pickSequenceTemplate(name = '') {
+  if (/voice|audio/i.test(name)) return SEQUENCE_TEMPLATES.find(t => t.id === 'voice_note_outreach');
   if (/nurture|existing|re.?engage/i.test(name)) return SEQUENCE_TEMPLATES.find(t => t.id === 'nurture_existing');
   if (/warm/i.test(name)) return SEQUENCE_TEMPLATES.find(t => t.id === 'warm_up_then_connect');
   if (/simple|minimal/i.test(name)) return SEQUENCE_TEMPLATES.find(t => t.id === 'simple_connect_message');
