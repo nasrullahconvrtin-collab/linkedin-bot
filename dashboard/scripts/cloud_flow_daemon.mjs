@@ -1,4 +1,16 @@
+import http from 'http';
 import { createClient } from '@supabase/supabase-js';
+
+const PORT = process.env.PORT;
+if (PORT) {
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', service: 'cloud-flow-daemon', timestamp: new Date().toISOString() }));
+  });
+  server.listen(Number(PORT), '0.0.0.0', () => {
+    console.log(`[Railway 24/7 Daemon] HTTP Health check server listening on port ${PORT}`);
+  });
+}
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://mjwganpjawthnowemabt.supabase.co';
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1qd2dhbnBqYXd0aG5vd2VtYWJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzMDczMTUsImV4cCI6MjEwMTg4MzMxNX0.OwKeHoH2DH-jS7-_XRf6Vkx4bNZPKgbL9WOr5oSd27c';
@@ -148,18 +160,66 @@ async function runCloudFlow() {
     } else {
       prospectQuery = prospectQuery.eq('campaign_id', campaign.id);
     }
-    const { data: prospects } = await prospectQuery;
-    if (!prospects || prospects.length === 0) continue;
+    // Pre-fetch recent messages from Unipile to detect inbound prospect replies
+    const { ok: msgOk, data: msgData } = await unipileFetch(`/messages?account_id=${accountId}&limit=200`);
+    const recentMsgs = (msgOk && msgData && msgData.items) || [];
+    const inboundBySender = new Map();
+    recentMsgs.forEach(m => {
+      if (m.is_sender === 0 && m.sender_id) {
+        if (!inboundBySender.has(m.sender_id) || (m.timestamp || '') > (inboundBySender.get(m.sender_id).timestamp || '')) {
+          inboundBySender.set(m.sender_id, m);
+        }
+      }
+    });
 
     for (const prospect of prospects) {
+      const cv = prospect.custom_variables || {};
+
+      // ── 0. INBOUND REPLY RECONCILIATION ──
+      const pProviderId = prospect.provider_id || prospect.member_id;
+      const inboundMsg = pProviderId ? inboundBySender.get(pProviderId) : null;
+      if (inboundMsg) {
+        const outreachDate = prospect.message_sent_date || prospect.connection_sent_date || prospect.created_at;
+        const msgTime = inboundMsg.timestamp || '';
+        if (!outreachDate || msgTime > outreachDate) {
+          const replyText = inboundMsg.text || 'Inbound reply';
+          if (prospect.status !== 'Replied' || cv.reply_date !== msgTime) {
+            console.log(`[Railway 24/7 Daemon] Inbound reply detected from ${prospect.name || prospect.id}: "${replyText.slice(0, 60)}"`);
+            prospect.status = 'Replied';
+            cv.reply_date = msgTime;
+            cv.last_message = replyText;
+            const hist = cv.history || [];
+            if (!hist.some(h => h.node_type === 'reply_detected' && h.executed_at === msgTime)) {
+              hist.push({
+                node_type: 'reply_detected',
+                node_label: 'Prospect Replied',
+                status: 'replied',
+                reply_text: replyText,
+                executed_at: msgTime
+              });
+            }
+            cv.history = hist;
+
+            await supabase.from('prospects').update({
+              status: 'Replied',
+              custom_variables: cv
+            }).eq('id', prospect.id);
+
+            await supabase.from('campaign_enrollments').update({
+              status: 'replied',
+              updated_at: new Date().toISOString()
+            }).eq('prospect_id', prospect.id);
+          }
+          continue; // Prospect replied! Immediately stop further sequence progression
+        }
+      }
+
       if (todayConnectionsTotal >= dailyConnectionLimit) {
         console.log(`[Railway 24/7 Daemon] 🎯 Goal Reached: Sent daily target of ${todayConnectionsTotal}/${dailyConnectionLimit} connections today for ${campaign.name}!`);
         break;
       }
-      if (['Completed', 'Failed', 'Replied', 'Connection Request Sent', 'Needs Review', 'Needs Attention'].includes(prospect.status)) continue;
+      if (['Completed', 'Failed', 'Replied', 'Connection Request Sent', 'Needs Review', 'Needs Attention'].includes(prospect.status) || cv.reply_date) continue;
       if (prospect.connection_status === 'invitation_sent' || prospect.connection_status === 'connected') continue;
-
-      const cv = prospect.custom_variables || {};
       let currentNodeId = cv.current_node_id || startNode.id;
       let currentNode = nodesMap.get(currentNodeId);
 
