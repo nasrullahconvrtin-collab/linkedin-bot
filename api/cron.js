@@ -78,6 +78,8 @@ export default async function handler(req, res) {
   const log = (msg) => logs.push(`[${new Date().toISOString()}] ${msg}`);
   log("Vercel Goal-Oriented Cron Runner started...");
 
+  const processedRecipientsThisRun = new Set();
+
   try {
     const campaigns = await sbFetch("campaigns?status=eq.running");
     log(`Found ${campaigns.length} running campaigns.`);
@@ -258,6 +260,15 @@ export default async function handler(req, res) {
 
         if (["Connection Request Sent", "Connection Sent", "Completed", "Failed", "Replied", "Needs Review", "Needs Attention"].includes(p.status) || cv.reply_date) continue;
 
+        const cleanUrl = (p.linkedin_url || '').toLowerCase().replace(/\/$/, '').trim();
+        const pubId = extractPublicId(p.linkedin_url)?.toLowerCase();
+        const recipientKey = p.provider_id || p.member_id || pubId || cleanUrl;
+
+        if (recipientKey && processedRecipientsThisRun.has(recipientKey)) {
+          log(`[Deduplication Guard] Skipping duplicate prospect ${p.name || recipientKey} - already processed in this run.`);
+          continue;
+        }
+
         let currentNodeId = cv.current_node_id || startNode.id;
         let currentNode = nodesMap.get(currentNodeId);
 
@@ -271,6 +282,28 @@ export default async function handler(req, res) {
         let nodeConfig = currentNode.data?.config || {};
         let edges = sourceEdgesMap.get(currentNode.id) || [];
         let nextEdge = edges.find(e => !e.data?.condition || e.data.condition === 'default') || edges[0];
+
+        // ── Idempotency Check: Fast-forward past already executed action nodes ──
+        let isAlreadyDone = (cv.history || []).some(h => h.node_id === currentNode.id && h.status === 'success');
+        while (isAlreadyDone) {
+          if (!nextEdge) {
+            log(`Node ${currentNode.id} was already executed and sequence is finished for ${p.name || p.id}. Marking Completed.`);
+            await sbFetch(`prospects?id=eq.${p.id}`, { method: "PATCH", body: JSON.stringify({ status: "Completed", custom_variables: cv }) });
+            break;
+          }
+          log(`Node ${currentNode.id} (${nodeType}) already succeeded for ${p.name || p.id}. Fast-forwarding to ${nextEdge.target}.`);
+          currentNodeId = nextEdge.target;
+          currentNode = nodesMap.get(currentNodeId);
+          if (!currentNode) break;
+          nodeType = currentNode.data?.nodeType || currentNode.type;
+          nodeConfig = currentNode.data?.config || {};
+          edges = sourceEdgesMap.get(currentNode.id) || [];
+          nextEdge = edges.find(e => !e.data?.condition || e.data.condition === 'default') || edges[0];
+          cv.current_node_id = currentNodeId;
+          await sbFetch(`prospects?id=eq.${p.id}`, { method: "PATCH", body: JSON.stringify({ custom_variables: cv }) });
+          isAlreadyDone = (cv.history || []).some(h => h.node_id === currentNode.id && h.status === 'success');
+        }
+        if (!currentNode || isAlreadyDone) continue;
 
         // 1. Visit profile if needed
         if (nodeType === 'visit_profile') {
@@ -383,6 +416,7 @@ export default async function handler(req, res) {
             ];
             if (nextEdge) cv.current_node_id = nextEdge.target;
 
+            if (recipientKey) processedRecipientsThisRun.add(recipientKey);
             await sbFetch(`prospects?id=eq.${p.id}`, {
               method: "PATCH",
               body: JSON.stringify({
@@ -400,6 +434,7 @@ export default async function handler(req, res) {
                             errStr.toLowerCase().includes("restricted") ||
                             errStr.toLowerCase().includes("blocked") ||
                             errStr.toLowerCase().includes("recipient id is valid") ||
+                            errStr.toLowerCase().includes("requires a subscription") ||
                             errStr.toLowerCase().includes("locked");
 
             const isProviderLimit = errStr.toLowerCase().includes("provider limit") ||
@@ -417,9 +452,13 @@ export default async function handler(req, res) {
               }
             ];
 
+            const nodeFailures = (cv.history || []).filter(h => h.node_id === currentNode.id && h.status === 'failed').length;
+
             const patchBody = { custom_variables: cv };
-            if (isFatal) {
+            if (isFatal || nodeFailures >= 2) {
+              log(`🛑 Halting invite retries for ${pName} (Fatal/repeated error: ${errStr}). Setting status to 'Needs Review'.`);
               patchBody.status = "Needs Review";
+              patchBody.custom_variables = { ...cv, delivery_failed: true, delivery_error: errStr };
             }
             await sbFetch(`prospects?id=eq.${p.id}`, { method: "PATCH", body: JSON.stringify(patchBody) });
 
@@ -481,6 +520,7 @@ export default async function handler(req, res) {
                 if (nextEdge) cv.current_node_id = nextEdge.target;
 
                 const isFollowUp = (currentNode.data?.label || '').toLowerCase().includes('follow') || rawMsg.toLowerCase().includes('follow');
+                if (recipientKey) processedRecipientsThisRun.add(recipientKey);
                 await sbFetch(`prospects?id=eq.${p.id}`, {
                   method: "PATCH",
                   body: JSON.stringify({
@@ -491,6 +531,7 @@ export default async function handler(req, res) {
                 });
               } else {
                 log(`FAILED send message to ${pName}: ${data?.detail || "Send message failed"}`);
+                const errMsg = String(data?.detail || data?.message || "Send message failed");
                 cv.history = [
                   ...(cv.history || []),
                   {
@@ -498,13 +539,30 @@ export default async function handler(req, res) {
                     node_type: "send_message",
                     node_label: currentNode.data?.label || "Send Message",
                     status: "failed",
-                    error: data?.detail || "Send message failed",
+                    error: errMsg,
                     executed_at: nowIso
                   }
                 ];
+
+                const isFatal = errMsg.toLowerCase().includes("cannot send") ||
+                                errMsg.toLowerCase().includes("requires a subscription") ||
+                                errMsg.toLowerCase().includes("cannot be invited") ||
+                                errMsg.toLowerCase().includes("not allowed") ||
+                                errMsg.toLowerCase().includes("blocked") ||
+                                errMsg.toLowerCase().includes("restricted") ||
+                                errMsg.toLowerCase().includes("recipient id is valid") ||
+                                errMsg.toLowerCase().includes("locked");
+                const nodeFailures = (cv.history || []).filter(h => h.node_id === currentNode.id && h.status === 'failed').length;
+
+                const patchBody = { custom_variables: cv };
+                if (isFatal || nodeFailures >= 2) {
+                  log(`🛑 Halting retries for ${pName} (Fatal/repeated error: ${errMsg}). Setting status to 'Needs Review'.`);
+                  patchBody.status = "Needs Review";
+                  patchBody.custom_variables = { ...cv, delivery_failed: true, delivery_error: errMsg };
+                }
                 await sbFetch(`prospects?id=eq.${p.id}`, {
                   method: "PATCH",
-                  body: JSON.stringify({ custom_variables: cv })
+                  body: JSON.stringify(patchBody)
                 });
               }
             }
@@ -578,6 +636,7 @@ export default async function handler(req, res) {
                   cv.last_action_at = nowIso;
                   if (nextEdge) cv.current_node_id = nextEdge.target;
 
+                  if (recipientKey) processedRecipientsThisRun.add(recipientKey);
                   await sbFetch(`prospects?id=eq.${p.id}`, {
                     method: "PATCH",
                     body: JSON.stringify({
@@ -588,6 +647,7 @@ export default async function handler(req, res) {
                   });
                 } else {
                   log(`FAILED send voice note to ${pName}: ${vData?.detail || "Send voice note failed"}`);
+                  const errMsg = String(vData?.detail || vData?.message || "Send voice note failed");
                   cv.history = [
                     ...(cv.history || []),
                     {
@@ -595,13 +655,29 @@ export default async function handler(req, res) {
                       node_type: "send_voice_message",
                       node_label: currentNode.data?.label || "Send Voice Note",
                       status: "failed",
-                      error: vData?.detail || "Send voice note failed",
+                      error: errMsg,
                       executed_at: nowIso
                     }
                   ];
+
+                  const isFatal = errMsg.toLowerCase().includes("cannot send") ||
+                                  errMsg.toLowerCase().includes("requires a subscription") ||
+                                  errMsg.toLowerCase().includes("not allowed") ||
+                                  errMsg.toLowerCase().includes("blocked") ||
+                                  errMsg.toLowerCase().includes("restricted") ||
+                                  errMsg.toLowerCase().includes("recipient id is valid") ||
+                                  errMsg.toLowerCase().includes("locked");
+                  const nodeFailures = (cv.history || []).filter(h => h.node_id === currentNode.id && h.status === 'failed').length;
+
+                  const patchBody = { custom_variables: cv };
+                  if (isFatal || nodeFailures >= 2) {
+                    log(`🛑 Halting retries for ${pName} (Fatal/repeated error: ${errMsg}). Setting status to 'Needs Review'.`);
+                    patchBody.status = "Needs Review";
+                    patchBody.custom_variables = { ...cv, delivery_failed: true, delivery_error: errMsg };
+                  }
                   await sbFetch(`prospects?id=eq.${p.id}`, {
                     method: "PATCH",
-                    body: JSON.stringify({ custom_variables: cv })
+                    body: JSON.stringify(patchBody)
                   });
                 }
               }

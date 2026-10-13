@@ -66,6 +66,8 @@ async function runCloudFlow() {
     return;
   }
 
+  const contactedRecipientsThisCycle = new Set();
+
   for (const campaign of campaigns) {
     const orgId = campaign.organization_id;
     const { data: profs } = await supabase.from('profiles').select('settings, unipile_account_id').eq('profile_key', campaign.profile_key || 'profile_1');
@@ -282,6 +284,15 @@ async function runCloudFlow() {
 
       if (['Completed', 'Failed', 'Replied', 'Needs Review', 'Needs Attention'].includes(prospect.status) || cv.reply_date) continue;
 
+      const cleanUrl = (prospect.linkedin_url || '').toLowerCase().replace(/\/$/, '').trim();
+      const pubId = extractPublicId(prospect.linkedin_url)?.toLowerCase();
+      const recipientKey = prospect.provider_id || prospect.member_id || pubId || cleanUrl;
+
+      if (recipientKey && contactedRecipientsThisCycle.has(recipientKey)) {
+        console.log(`[Railway 24/7 Daemon] 🛡️ Deduplication Guard: Already processed action for ${prospect.name || recipientKey} in this cycle. Skipping duplicate prospect.`);
+        continue;
+      }
+
       let currentNodeId = cv.current_node_id || startNode.id;
       let currentNode = nodesMap.get(currentNodeId);
 
@@ -295,6 +306,28 @@ async function runCloudFlow() {
       let nodeConfig = currentNode.data?.config || {};
       let edges = sourceEdgesMap.get(currentNode.id) || [];
       let nextEdge = edges.find(e => !e.data?.condition || e.data.condition === 'default') || edges[0];
+
+      // ── Idempotency Check: Fast-forward past already executed action nodes ──
+      let isAlreadyDone = (cv.history || []).some(h => h.node_id === currentNode.id && h.status === 'success');
+      while (isAlreadyDone) {
+        if (!nextEdge) {
+          console.log(`[Railway 24/7 Daemon] Node ${currentNode.id} was already executed and sequence is finished for ${prospect.name || prospect.id}. Marking Completed.`);
+          await supabase.from('prospects').update({ status: 'Completed', custom_variables: cv }).eq('id', prospect.id);
+          break;
+        }
+        console.log(`[Railway 24/7 Daemon] Node ${currentNode.id} (${nodeType}) already succeeded for ${prospect.name || prospect.id}. Fast-forwarding to ${nextEdge.target}.`);
+        currentNodeId = nextEdge.target;
+        currentNode = nodesMap.get(currentNodeId);
+        if (!currentNode) break;
+        nodeType = currentNode.data?.nodeType || currentNode.type;
+        nodeConfig = currentNode.data?.config || {};
+        edges = sourceEdgesMap.get(currentNode.id) || [];
+        nextEdge = edges.find(e => !e.data?.condition || e.data.condition === 'default') || edges[0];
+        cv.current_node_id = currentNodeId;
+        await supabase.from('prospects').update({ custom_variables: cv }).eq('id', prospect.id);
+        isAlreadyDone = (cv.history || []).some(h => h.node_id === currentNode.id && h.status === 'success');
+      }
+      if (!currentNode || isAlreadyDone) continue;
 
       // ── Step 1: Visit profile if needed ─────────────────────────────────────
       if (nodeType === 'visit_profile') {
@@ -442,6 +475,7 @@ async function runCloudFlow() {
           cv.invitation_sent_at = nowIso;
           if (nextEdge) cv.current_node_id = nextEdge.target;
 
+          if (recipientKey) contactedRecipientsThisCycle.add(recipientKey);
           await supabase.from('prospects').update({
             status: 'Connection Request Sent',
             connection_status: 'invitation_sent',
@@ -470,8 +504,18 @@ async function runCloudFlow() {
           } else {
             cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_invitation', node_label: 'Connection Request Failed', executed_at: nowIso, status: 'failed', error: errStr }];
             const patchBody = { custom_variables: cv };
-            if (errStr.toLowerCase().includes('cannot') || errStr.toLowerCase().includes('restricted') || errStr.toLowerCase().includes('not allowed') || errStr.toLowerCase().includes('recipient id is valid') || errStr.toLowerCase().includes('locked')) {
+            const isFatal = errStr.toLowerCase().includes('cannot') ||
+                            errStr.toLowerCase().includes('restricted') ||
+                            errStr.toLowerCase().includes('not allowed') ||
+                            errStr.toLowerCase().includes('recipient id is valid') ||
+                            errStr.toLowerCase().includes('requires a subscription') ||
+                            errStr.toLowerCase().includes('locked');
+            const nodeFailures = (cv.history || []).filter(h => h.node_id === currentNode.id && h.status === 'failed').length;
+
+            if (isFatal || nodeFailures >= 2) {
+              console.warn(`[Railway 24/7 Daemon] 🛑 Halting invite retries for ${prospect.name || prospect.id} (Fatal/repeated error: ${errStr}). Marking 'Needs Review'.`);
               patchBody.status = 'Needs Review';
+              patchBody.custom_variables = { ...cv, delivery_failed: true, delivery_error: errStr };
             }
             await supabase.from('prospects').update(patchBody).eq('id', prospect.id);
 
@@ -529,6 +573,7 @@ async function runCloudFlow() {
               if (nextEdge) cv.current_node_id = nextEdge.target;
 
               const isFollowUp = (currentNode.data?.label || '').toLowerCase().includes('follow') || rawMsg.toLowerCase().includes('follow');
+              if (recipientKey) contactedRecipientsThisCycle.add(recipientKey);
               await supabase.from('prospects').update({
                 status: isFollowUp ? 'Following Up' : 'Initial Message Sent',
                 message_sent_date: nowIso,
@@ -536,8 +581,28 @@ async function runCloudFlow() {
               }).eq('id', prospect.id);
             } else {
               console.warn(`[Railway 24/7 Daemon] ⚠️ Message failed for ${prospect.first_name || ''}:`, res.data?.detail || res.status);
-              cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_message', node_label: currentNode.data?.label || 'Send Message', executed_at: nowIso, status: 'failed', error: res.data?.detail || 'Failed' }];
-              await supabase.from('prospects').update({ custom_variables: cv }).eq('id', prospect.id);
+              const errMsg = String(res.data?.detail || res.data?.message || res.status || 'Failed');
+              cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_message', node_label: currentNode.data?.label || 'Send Message', executed_at: nowIso, status: 'failed', error: errMsg }];
+
+              const isFatal = errMsg.toLowerCase().includes('cannot send messages to the recipient') ||
+                              errMsg.toLowerCase().includes('requires a subscription') ||
+                              errMsg.toLowerCase().includes('cannot be invited') ||
+                              errMsg.toLowerCase().includes('not allowed') ||
+                              errMsg.toLowerCase().includes('blocked') ||
+                              errMsg.toLowerCase().includes('restricted') ||
+                              errMsg.toLowerCase().includes('recipient id is valid') ||
+                              errMsg.toLowerCase().includes('locked');
+              const nodeFailures = (cv.history || []).filter(h => h.node_id === currentNode.id && h.status === 'failed').length;
+
+              if (isFatal || nodeFailures >= 2) {
+                console.warn(`[Railway 24/7 Daemon] 🛑 Halting retries for ${prospect.name || prospect.id} (Fatal/repeated error: ${errMsg}). Marking 'Needs Review'.`);
+                await supabase.from('prospects').update({
+                  status: 'Needs Review',
+                  custom_variables: { ...cv, delivery_failed: true, delivery_error: errMsg }
+                }).eq('id', prospect.id);
+              } else {
+                await supabase.from('prospects').update({ custom_variables: cv }).eq('id', prospect.id);
+              }
             }
           }
         }
@@ -606,6 +671,7 @@ async function runCloudFlow() {
                 cv.last_action_at = nowIso;
                 if (nextEdge) cv.current_node_id = nextEdge.target;
 
+                if (recipientKey) contactedRecipientsThisCycle.add(recipientKey);
                 await supabase.from('prospects').update({
                   status: 'Initial Message Sent',
                   message_sent_date: nowIso,
@@ -613,8 +679,27 @@ async function runCloudFlow() {
                 }).eq('id', prospect.id);
               } else {
                 console.warn(`[Railway 24/7 Daemon] ⚠️ Voice note failed for ${prospect.first_name || ''}:`, vData?.detail || vRes.status);
-                cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_voice_message', node_label: currentNode.data?.label || 'Send Voice Note', executed_at: nowIso, status: 'failed', error: vData?.detail || 'Failed' }];
-                await supabase.from('prospects').update({ custom_variables: cv }).eq('id', prospect.id);
+                const errMsg = String(vData?.detail || vData?.message || vRes.status || 'Failed');
+                cv.history = [...(cv.history || []), { node_id: currentNode.id, node_type: 'send_voice_message', node_label: currentNode.data?.label || 'Send Voice Note', executed_at: nowIso, status: 'failed', error: errMsg }];
+
+                const isFatal = errMsg.toLowerCase().includes('cannot send') ||
+                                errMsg.toLowerCase().includes('requires a subscription') ||
+                                errMsg.toLowerCase().includes('not allowed') ||
+                                errMsg.toLowerCase().includes('blocked') ||
+                                errMsg.toLowerCase().includes('restricted') ||
+                                errMsg.toLowerCase().includes('recipient id is valid') ||
+                                errMsg.toLowerCase().includes('locked');
+                const nodeFailures = (cv.history || []).filter(h => h.node_id === currentNode.id && h.status === 'failed').length;
+
+                if (isFatal || nodeFailures >= 2) {
+                  console.warn(`[Railway 24/7 Daemon] 🛑 Halting retries for ${prospect.name || prospect.id} (Fatal/repeated error: ${errMsg}). Marking 'Needs Review'.`);
+                  await supabase.from('prospects').update({
+                    status: 'Needs Review',
+                    custom_variables: { ...cv, delivery_failed: true, delivery_error: errMsg }
+                  }).eq('id', prospect.id);
+                } else {
+                  await supabase.from('prospects').update({ custom_variables: cv }).eq('id', prospect.id);
+                }
               }
             }
           } catch (err) {
