@@ -237,9 +237,11 @@ function VoiceNoteNodeConfig({ cfg, set, availableVars }) {
         const reader = new FileReader();
         reader.onloadend = () => {
           const base64data = reader.result;
-          set('voice_url', base64data);
-          set('voice_file_name', `voice_note_${Date.now()}.m4a`);
-          set('voice_file_size', `${(blob.size / 1024).toFixed(1)} KB`);
+          set({
+            voice_url: base64data,
+            voice_file_name: `voice_note_${Date.now()}.m4a`,
+            voice_file_size: `${(blob.size / 1024).toFixed(1)} KB`
+          });
           toast.success('Voice note recorded and attached!');
         };
         reader.readAsDataURL(blob);
@@ -302,9 +304,11 @@ function VoiceNoteNodeConfig({ cfg, set, availableVars }) {
     if (!file) return;
     const reader = new FileReader();
     reader.onloadend = () => {
-      set('voice_url', reader.result);
-      set('voice_file_name', file.name.endsWith('.m4a') ? file.name : `${file.name.replace(/\.[^/.]+$/, '')}.m4a`);
-      set('voice_file_size', `${(file.size / 1024).toFixed(1)} KB`);
+      set({
+        voice_url: reader.result,
+        voice_file_name: file.name.endsWith('.m4a') ? file.name : `${file.name.replace(/\.[^/.]+$/, '')}.m4a`,
+        voice_file_size: `${(file.size / 1024).toFixed(1)} KB`
+      });
       toast.success(`Attached audio file "${file.name}"!`);
     };
     reader.readAsDataURL(file);
@@ -312,9 +316,11 @@ function VoiceNoteNodeConfig({ cfg, set, availableVars }) {
   };
 
   const removeVoice = () => {
-    set('voice_url', '');
-    set('voice_file_name', '');
-    set('voice_file_size', '');
+    set({
+      voice_url: '',
+      voice_file_name: '',
+      voice_file_size: ''
+    });
     setIsPlayingPreview(false);
   };
 
@@ -460,7 +466,13 @@ function VoiceNoteNodeConfig({ cfg, set, availableVars }) {
 function NodeConfigPanel({ node, onChange, onClose, onDelete, availableVars }) {
   const def = NODE_MAP[node.data.nodeType] || {};
   const cfg = node.data.config || {};
-  const set = (key, val) => onChange({ ...node.data, config: { ...cfg, [key]: val } });
+  const set = (keyOrObj, val) => {
+    if (typeof keyOrObj === 'object' && keyOrObj !== null) {
+      onChange({ ...node.data, config: { ...cfg, ...keyOrObj } });
+    } else {
+      onChange({ ...node.data, config: { ...cfg, [keyOrObj]: val } });
+    }
+  };
 
   return (
     <div className="fixed right-0 top-0 h-full w-80 bg-[#111111] border-l border-[#2a2a2a] z-50 flex flex-col shadow-2xl">

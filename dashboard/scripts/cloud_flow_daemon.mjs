@@ -126,7 +126,11 @@ async function runCloudFlow() {
       });
     } catch (e) {}
 
-    if (todayConnectionsTotal >= dailyConnectionLimit) {
+    const flowSequence = campaign.sequence_config?.flow_sequence;
+    if (!flowSequence || !Array.isArray(flowSequence.nodes) || flowSequence.nodes.length === 0) continue;
+
+    const hasInviteStep = flowSequence.nodes.some(n => (n.data?.nodeType || n.type) === 'send_invitation');
+    if (hasInviteStep && todayConnectionsTotal >= dailyConnectionLimit) {
       console.log(`[Railway 24/7 Daemon] 🎯 Goal Reached: Sent target ${todayConnectionsTotal}/${dailyConnectionLimit} connections for profile today in ${profileTz}.`);
       continue;
     }
@@ -135,9 +139,6 @@ async function runCloudFlow() {
       console.log(`[Railway 24/7 Daemon] 🎯 Global Limit Reached: Executed ${todayActionsTotal}/${globalDailyLimit} actions for profile today in ${profileTz}.`);
       continue;
     }
-
-    const flowSequence = campaign.sequence_config?.flow_sequence;
-    if (!flowSequence || !Array.isArray(flowSequence.nodes) || flowSequence.nodes.length === 0) continue;
 
     const nodesMap = new Map(flowSequence.nodes.map(n => [n.id, n]));
     const sourceEdgesMap = new Map();
@@ -160,6 +161,9 @@ async function runCloudFlow() {
     } else {
       prospectQuery = prospectQuery.eq('campaign_id', campaign.id);
     }
+    const { data: prospects } = await prospectQuery;
+    if (!prospects || prospects.length === 0) continue;
+
     // Pre-fetch recent messages from Unipile to detect inbound prospect replies
     const { ok: msgOk, data: msgData } = await unipileFetch(`/messages?account_id=${accountId}&limit=200`);
     const recentMsgs = (msgOk && msgData && msgData.items) || [];

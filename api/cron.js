@@ -94,13 +94,14 @@ export default async function handler(req, res) {
       if (!profile || !profile.unipile_account_id) continue;
 
       const dailyConnectionLimit = Number(profile.settings?.daily_connection_limit || 15);
-      if (totalSentToday >= dailyConnectionLimit) break;
+      const flowSequence = c.sequence_config?.flow_sequence;
+      if (!flowSequence || !Array.isArray(flowSequence.nodes) || flowSequence.nodes.length === 0) continue;
+
+      const hasInviteStep = flowSequence.nodes.some(n => (n.data?.nodeType || n.type) === 'send_invitation');
+      if (hasInviteStep && totalSentToday >= dailyConnectionLimit) continue;
 
       const accId = profile.unipile_account_id;
       log(`Processing Campaign '${c.name}' for account '${profile.display_name}' (${accId})`);
-
-      const flowSequence = c.sequence_config?.flow_sequence;
-      if (!flowSequence || !Array.isArray(flowSequence.nodes) || flowSequence.nodes.length === 0) continue;
 
       const nodesMap = new Map(flowSequence.nodes.map(n => [n.id, n]));
       const sourceEdgesMap = new Map();
