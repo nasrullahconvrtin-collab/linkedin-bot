@@ -6,7 +6,7 @@ import {
   Building, MapPin, Briefcase, Mail, RefreshCw, ThumbsUp, HelpCircle, PlayCircle,
   Phone, Globe, Users as UsersIcon, Download, Eye, X, CheckCheck, Clock, Calendar,
   CornerDownLeft, MessageCircle, Copy, CheckCircle2, ShieldCheck, Tag,
-  Mic, Square, Play, Pause, Volume2
+  Mic, Square, Play, Pause, Volume2, ChevronDown, Layers
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Layout from '../components/Layout';
@@ -269,6 +269,18 @@ export default function Inbox() {
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
   const [templates, setTemplates] = useState([]);
 
+  // Multi-Account & Pagination State
+  const [accounts, setAccounts] = useState([]);
+  const [selectedAccountId, setSelectedAccountId] = useState(() => {
+    return typeof window !== 'undefined'
+      ? (localStorage.getItem('lf_selected_account_id') || localStorage.getItem('lf_active_account_id') || null)
+      : null;
+  });
+  const [chatCursor, setChatCursor] = useState(null);
+  const [hasMoreChats, setHasMoreChats] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadingAll, setLoadingAll] = useState(false);
+
   // Rich Contact Profile Details from Unipile
   const [realProfile, setRealProfile] = useState(null);
   const [loadingProfile, setLoadingProfile] = useState(false);
@@ -289,8 +301,10 @@ export default function Inbox() {
   };
 
   // 1. Fetch Conversations from Unipile & Supabase
-  const loadConversations = useCallback(async () => {
+  const loadConversations = useCallback(async (targetAccId = null) => {
     setLoadingList(true);
+    setChatCursor(null);
+    setHasMoreChats(false);
     try {
       const {
         directGetProfiles,
@@ -304,10 +318,18 @@ export default function Inbox() {
       const userAcc = getActiveUserAccount();
       const orgId = getActiveOrganizationId();
 
+      setAccounts(userProfiles || []);
+
       if (!userProfiles || userProfiles.length === 0) {
         setChats([]);
         setLoadingList(false);
         return;
+      }
+
+      const activeAcc = targetAccId || selectedAccountId || userProfiles[0]?.unipile_account_id;
+      if (activeAcc && activeAcc !== selectedAccountId) {
+        setSelectedAccountId(activeAcc);
+        if (typeof window !== 'undefined') localStorage.setItem('lf_selected_account_id', activeAcc);
       }
 
       // Fetch Supabase campaigns map - FILTERED by current user's org
@@ -337,9 +359,11 @@ export default function Inbox() {
       const tRes = await getMessages().catch(() => ({ messages: [] }));
       setTemplates(tRes.messages || tRes.templates || []);
 
-      // Fetch Live Chats from Unipile for active account
-      const chatRes = await directGetUnipileChats(50);
+      // Fetch Live Chats from Unipile for active account (batch 1: 50)
+      const chatRes = await directGetUnipileChats(50, activeAcc, null);
       let liveChats = chatRes.chats || [];
+      setChatCursor(chatRes.cursor || null);
+      setHasMoreChats(Boolean(chatRes.cursor));
 
       // Combine Unipile chats with Supabase prospects
       if (liveChats.length === 0 && (pData || []).length > 0) {
@@ -400,11 +424,88 @@ export default function Inbox() {
     } finally {
       setLoadingList(false);
     }
-  }, [location.state]);
+  }, [location.state, selectedAccountId]);
 
   useEffect(() => {
     loadConversations();
   }, [loadConversations]);
+
+  // Load next batch of 50 conversations using Unipile cursor
+  const loadMoreChats = useCallback(async () => {
+    if (loadingMore || !chatCursor) return;
+    setLoadingMore(true);
+    try {
+      const res = await directGetUnipileChats(50, selectedAccountId, chatCursor);
+      if (res.success && res.chats?.length > 0) {
+        const newEnriched = res.chats.map(c => ({
+          ...c,
+          prospect_ref: prospectsMap[c.attendee_provider_id] || (c.name ? prospectsMap[c.name.toLowerCase()] : null) || null
+        }));
+        setChats(prev => {
+          const existingIds = new Set(prev.map(c => c.id));
+          const toAdd = newEnriched.filter(c => !existingIds.has(c.id));
+          return [...prev, ...toAdd];
+        });
+        setChatCursor(res.cursor || null);
+        setHasMoreChats(Boolean(res.cursor));
+        toast.success(`Loaded ${res.chats.length} more conversations`);
+      } else {
+        setChatCursor(null);
+        setHasMoreChats(false);
+      }
+    } catch (err) {
+      console.error('Failed to load more chats:', err);
+      toast.error('Failed to load more conversations');
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [chatCursor, loadingMore, selectedAccountId, prospectsMap]);
+
+  // Sequentially load all remaining conversations across all pages
+  const loadAllChats = useCallback(async () => {
+    if (loadingAll || !chatCursor) return;
+    setLoadingAll(true);
+    let currentCursor = chatCursor;
+    let totalFetched = 0;
+    try {
+      while (currentCursor) {
+        const res = await directGetUnipileChats(50, selectedAccountId, currentCursor);
+        if (!res.success || !res.chats?.length) break;
+
+        const newEnriched = res.chats.map(c => ({
+          ...c,
+          prospect_ref: prospectsMap[c.attendee_provider_id] || (c.name ? prospectsMap[c.name.toLowerCase()] : null) || null
+        }));
+        setChats(prev => {
+          const existingIds = new Set(prev.map(c => c.id));
+          const toAdd = newEnriched.filter(c => !existingIds.has(c.id));
+          return [...prev, ...toAdd];
+        });
+        totalFetched += res.chats.length;
+        currentCursor = res.cursor || null;
+        setChatCursor(currentCursor);
+        setHasMoreChats(Boolean(currentCursor));
+        await new Promise(r => setTimeout(r, 200));
+      }
+      toast.success(`All conversations loaded (+${totalFetched} total)`);
+    } catch (err) {
+      console.error('Error loading all chats:', err);
+      toast.error('Stopped loading conversations');
+    } finally {
+      setLoadingAll(false);
+    }
+  }, [chatCursor, loadingAll, selectedAccountId, prospectsMap]);
+
+  const handleAccountChange = (newAccId) => {
+    setSelectedAccountId(newAccId);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('lf_selected_account_id', newAccId);
+      localStorage.setItem('lf_active_account_id', newAccId);
+    }
+    setSelectedChat(null);
+    setMessages([]);
+    loadConversations(newAccId);
+  };
 
   // 2. Filter Chats by Source Tabs (LinkedIn / InMail / Sales Navigator)
   const tabFilteredChats = useMemo(() => {
@@ -923,14 +1024,30 @@ export default function Inbox() {
           </div>
         </div>
 
-        {/* Right: Operational Status & Refresh */}
+        {/* Right: Account Selector, Operational Status & Refresh */}
         <div className="flex items-center gap-3">
+          {accounts.length > 1 && (
+            <div className="flex items-center gap-2 bg-[#141414] px-3 py-1.5 rounded-xl border border-[#2a2a2a] shadow-inner">
+              <User size={13} className="text-[#6366f1]" />
+              <select
+                value={selectedAccountId || ''}
+                onChange={e => handleAccountChange(e.target.value)}
+                className="bg-transparent text-xs text-white font-semibold focus:outline-none cursor-pointer max-w-[150px] truncate"
+              >
+                {accounts.map(a => (
+                  <option key={a.unipile_account_id || a.id} value={a.unipile_account_id} className="bg-[#181818] text-white">
+                    {a.display_name || a.profile_key}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="hidden lg:flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl font-medium">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span>LinkedIn Live Sync</span>
           </div>
           <button
-            onClick={loadConversations}
+            onClick={() => loadConversations(selectedAccountId)}
             disabled={loadingList}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[#2a2a2a] bg-[#141414] hover:bg-[#222222] text-[#9ca3af] hover:text-white text-xs font-medium transition-all cursor-pointer"
             title="Refresh Conversations"
@@ -959,7 +1076,9 @@ export default function Inbox() {
                   <option key={f.key} value={f.key}>{f.label}</option>
                 ))}
               </select>
-              <span className="text-[11px] text-[#737373] font-mono font-medium">{filteredChats.length} conversations</span>
+              <span className="text-[11px] text-[#737373] font-mono font-medium">
+                {filteredChats.length} conversations{hasMoreChats ? '+' : ''}
+              </span>
             </div>
 
             {/* Clearable Search Input */}
@@ -1059,6 +1178,52 @@ export default function Inbox() {
                   </div>
                 );
               })
+            )}
+
+            {/* Load More Conversations Footer */}
+            {hasMoreChats && (
+              <div className="p-3 bg-[#131313] border-t border-[#222222] flex flex-col gap-2 shrink-0">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={loadMoreChats}
+                    disabled={loadingMore || loadingAll}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-[#1e1e2d] hover:bg-[#27273d] text-[#818cf8] hover:text-white text-xs font-semibold border border-indigo-500/20 transition-all cursor-pointer disabled:opacity-50 shadow-sm"
+                  >
+                    {loadingMore ? (
+                      <>
+                        <Loader2 size={13} className="animate-spin text-[#818cf8]" />
+                        <span>Loading next 50...</span>
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown size={14} />
+                        <span>Load Next 50</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={loadAllChats}
+                    disabled={loadingMore || loadingAll}
+                    className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-[#1f1f1f] hover:bg-[#2a2a2a] text-[#a3a3a3] hover:text-white text-xs font-semibold border border-[#333333] transition-all cursor-pointer disabled:opacity-50 shadow-sm"
+                    title="Load all remaining conversations across all pages"
+                  >
+                    {loadingAll ? (
+                      <Loader2 size={13} className="animate-spin text-[#6366f1]" />
+                    ) : (
+                      <Layers size={13} />
+                    )}
+                    <span>{loadingAll ? 'Loading All...' : 'Load All'}</span>
+                  </button>
+                </div>
+                <p className="text-[10px] text-center text-[#737373]">
+                  Showing {filteredChats.length} conversations • More available on LinkedIn
+                </p>
+              </div>
+            )}
+            {!hasMoreChats && chats.length > 0 && !loadingList && (
+              <div className="py-2.5 px-3 text-center text-[10px] text-[#666666] border-t border-[#222222] bg-[#111111] shrink-0">
+                ✓ All conversations loaded ({chats.length} total)
+              </div>
             )}
           </div>
         </div>

@@ -2437,18 +2437,23 @@ export const directSendUnipileInMail = async (prospect, subject = '', text = '',
   return { success: ok, data };
 };
 
-export const directGetUnipileChats = async (limit = 50, overrideAccountId = null) => {
+export const directGetUnipileChats = async (limit = 50, overrideAccountId = null, cursor = null) => {
   let accountId = overrideAccountId;
   if (!accountId) {
     const userProfiles = await directGetProfiles();
     accountId = userProfiles?.[0]?.unipile_account_id;
   }
   if (!accountId) {
-    return { success: false, chats: [], error: 'NO_CONNECTED_ACCOUNT' };
+    return { success: false, chats: [], cursor: null, error: 'NO_CONNECTED_ACCOUNT' };
   }
-  const { ok, data } = await unipileFetch(`/chats?account_id=${accountId}&limit=${limit}`);
+  let endpoint = `/chats?account_id=${accountId}&limit=${limit}`;
+  if (cursor) {
+    endpoint += `&cursor=${encodeURIComponent(cursor)}`;
+  }
+  const { ok, data } = await unipileFetch(endpoint);
   if (ok && data) {
     const rawChats = data.items || data.chats || [];
+    const nextCursor = data.cursor || null;
 
     // Parallel fetch attendees for chats to resolve real LinkedIn names and profile avatars
     const enrichedChats = await Promise.all(
@@ -2475,9 +2480,9 @@ export const directGetUnipileChats = async (limit = 50, overrideAccountId = null
       })
     );
 
-    return { success: true, chats: enrichedChats };
+    return { success: true, chats: enrichedChats, cursor: nextCursor };
   }
-  return { success: false, chats: [] };
+  return { success: false, chats: [], cursor: null };
 };
 
 export const directGetChatMessages = async (chatId, limit = 50, overrideAccountId = null) => {
