@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "node dashboard/scripts/cloud_flow_daemon.mjs",
+    "worker": "node dashboard/scripts/cloud_flow_daemon.mjs",
     "postinstall": "cd dashboard && npm install",
     "build": "cd dashboard && npm run build"
   },

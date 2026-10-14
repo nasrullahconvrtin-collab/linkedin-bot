@@ -3,10 +3,12 @@ builder = "nixpacks"
 providers = ["node"]
 
 [phases.setup]
-nixPkgs = ["nodejs_20"]
+nixPkgs = ["nodejs_22"]
 
 [phases.install]
 cmds = ["cd dashboard && npm install"]
 
 [deploy]
-startCommand = "cd dashboard && npm run worker"
+startCommand = "node dashboard/scripts/cloud_flow_daemon.mjs"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
