@@ -2521,12 +2521,13 @@ export const directCheckProspectReplied = async (prospect) => {
     return { success: true, replied: true };
   }
 
-  const recipientId = getLinkedinId(prospect);
-  if (!recipientId) return { success: true, replied: false };
-
-  const userProfiles = await directGetProfiles();
-  const accountId = userProfiles?.[0]?.unipile_account_id;
+  const pAccount = await getAccountForProspect(prospect);
+  const accountId = pAccount?.unipile_account_id;
   if (!accountId) return { success: true, replied: false };
+
+  const pProviderId = prospect.provider_id || prospect.member_id;
+  const recipientId = getLinkedinId(prospect);
+  if (!pProviderId && !recipientId) return { success: true, replied: false };
 
   // When did our campaign start contacting this person?
   const outreachTimestamp = new Date(
@@ -2537,19 +2538,65 @@ export const directCheckProspectReplied = async (prospect) => {
     0
   ).getTime();
 
-  const { ok, data } = await unipileFetch(`/chats?account_id=${accountId}&attendees_ids=${encodeURIComponent(recipientId)}`);
-  if (ok && data && Array.isArray(data.items) && data.items.length > 0) {
-    const chat = data.items[0];
-    if (chat && chat.id) {
-      // Fetch messages history
-      const { ok: msgOk, data: msgData } = await unipileFetch(`/chats/${encodeURIComponent(chat.id)}/messages?account_id=${accountId}&limit=100`);
-      if (msgOk && msgData && Array.isArray(msgData.items)) {
-        // Find incoming message sent by the prospect AFTER our campaign message
-        const firstReply = msgData.items.find(m => {
-          const isFromProspect = m.is_sender === 0;
-          if (!isFromProspect) return false;
+  // 1. Check recent inbound messages matching THIS prospect's provider/member ID
+  const { ok: msgOk, data: msgData } = await unipileFetch(`/messages?account_id=${accountId}&limit=100`);
+  if (msgOk && msgData && Array.isArray(msgData.items)) {
+    const inboundMatch = msgData.items.find(m => {
+      if (m.is_sender !== 0) return false;
+      const isSenderMatch = (pProviderId && m.sender_id === pProviderId) ||
+                            (recipientId && m.sender_id === recipientId);
+      if (!isSenderMatch) return false;
+      const msgTime = new Date(m.timestamp || m.created_at || 0).getTime();
+      return msgTime > (outreachTimestamp + 2000);
+    });
+
+    if (inboundMatch) {
+      const replyText = inboundMatch.text || inboundMatch.message || 'Incoming message';
+      const replyDateStr = inboundMatch.timestamp || inboundMatch.created_at || new Date().toISOString();
+
+      const cv = prospect.custom_variables || {};
+      const history = cv.history || [];
+      if (!history.some(h => h.node_type === 'check_reply' && h.executed_at === replyDateStr)) {
+        history.push({
+          node_id: 'check_reply',
+          node_type: 'check_reply',
+          status: 'replied',
+          reply_text: replyText,
+          executed_at: replyDateStr
+        });
+      }
+
+      cv.reply_date = replyDateStr;
+      cv.last_message = replyText;
+      cv.history = history;
+
+      prospect.status = 'Replied';
+      prospect.custom_variables = cv;
+
+      await supabaseDirect.from('prospects').update({
+        status: 'Replied',
+        custom_variables: cv,
+        updated_at: new Date().toISOString()
+      }).eq('id', prospect.id);
+
+      return { success: true, replied: true };
+    }
+  }
+
+  // 2. Alternatively check chats - ONLY if chat.attendee_provider_id explicitly matches THIS prospect
+  const { ok: chatOk, data: chatData } = await unipileFetch(`/chats?account_id=${accountId}&limit=50`);
+  if (chatOk && chatData && Array.isArray(chatData.items)) {
+    const matchingChat = chatData.items.find(c => {
+      return (pProviderId && c.attendee_provider_id === pProviderId) ||
+             (recipientId && c.attendee_provider_id === recipientId);
+    });
+
+    if (matchingChat && matchingChat.id) {
+      const { ok: chatMsgOk, data: chatMsgData } = await unipileFetch(`/chats/${encodeURIComponent(matchingChat.id)}/messages?account_id=${accountId}&limit=50`);
+      if (chatMsgOk && chatMsgData && Array.isArray(chatMsgData.items)) {
+        const firstReply = chatMsgData.items.find(m => {
+          if (m.is_sender !== 0) return false;
           const msgTime = new Date(m.timestamp || m.created_at || 0).getTime();
-          // Must have been received at least 2 seconds after our outreach was sent
           return msgTime > (outreachTimestamp + 2000);
         });
 
@@ -2559,22 +2606,26 @@ export const directCheckProspectReplied = async (prospect) => {
 
           const cv = prospect.custom_variables || {};
           const history = cv.history || [];
-          history.push({
-            node_id: 'check_reply',
-            node_type: 'check_reply',
-            status: 'replied',
-            reply_text: replyText,
-            executed_at: replyDateStr
-          });
+          if (!history.some(h => h.node_type === 'check_reply' && h.executed_at === replyDateStr)) {
+            history.push({
+              node_id: 'check_reply',
+              node_type: 'check_reply',
+              status: 'replied',
+              reply_text: replyText,
+              executed_at: replyDateStr
+            });
+          }
+
+          cv.reply_date = replyDateStr;
+          cv.last_message = replyText;
+          cv.history = history;
+
+          prospect.status = 'Replied';
+          prospect.custom_variables = cv;
 
           await supabaseDirect.from('prospects').update({
             status: 'Replied',
-            custom_variables: {
-              ...cv,
-              reply_date: replyDateStr,
-              last_message: replyText,
-              history
-            },
+            custom_variables: cv,
             updated_at: new Date().toISOString()
           }).eq('id', prospect.id);
 
@@ -2583,6 +2634,7 @@ export const directCheckProspectReplied = async (prospect) => {
       }
     }
   }
+
   return { success: true, replied: false };
 };
 
