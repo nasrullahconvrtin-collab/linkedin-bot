@@ -395,21 +395,23 @@ export default function Inbox() {
       // Select default or pre-selected chat
       if (location.state?.selectProspect) {
         const targetP = location.state.selectProspect;
+        const targetChatId = targetP.custom_variables?.chat_id;
         const found = liveChats.find(c =>
+          (targetChatId && c.id === targetChatId) ||
           c.id === targetP.id ||
-          c.attendee_provider_id === targetP.provider_id ||
+          (targetP.provider_id && c.attendee_provider_id === targetP.provider_id) ||
           (c.name && targetP.name && c.name.toLowerCase() === targetP.name.toLowerCase())
         );
         if (found) {
           setSelectedChat(found);
         } else {
           const tempChat = {
-            id: targetP.id,
+            id: targetChatId || targetP.id,
             name: targetP.name || 'LinkedIn Member',
             account_type: 'LINKEDIN',
             folder: ['INBOX', 'INBOX_LINKEDIN_CLASSIC'],
-            timestamp: targetP.reply_date || targetP.updated_at || new Date().toISOString(),
-            last_message_text: targetP.last_message || 'LinkedIn Conversation',
+            timestamp: targetP.reply_date || targetP.custom_variables?.reply_date || targetP.updated_at || new Date().toISOString(),
+            last_message_text: targetP.last_message || targetP.custom_variables?.last_message || 'LinkedIn Conversation',
             attendee_provider_id: targetP.provider_id || targetP.linkedin_url,
             prospect_ref: targetP,
           };
@@ -554,7 +556,10 @@ export default function Inbox() {
     setLoadingMessages(true);
     setLoadingProfile(true);
 
-    const chatId = selectedChat.id;
+    let chatId = selectedChat.id;
+    if ((!chatId || chatId.includes('-')) && selectedChat.prospect_ref?.custom_variables?.chat_id) {
+      chatId = selectedChat.prospect_ref.custom_variables.chat_id;
+    }
     const attendeeId = selectedChat.attendee_provider_id || selectedChat.prospect_ref?.provider_id || selectedChat.prospect_ref?.linkedin_url || selectedChat.name;
 
     try {
@@ -595,10 +600,11 @@ export default function Inbox() {
       // Fallback message stream if thread is empty
       if (fetchedMsgs.length === 0) {
         const p = selectedChat.prospect_ref;
-        if (p && p.last_message) {
+        const lastMsg = p?.last_message || p?.custom_variables?.last_message;
+        if (p && lastMsg) {
           fetchedMsgs = [
             { id: 'm1', text: `Hi ${p.name ? p.name.split(' ')[0] : 'there'}, thanks for reaching out!`, sender: 'me', timestamp: p.created_at || new Date(Date.now() - 3600000).toISOString() },
-            { id: 'm2', text: p.last_message, sender: 'them', timestamp: p.reply_date || p.updated_at || new Date().toISOString() }
+            { id: 'm2', text: lastMsg, sender: 'them', timestamp: p.reply_date || p.custom_variables?.reply_date || p.updated_at || new Date().toISOString() }
           ];
         }
       }
