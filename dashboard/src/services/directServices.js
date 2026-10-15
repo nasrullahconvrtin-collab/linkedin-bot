@@ -2906,6 +2906,58 @@ export const directRunFlow = async () => {
       if (fullName) relNames.set(fullName, r);
     });
 
+    // Reconcile inbound replies across ALL enrolled prospects (even if previously Completed)
+    if (campaignAccId) {
+      try {
+        const { ok: msgOk, data: msgData } = await unipileFetch(`/messages?account_id=${campaignAccId}&limit=100`);
+        if (msgOk && msgData && Array.isArray(msgData.items)) {
+          const inboundBySender = new Map();
+          msgData.items.forEach(m => {
+            if (m.is_sender === 0 && m.sender_id) {
+              if (!inboundBySender.has(m.sender_id) || (m.timestamp || '') > (inboundBySender.get(m.sender_id).timestamp || '')) {
+                inboundBySender.set(m.sender_id, m);
+              }
+            }
+          });
+
+          for (const p of prospects) {
+            const pProviderId = p.provider_id || p.member_id;
+            const inboundMsg = pProviderId ? inboundBySender.get(pProviderId) : null;
+            if (inboundMsg) {
+              const outreachDate = p.message_sent_date || p.connection_sent_date || p.created_at;
+              const msgTime = inboundMsg.timestamp || '';
+              if (!outreachDate || msgTime > outreachDate) {
+                const replyText = inboundMsg.text || 'Inbound reply';
+                const cv = p.custom_variables || {};
+                if (p.status !== 'Replied' || cv.reply_date !== msgTime) {
+                  console.log(`[Runner] Reconciled inbound reply from ${p.name || p.id}: "${replyText.slice(0, 50)}"`);
+                  p.status = 'Replied';
+                  cv.reply_date = msgTime;
+                  cv.last_message = replyText;
+                  cv.history = [
+                    ...(cv.history || []),
+                    { node_type: 'reply_detected', node_label: 'Prospect Replied', status: 'replied', reply_text: replyText, executed_at: msgTime }
+                  ];
+                  p.custom_variables = cv;
+                  await supabaseDirect.from('prospects').update({
+                    status: 'Replied',
+                    custom_variables: cv,
+                    updated_at: new Date().toISOString()
+                  }).eq('id', p.id);
+                  await supabaseDirect.from('campaign_enrollments').update({
+                    status: 'replied',
+                    updated_at: new Date().toISOString()
+                  }).eq('prospect_id', p.id);
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[Runner] Inbound reply reconciliation warning:', err);
+      }
+    }
+
     for (const prospect of prospects) {
       if (actionsTaken >= effectiveLimit || remainingGlobalQuota <= 0) break;
 
