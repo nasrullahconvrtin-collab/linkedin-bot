@@ -86,6 +86,8 @@ export default async function handler(req, res) {
     const profileMap = new Map((profiles || []).map(p => [p.profile_key, p]));
 
     let totalSentToday = 0;
+    const sentInvitesTodayByAccount = new Map();
+    const todayDateStr = new Date().toISOString().slice(0, 10);
     for (const c of campaigns || []) {
       let profile = profileMap.get(c.profile_key);
       if (!profile && c.organization_id) {
@@ -94,8 +96,6 @@ export default async function handler(req, res) {
       if (!profile || !profile.unipile_account_id) continue;
 
       const dailyConnectionLimit = Number(profile.settings?.daily_connection_limit || 15);
-      if (totalSentToday >= dailyConnectionLimit) break;
-
       const accId = profile.unipile_account_id;
       log(`Processing Campaign '${c.name}' for account '${profile.display_name}' (${accId})`);
 
@@ -124,6 +124,20 @@ export default async function handler(req, res) {
         }
       } catch (e) {
         prospects = await sbFetch(`prospects?campaign_id=eq.${c.id}`);
+      }
+
+      // Count today's successful invitations for this account if not yet initialized
+      if (!sentInvitesTodayByAccount.has(accId)) {
+        let existingTodayCount = 0;
+        for (const p of prospects || []) {
+          const hist = p.custom_variables?.history || [];
+          for (const h of hist) {
+            if (h.node_type === 'send_invitation' && h.status === 'success' && h.executed_at && h.executed_at.startsWith(todayDateStr)) {
+              existingTodayCount += 1;
+            }
+          }
+        }
+        sentInvitesTodayByAccount.set(accId, existingTodayCount);
       }
 
       // Pre-fetch 1st-degree relations to check for connection acceptances
@@ -200,7 +214,7 @@ export default async function handler(req, res) {
           }
         }
 
-        if (["Connection Request Sent", "Connection Sent", "Completed", "Failed", "Replied", "Needs Review", "Needs Attention"].includes(p.status)) continue;
+        if (["Connection Request Sent", "Connection Sent", "Completed", "Failed", "Replied", "Needs Review", "Needs Attention", "Awaiting SDR Approval"].includes(p.status)) continue;
 
         let currentNodeId = cv.current_node_id || startNode.id;
         let currentNode = nodesMap.get(currentNodeId);
@@ -279,25 +293,26 @@ export default async function handler(req, res) {
             continue;
           }
 
-          if (totalSentToday >= dailyConnectionLimit) continue;
+          const accSentToday = sentInvitesTodayByAccount.get(accId) || 0;
+          if (accSentToday >= dailyConnectionLimit) continue;
 
+          const pName = p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim();
           let providerId = p.provider_id;
-          if (!providerId) {
-            const pubId = extractPublicId(p.linkedin_url);
+          if (!providerId || !String(providerId).startsWith("AC")) {
+            const pubId = extractPublicId(p.linkedin_url) || p.public_identifier;
             if (pubId) {
               const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(pubId)}?account_id=${accId}`);
               if (ok && data) providerId = data.provider_id || data.id;
             }
           }
 
-          if (!providerId) {
-            log(`Could not resolve providerId for ${pName || p.id}. Marking Needs Review.`);
+          if (!providerId || !String(providerId).startsWith("AC")) {
+            log(`Could not resolve valid ACo/ACw providerId for ${pName || p.id}. Marking Needs Review.`);
             cv.history = [...(cv.history || []), { node_type: "send_invitation", node_label: "Profile Not Found", status: "failed", error: "Invalid LinkedIn URL or profile locked", executed_at: new Date().toISOString() }];
             await sbFetch(`prospects?id=eq.${p.id}`, { method: "PATCH", body: JSON.stringify({ status: "Needs Review", custom_variables: cv }) });
             continue;
           }
 
-          const pName = p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim();
           log(`Sending connection invite to ${pName}...`);
           const { ok, data } = await unipileFetch("/users/invite", {
             method: "POST",
@@ -314,6 +329,7 @@ export default async function handler(req, res) {
 
           if (ok || isAlreadyInvited) {
             totalSentToday += 1;
+            sentInvitesTodayByAccount.set(accId, accSentToday + 1);
             log(`SUCCESS: Connection invite ${isAlreadyInvited ? 'already sent previously' : 'sent'} for ${pName}!`);
             cv.history = [
               ...(cv.history || []),
@@ -325,7 +341,13 @@ export default async function handler(req, res) {
                 detail: isAlreadyInvited ? "Invitation was already pending on LinkedIn" : undefined
               }
             ];
-            if (nextEdge) cv.current_node_id = nextEdge.target;
+            // Keep current_node_id on send_invitation until acceptance reconciliation advances it (unless next node is completed)
+            const nextNode = nextEdge ? nodesMap.get(nextEdge.target) : null;
+            if (nextNode && (nextNode.data?.nodeType === 'completed' || nextNode.type === 'completed')) {
+              cv.current_node_id = nextEdge.target;
+            } else {
+              cv.current_node_id = currentNode.id;
+            }
 
             await sbFetch(`prospects?id=eq.${p.id}`, {
               method: "PATCH",
@@ -339,13 +361,6 @@ export default async function handler(req, res) {
             });
           } else {
             log(`FAILED invite for ${pName}: ${data?.detail || "Invite failed"}`);
-            const isFatal = errStr.toLowerCase().includes("cannot") ||
-                            errStr.toLowerCase().includes("not allowed") ||
-                            errStr.toLowerCase().includes("restricted") ||
-                            errStr.toLowerCase().includes("blocked") ||
-                            errStr.toLowerCase().includes("recipient id is valid") ||
-                            errStr.toLowerCase().includes("locked");
-
             const isProviderLimit = errStr.toLowerCase().includes("provider limit") ||
                                     errStr.toLowerCase().includes("rate limit") ||
                                     errStr.toLowerCase().includes("too many requests");
@@ -362,8 +377,9 @@ export default async function handler(req, res) {
             ];
 
             const patchBody = { custom_variables: cv };
-            if (isFatal) {
+            if (!isProviderLimit) {
               patchBody.status = "Needs Review";
+              cv.review_reason = data?.detail || "Connection invite failed";
             }
             await sbFetch(`prospects?id=eq.${p.id}`, { method: "PATCH", body: JSON.stringify(patchBody) });
 
@@ -378,13 +394,19 @@ export default async function handler(req, res) {
               break;
             }
           }
+          continue;
         }
 
         // 4. Send Message (Direct chat messaging for connected prospects)
         if (nodeType === 'send_message') {
+          if (p.status === 'Connection Request Sent' || p.status === 'Connection Sent' || (p.connection_status === 'invitation_sent' && p.status !== 'Connection Accepted')) {
+            log(`Skipping send_message for ${p.name || p.id}: connection invite not yet accepted.`);
+            continue;
+          }
+
           let recipientId = p.provider_id || p.member_id;
-          if (!recipientId) {
-            const pubId = extractPublicId(p.linkedin_url);
+          if (!recipientId || !String(recipientId).startsWith("AC")) {
+            const pubId = extractPublicId(p.linkedin_url) || p.public_identifier;
             if (pubId) {
               const { ok, data } = await unipileFetch(`/users/${encodeURIComponent(pubId)}?account_id=${accId}`);
               if (ok && data) recipientId = data.provider_id || data.id;
@@ -434,7 +456,8 @@ export default async function handler(req, res) {
                   })
                 });
               } else {
-                log(`FAILED send message to ${pName}: ${data?.detail || "Send message failed"}`);
+                const errDetail = String(data?.detail || "Send message failed");
+                log(`FAILED send message to ${pName}: ${errDetail}`);
                 cv.history = [
                   ...(cv.history || []),
                   {
@@ -442,13 +465,26 @@ export default async function handler(req, res) {
                     node_type: "send_message",
                     node_label: currentNode.data?.label || "Send Message",
                     status: "failed",
-                    error: data?.detail || "Send message failed",
+                    error: errDetail,
                     executed_at: nowIso
                   }
                 ];
+                const patchObj = { custom_variables: cv };
+                const errLower = errDetail.toLowerCase();
+                if (errLower.includes("not to be first degree") || errLower.includes("requires a subscription")) {
+                  if (p.connection_sent_date || cv.invitation_sent_at) {
+                    patchObj.status = "Connection Request Sent";
+                    const invNode = Array.from(nodesMap.values()).find(n => (n.data?.nodeType === 'send_invitation' || n.type === 'send_invitation'));
+                    if (invNode) cv.current_node_id = invNode.id;
+                  } else {
+                    patchObj.status = "Needs Review";
+                  }
+                } else {
+                  patchObj.status = "Needs Review";
+                }
                 await sbFetch(`prospects?id=eq.${p.id}`, {
                   method: "PATCH",
-                  body: JSON.stringify({ custom_variables: cv })
+                  body: JSON.stringify(patchObj)
                 });
               }
             }

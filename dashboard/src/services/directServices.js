@@ -2156,9 +2156,25 @@ export const directEndorseProfile = async (prospect) => {
 };
 
 export const directSendUnipileConnectionInvite = async (prospect, message = '') => {
-  const provider_id = getLinkedinId(prospect);
   const accountId = await getAccountForProspect(prospect);
   if (!accountId) return { success: false, error: 'NO_CONNECTED_ACCOUNT' };
+
+  let provider_id = prospect.provider_id || prospect.member_id || '';
+  if (!provider_id || !String(provider_id).startsWith('AC')) {
+    const resolved = await directResolveLinkedinProfile(prospect);
+    if (resolved && (resolved.provider_id || resolved.id)) {
+      provider_id = resolved.provider_id || resolved.id;
+    } else {
+      provider_id = prospect.provider_id || '';
+    }
+  }
+
+  if (!provider_id || !String(provider_id).startsWith('AC')) {
+    return {
+      success: false,
+      error: prospect._lastResolveError || 'Could not resolve valid LinkedIn provider_id (ACo/ACw) for prospect',
+    };
+  }
 
   // Pre-invite human review pause
   await humanPause(12, 30, `Reviewing ${prospect.name || 'prospect'} before sending invitation`);
@@ -2805,7 +2821,7 @@ export const directRunFlow = async () => {
     (allProspects || []).forEach(p => {
       const history = p.custom_variables?.history || [];
       history.forEach(h => {
-        if (h.executed_at && h.executed_at.startsWith(todayDateStr)) {
+        if (h.executed_at && h.executed_at.startsWith(todayDateStr) && h.status === 'success') {
           todayActionsTotal += 1;
           if (h.node_type === 'send_invitation') todayConnectionsTotal += 1;
           if (h.node_type === 'send_message') todayMessagesTotal += 1;
@@ -2973,7 +2989,7 @@ export const directRunFlow = async () => {
         }
       } catch (e) {}
 
-      if (['Completed', 'Failed', 'Replied'].includes(prospect.status)) {
+      if (['Completed', 'Failed', 'Replied', 'Needs Review', 'Needs Attention', 'Awaiting SDR Approval'].includes(prospect.status)) {
         continue;
       }
 
@@ -3059,10 +3075,10 @@ export const directRunFlow = async () => {
       let nodeConfig = currentNode.data?.config || {};
       let nodeLabel = currentNode.data?.label || currentNode.id;
 
-      // Auto-resolve LinkedIn IDs if the prospect has not been visited/resolved yet
+      // Auto-resolve LinkedIn IDs if the prospect does not have a valid ACo/ACw provider_id yet
       const isActionNode = ['follow_profile', 'endorse_profile', 'send_invitation', 'send_message'].includes(nodeType);
-      if (isActionNode && !prospect.provider_id && !prospect.member_id) {
-        console.log(`Prospect ${prospect.name || prospect.id} does not have resolved provider IDs. Performing auto-visit resolution...`);
+      if (isActionNode && (!prospect.provider_id || !String(prospect.provider_id).startsWith('AC'))) {
+        console.log(`Prospect ${prospect.name || prospect.id} does not have resolved ACo/ACw provider ID. Performing auto-visit resolution...`);
         await directVisitProfile(prospect);
       }
 
@@ -3206,12 +3222,11 @@ export const directRunFlow = async () => {
           const inviteNote = hasNoteToggle ? render(nodeConfig.note || '') : '';
           console.log(`Sending connection invite to ${prospect.name} (hasNote=${hasNoteToggle})...`);
           const res = await directSendUnipileConnectionInvite(prospect, inviteNote);
-          
-          actionsTaken += 1;
-          todayConnectionsTotal += 1;
-          todayActionsTotal += 1;
 
           if (res.success) {
+            actionsTaken += 1;
+            todayConnectionsTotal += 1;
+            todayActionsTotal += 1;
             totalConnections += 1;
             prospect.status = 'Connection Request Sent';
             prospect.connection_status = 'invitation_sent';
@@ -3238,6 +3253,9 @@ export const directRunFlow = async () => {
 
             if (isAlreadyInvited) {
               console.log(`Prospect ${prospect.name} was already invited recently. Marking Connection Request Sent.`);
+              actionsTaken += 1;
+              todayConnectionsTotal += 1;
+              todayActionsTotal += 1;
               totalConnections += 1;
               prospect.status = 'Connection Request Sent';
               prospect.connection_status = 'invitation_sent';
@@ -3261,8 +3279,16 @@ export const directRunFlow = async () => {
                 ...(prospect.custom_variables.history || []),
                 { node_id: currentNode.id, node_type: 'send_invitation', executed_at: new Date().toISOString(), status: 'failed', error: res.error }
               ];
+
+              // Mark failed prospects as Needs Review so the runner skips them and continues to complete daily limits
+              if (!isProviderLimitError(res.error)) {
+                prospect.status = 'Needs Review';
+                prospect.custom_variables.review_reason = res.error || 'Connection invite failed';
+              }
+
               try {
                 await supabaseDirect.from('prospects').update({
+                  status: prospect.status,
                   custom_variables: prospect.custom_variables
                 }).eq('id', prospect.id);
               } catch (e) {
@@ -3286,33 +3312,25 @@ export const directRunFlow = async () => {
           }
           continue;
         } else if (!isConnected) {
-          const sentAtStr = prospect.custom_variables?.invitation_sent_at || prospect.custom_variables?.last_action_at || prospect.connection_sent_date || prospect.created_at;
-          const waitDays = Number(nodeConfig.max_wait_days) || 14;
-          const isTimedOut = Date.now() - new Date(sentAtStr).getTime() > waitDays * 24 * 60 * 60 * 1000;
-
-          if (isTimedOut) {
-            console.log(`Connection request to ${prospect.name} timed out after ${waitDays} days.`);
-            prospect.status = 'Failed';
-            prospect.custom_variables.history = [
-              ...(prospect.custom_variables.history || []),
-              { node_id: currentNode.id, node_type: 'send_invitation', executed_at: new Date().toISOString(), status: 'timeout' }
-            ];
-            try {
-              await supabaseDirect.from('prospects').update({
-                status: 'Failed',
-                custom_variables: prospect.custom_variables
-              }).eq('id', prospect.id);
-            } catch (e) {
-              console.warn(e);
-            }
-          } else {
-            console.log(`Waiting for connection acceptance from ${prospect.name}...`);
-          }
+          console.log(`Waiting for connection acceptance from ${prospect.name}...`);
           continue;
         }
       }
 
       if (nodeType === 'send_message') {
+        // SAFETY GUARD: Never send direct chat message if prospect is still waiting for connection acceptance
+        if (prospect.status === 'Connection Request Sent' || (prospect.connection_status === 'invitation_sent' && prospect.status !== 'Connection Accepted')) {
+          console.log(`[Runner] ${prospect.name} has not accepted connection invite yet (status=${prospect.status}). Waiting for acceptance before sending message.`);
+          const invNode = Array.from(nodesMap.values()).find(n => (n.data?.nodeType === 'send_invitation' || n.data?.action_type === 'send_invitation'));
+          if (invNode && prospect.custom_variables.current_node_id !== invNode.id) {
+            prospect.custom_variables.current_node_id = invNode.id;
+            try {
+              await supabaseDirect.from('prospects').update({ custom_variables: prospect.custom_variables }).eq('id', prospect.id);
+            } catch (e) {}
+          }
+          continue;
+        }
+
         const edges = sourceEdgesMap.get(currentNode.id) || [];
         const defaultEdge = edges.find(e => !e.data?.condition || e.data.condition === 'default');
         const wasSent = prospect.custom_variables.last_sent_node_id === currentNode.id;
@@ -3380,7 +3398,9 @@ export const directRunFlow = async () => {
             delete prospect.custom_variables.send_in_progress_at;
 
             const errStr = String(res.error || '');
-            const isNotConnected = errStr.toLowerCase().includes('not to be first degree') || errStr.toLowerCase().includes('not a first degree');
+            const isNotConnected = errStr.toLowerCase().includes('not to be first degree') ||
+                                   errStr.toLowerCase().includes('not a first degree') ||
+                                   errStr.toLowerCase().includes('requires a subscription');
 
             if (isNotConnected) {
               console.warn(`[Runner] ${prospect.name} is NOT a 1st degree connection. Reverting status to wait for acceptance.`);
@@ -3396,6 +3416,9 @@ export const directRunFlow = async () => {
                 prospect.status = 'Needs Review';
                 prospect.connection_status = 'not_connected';
               }
+            } else if (!isProviderLimitError(res.error)) {
+              prospect.status = 'Needs Review';
+              prospect.custom_variables.review_reason = res.error || 'Message send failed';
             }
 
             prospect.custom_variables.history = [
