@@ -2319,6 +2319,9 @@ export const directSendUnipileChatMessage = async (prospect, text = '') => {
 export const directSendUnipileChatMessageWithAttachments = async (chatId, text = '', files = [], overrideAccountId = null) => {
   try {
     let accountId = overrideAccountId;
+    if (!accountId && typeof window !== 'undefined') {
+      accountId = localStorage.getItem('lf_selected_account_id') || localStorage.getItem('lf_active_account_id');
+    }
     if (!accountId) {
       const userProfiles = await directGetProfiles();
       accountId = userProfiles?.[0]?.unipile_account_id;
@@ -2333,7 +2336,11 @@ export const directSendUnipileChatMessageWithAttachments = async (chatId, text =
           text: text,
         }),
       });
-      return { success: ok, data };
+      return {
+        success: ok,
+        data,
+        error: ok ? null : (data?.detail || data?.message || data?.title || 'Failed to send message')
+      };
     }
 
     const formData = new FormData();
@@ -2344,7 +2351,11 @@ export const directSendUnipileChatMessageWithAttachments = async (chatId, text =
     });
 
     const { ok, data } = await unipileFormFetch(`/chats/${encodeURIComponent(chatId)}/messages`, formData);
-    return { success: ok, data };
+    return {
+      success: ok,
+      data,
+      error: ok ? null : (data?.detail || data?.message || data?.title || 'Failed to send file attachment via Unipile')
+    };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -2353,6 +2364,9 @@ export const directSendUnipileChatMessageWithAttachments = async (chatId, text =
 export const directSendUnipileVoiceMessageInChat = async (chatId, audioBlobOrFile, companionText = '', overrideAccountId = null) => {
   try {
     let accountId = overrideAccountId;
+    if (!accountId && typeof window !== 'undefined') {
+      accountId = localStorage.getItem('lf_selected_account_id') || localStorage.getItem('lf_active_account_id');
+    }
     if (!accountId) {
       const userProfiles = await directGetProfiles();
       accountId = userProfiles?.[0]?.unipile_account_id;
@@ -2373,7 +2387,11 @@ export const directSendUnipileVoiceMessageInChat = async (chatId, audioBlobOrFil
     }
 
     const { ok, data } = await unipileFormFetch(`/chats/${encodeURIComponent(chatId)}/messages`, formData);
-    return { success: ok, data };
+    return {
+      success: ok,
+      data,
+      error: ok ? null : (data?.detail || data?.message || data?.title || 'Failed to send voice message via Unipile')
+    };
   } catch (err) {
     console.error('directSendUnipileVoiceMessageInChat error:', err);
     return { success: false, error: err.message };

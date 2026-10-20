@@ -865,6 +865,9 @@ export default function Inbox() {
     clearRecordedAudio();
     setSending(true);
 
+    // Resolve the exact account that owns this chat (critical for multi-account send, e.g. Meglina)
+    const targetAccountId = selectedChat?.account_id || selectedAccountId || (typeof window !== 'undefined' ? (localStorage.getItem('lf_selected_account_id') || localStorage.getItem('lf_active_account_id')) : null);
+
     // If sending a recorded voice note
     if (voiceBlobToSend) {
       const localAttachments = [{
@@ -887,7 +890,7 @@ export default function Inbox() {
       saveLocalSentMessage(chatId, newMsg);
 
       try {
-        const res = await directSendUnipileVoiceMessageInChat(chatId, voiceBlobToSend, messageText);
+        const res = await directSendUnipileVoiceMessageInChat(chatId, voiceBlobToSend, messageText, targetAccountId);
         if (res.success) {
           toast.success('Voice message delivered!');
           setChats(prev => prev.map(c => c.id === chatId ? { ...c, last_message_text: messageText || '🎙️ Sent voice note', timestamp: new Date().toISOString() } : c));
@@ -926,7 +929,7 @@ export default function Inbox() {
     saveLocalSentMessage(chatId, newMsg);
 
     try {
-      const res = await directSendUnipileChatMessageWithAttachments(chatId, messageText, filesToSend);
+      const res = await directSendUnipileChatMessageWithAttachments(chatId, messageText, filesToSend, targetAccountId);
       if (res.success) {
         toast.success(filesToSend.length > 0 ? `Sent with ${filesToSend.length} file(s)!` : 'Message delivered!');
         setChats(prev => prev.map(c => c.id === chatId ? { ...c, last_message_text: messageText || `📎 Sent ${filesToSend.length} file(s)`, timestamp: new Date().toISOString() } : c));
