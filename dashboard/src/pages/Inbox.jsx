@@ -57,6 +57,17 @@ function saveLocalSentMessage(chatId, msgObj) {
   }
 }
 
+function removeLocalSentMessage(chatId, msgId) {
+  if (!chatId || !msgId) return;
+  try {
+    const existing = getLocalSentMessages(chatId);
+    const updated = existing.filter(m => m.id !== msgId);
+    localStorage.setItem(getChatStorageKey(chatId), JSON.stringify(updated));
+  } catch (err) {
+    console.warn('LocalStorage remove warning:', err);
+  }
+}
+
 function formatRelativeTime(isoStr) {
   if (!isoStr) return '';
   try {
@@ -895,9 +906,15 @@ export default function Inbox() {
           toast.success('Voice message delivered!');
           setChats(prev => prev.map(c => c.id === chatId ? { ...c, last_message_text: messageText || '🎙️ Sent voice note', timestamp: new Date().toISOString() } : c));
         } else {
+          removeLocalSentMessage(chatId, newMsg.id);
+          setMessages(prev => prev.filter(m => m.id !== newMsg.id));
+          setInputText(messageText);
           toast.error(res.error || 'Failed to send voice message');
         }
       } catch (err) {
+        removeLocalSentMessage(chatId, newMsg.id);
+        setMessages(prev => prev.filter(m => m.id !== newMsg.id));
+        setInputText(messageText);
         toast.error('Error sending voice message');
       } finally {
         setSending(false);
@@ -934,9 +951,17 @@ export default function Inbox() {
         toast.success(filesToSend.length > 0 ? `Sent with ${filesToSend.length} file(s)!` : 'Message delivered!');
         setChats(prev => prev.map(c => c.id === chatId ? { ...c, last_message_text: messageText || `📎 Sent ${filesToSend.length} file(s)`, timestamp: new Date().toISOString() } : c));
       } else {
+        removeLocalSentMessage(chatId, newMsg.id);
+        setMessages(prev => prev.filter(m => m.id !== newMsg.id));
+        setInputText(messageText);
+        setAttachedFiles(filesToSend);
         toast.error(res.error || 'Failed to send message via Unipile');
       }
     } catch (err) {
+      removeLocalSentMessage(chatId, newMsg.id);
+      setMessages(prev => prev.filter(m => m.id !== newMsg.id));
+      setInputText(messageText);
+      setAttachedFiles(filesToSend);
       toast.error('Error sending message');
     } finally {
       setSending(false);
@@ -1056,10 +1081,21 @@ export default function Inbox() {
             <span>LinkedIn Live Sync</span>
           </div>
           <button
-            onClick={() => loadConversations(selectedAccountId)}
+            onClick={() => {
+              if (selectedChat?.id) {
+                try {
+                  localStorage.removeItem(getChatStorageKey(selectedChat.id));
+                } catch (e) {}
+              }
+              loadConversations(selectedAccountId);
+              if (selectedChat?.id) {
+                loadThread(selectedChat.id);
+              }
+              toast.success('Synced live with LinkedIn');
+            }}
             disabled={loadingList}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[#2a2a2a] bg-[#141414] hover:bg-[#222222] text-[#9ca3af] hover:text-white text-xs font-medium transition-all cursor-pointer"
-            title="Refresh Conversations"
+            title="Refresh Conversations and clear local cache"
           >
             <RefreshCw size={14} className={loadingList ? 'animate-spin text-[#6366f1]' : ''} />
             <span>Sync</span>
@@ -1406,9 +1442,23 @@ export default function Inbox() {
                               </div>
 
                               {/* Message Delivery Timestamp with Read Checkmarks */}
-                              <div className={`flex items-center gap-1 text-[10px] text-[#737373] mt-1 ${isMe ? 'justify-end pr-0.5' : 'justify-start pl-0.5'}`}>
+                              <div className={`flex items-center gap-1.5 text-[10px] text-[#737373] mt-1 ${isMe ? 'justify-end pr-0.5' : 'justify-start pl-0.5'}`}>
                                 <span>{timeStr}</span>
                                 {isMe && <CheckCheck size={12} className="text-indigo-400" />}
+                                {isMe && String(m.id || '').startsWith('sent_') && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      removeLocalSentMessage(selectedChat?.id, m.id);
+                                      setMessages(prev => prev.filter(x => x.id !== m.id));
+                                      toast.success('Cleared unconfirmed local cache');
+                                    }}
+                                    className="text-[10px] text-amber-400 hover:text-amber-300 ml-2 underline cursor-pointer"
+                                    title="This message was cached locally and not confirmed by LinkedIn. Click to remove."
+                                  >
+                                    (Unconfirmed — Click to clear)
+                                  </button>
+                                )}
                               </div>
                             </div>
                           </div>
