@@ -43,53 +43,57 @@ function getEventDate(prospect, eventType) {
 
   if (eventType === 'invitation') {
     if (prospect.connection_sent_date) return new Date(prospect.connection_sent_date);
+    if (prospect.invitation_sent_at) return new Date(prospect.invitation_sent_at);
     if (cv.invitation_sent_at) return new Date(cv.invitation_sent_at);
+    if (cv.connection_sent_date) return new Date(cv.connection_sent_date);
 
-    const item = hist.find(h => h.node_type === 'send_invitation' && (h.status === 'success' || String(h.node_label || '').includes('Sent')));
+    const item = hist.find(h => (h.node_type === 'send_invitation' || h.node_type === 'connect' || h.action === 'send_invitation') && (h.status === 'success' || String(h.node_label || '').toLowerCase().includes('sent')));
     if (item?.executed_at) return new Date(item.executed_at);
-
-    const st = String(prospect.status || '').toLowerCase();
-    const connSt = String(prospect.connection_status || '').toLowerCase();
-    if (st.includes('sent') || st.includes('request') || connSt.includes('sent') || connSt.includes('invitation')) {
-      return prospect.updated_at ? new Date(prospect.updated_at) : (prospect.created_at ? new Date(prospect.created_at) : null);
-    }
+    return null;
   }
 
   if (eventType === 'acceptance') {
-    if (prospect.accepted_at || cv.accepted_at) return new Date(prospect.accepted_at || cv.accepted_at);
-    const item = hist.find(h => (h.node_type === 'check_acceptance' || h.node_type === 'connection_accepted' || String(h.node_label || '').includes('Accept')) && h.status === 'success');
+    if (prospect.accepted_at) return new Date(prospect.accepted_at);
+    if (cv.accepted_at) return new Date(cv.accepted_at);
+
+    const item = hist.find(h => (h.node_type === 'check_acceptance' || h.node_type === 'connection_accepted') && (h.status === 'success' || h.status === 'accepted'));
     if (item?.executed_at) return new Date(item.executed_at);
 
-    const st = String(prospect.status || '').toLowerCase();
-    const connSt = String(prospect.connection_status || '').toLowerCase();
-    if (st.includes('accept') || st.includes('connect') || connSt.includes('connect')) {
-      return prospect.updated_at ? new Date(prospect.updated_at) : (prospect.created_at ? new Date(prospect.created_at) : null);
+    const st = String(prospect.status || '').toLowerCase().trim();
+    const connSt = String(prospect.connection_status || '').toLowerCase().trim();
+    if (st === 'connection accepted' || st === 'accepted' || connSt === 'connected') {
+      if (prospect.updated_at) return new Date(prospect.updated_at);
     }
+    return null;
   }
 
   if (eventType === 'message') {
-    if (prospect.message_sent_date || cv.message_sent_at) return new Date(prospect.message_sent_date || cv.message_sent_at);
-    const item = hist.find(h => h.node_type === 'send_message' && h.status === 'success');
+    if (prospect.message_sent_date) return new Date(prospect.message_sent_date);
+    if (cv.message_sent_at) return new Date(cv.message_sent_at);
+    if (cv.last_message_at) return new Date(cv.last_message_at);
+
+    const item = hist.find(h => (h.node_type === 'send_message' || h.node_type === 'send_voice_message' || h.node_type === 'initial_message' || h.node_type === 'followup_message') && h.status === 'success');
     if (item?.executed_at) return new Date(item.executed_at);
-    if (String(prospect.status || '').toLowerCase().includes('message')) {
-      return prospect.updated_at ? new Date(prospect.updated_at) : null;
-    }
+    return null;
   }
 
   if (eventType === 'reply') {
-    const item = hist.find(h => (h.node_type === 'check_reply' || h.node_type === 'replied') && (h.status === 'replied' || h.status === 'success'));
+    if (prospect.reply_date) return new Date(prospect.reply_date);
+    if (cv.reply_date) return new Date(cv.reply_date);
+
+    const item = hist.find(h => (h.node_type === 'check_reply' || h.node_type === 'reply_detected' || h.node_type === 'replied') && (h.status === 'replied' || h.status === 'success'));
     if (item?.executed_at) return new Date(item.executed_at);
-    if (String(prospect.status || '').toLowerCase().includes('repli') || prospect.reply_date) {
-      return prospect.reply_date ? new Date(prospect.reply_date) : (prospect.updated_at ? new Date(prospect.updated_at) : null);
-    }
+    return null;
   }
 
   if (eventType === 'visit') {
-    const item = hist.find(h => h.node_type === 'visit_profile' && h.status === 'success');
+    if (prospect.profile_viewed_at) return new Date(prospect.profile_viewed_at);
+    if (cv.profile_viewed_at) return new Date(cv.profile_viewed_at);
+    if (cv.viewed_at) return new Date(cv.viewed_at);
+
+    const item = hist.find(h => (h.node_type === 'visit_profile' || h.node_type === 'deep_scrape') && h.status === 'success');
     if (item?.executed_at) return new Date(item.executed_at);
-    if (String(prospect.status || '').toLowerCase().includes('visit')) {
-      return prospect.updated_at ? new Date(prospect.updated_at) : null;
-    }
+    return null;
   }
 
   return null;
@@ -255,9 +259,9 @@ export default function Dashboard() {
   const timelineReplies = useMemo(() => {
     const { start, end } = dateBounds;
     return (prospects || []).filter(p => {
-      if (!p.campaign_id || !p.reply_date) return false;
-      const d = new Date(p.reply_date);
-      return d >= start && d <= end;
+      if (!p.campaign_id) return false;
+      const d = getEventDate(p, 'reply');
+      return d && d >= start && d <= end;
     });
   }, [prospects, dateBounds]);
 
@@ -267,82 +271,37 @@ export default function Dashboard() {
     (prospects || []).forEach(p => {
       const prospectName = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || p.name || 'LinkedIn Member';
       const headlineStr = p.title || p.company || 'Prospect';
-      
-      if (p.connection_sent_date) {
-        const d = new Date(p.connection_sent_date);
-        if (d >= start && d <= end) {
-          list.push({
-            id: p.id + '_conn',
-            name: prospectName,
-            headline: headlineStr,
-            avatar_url: p.avatar_url,
-            action: 'Connection request sent',
-            campaign_id: p.campaign_id,
-            timestamp: d,
-          });
-        }
+      const avatarUrl = p.avatar_url || p.profile_picture_url;
+
+      const invDate = getEventDate(p, 'invitation');
+      if (invDate && invDate >= start && invDate <= end) {
+        list.push({ id: p.id + '_conn', name: prospectName, headline: headlineStr, avatar_url: avatarUrl, action: 'Connection request sent', campaign_id: p.campaign_id, timestamp: invDate });
       }
-      if (p.accepted_at) {
-        const d = new Date(p.accepted_at);
-        if (d >= start && d <= end) {
-          list.push({
-            id: p.id + '_acc',
-            name: prospectName,
-            headline: headlineStr,
-            avatar_url: p.avatar_url,
-            action: 'Connection accepted',
-            campaign_id: p.campaign_id,
-            timestamp: d,
-          });
-        }
+
+      const accDate = getEventDate(p, 'acceptance');
+      if (accDate && accDate >= start && accDate <= end) {
+        list.push({ id: p.id + '_acc', name: prospectName, headline: headlineStr, avatar_url: avatarUrl, action: 'Connection accepted', campaign_id: p.campaign_id, timestamp: accDate });
       }
-      if (p.message_sent_date) {
-        const d = new Date(p.message_sent_date);
-        if (d >= start && d <= end) {
-          list.push({
-            id: p.id + '_msg',
-            name: prospectName,
-            headline: headlineStr,
-            avatar_url: p.avatar_url,
-            action: 'Message sent',
-            campaign_id: p.campaign_id,
-            timestamp: d,
-          });
-        }
+
+      const msgDate = getEventDate(p, 'message');
+      if (msgDate && msgDate >= start && msgDate <= end) {
+        list.push({ id: p.id + '_msg', name: prospectName, headline: headlineStr, avatar_url: avatarUrl, action: 'Message sent', campaign_id: p.campaign_id, timestamp: msgDate });
       }
-      if (p.reply_date && p.campaign_id) {
-        const d = new Date(p.reply_date);
-        if (d >= start && d <= end) {
-          list.push({
-            id: p.id + '_rep',
-            name: prospectName,
-            headline: headlineStr,
-            avatar_url: p.avatar_url,
-            action: 'LinkedIn reply detected',
-            campaign_id: p.campaign_id,
-            timestamp: d,
-          });
-        }
+
+      const repDate = getEventDate(p, 'reply');
+      if (repDate && p.campaign_id && repDate >= start && repDate <= end) {
+        list.push({ id: p.id + '_rep', name: prospectName, headline: headlineStr, avatar_url: avatarUrl, action: 'LinkedIn reply detected', campaign_id: p.campaign_id, timestamp: repDate });
       }
-      if (p.visited_date) {
-        const d = new Date(p.visited_date);
-        if (d >= start && d <= end) {
-          list.push({
-            id: p.id + '_vis',
-            name: prospectName,
-            headline: headlineStr,
-            avatar_url: p.avatar_url,
-            action: 'Profile visited',
-            campaign_id: p.campaign_id,
-            timestamp: d,
-          });
-        }
+
+      const visDate = getEventDate(p, 'visit');
+      if (visDate && visDate >= start && visDate <= end) {
+        list.push({ id: p.id + '_vis', name: prospectName, headline: headlineStr, avatar_url: avatarUrl, action: 'Profile visited', campaign_id: p.campaign_id, timestamp: visDate });
       }
     });
 
     return list
       .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(0, 10)
+      .slice(0, 15)
       .map(act => ({
         ...act,
         time: act.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
