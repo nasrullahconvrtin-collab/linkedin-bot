@@ -1,5 +1,8 @@
 const STATUS_STYLES = {
   '':                        { label: 'Not Contacted',          cls: 'bg-[#1a1a1a] text-[#6b7280] border border-[#2a2a2a]' },
+  'Not Contacted':           { label: 'Not Contacted',          cls: 'bg-[#1a1a1a] text-[#6b7280] border border-[#2a2a2a]' },
+  'Queued in Campaign':      { label: 'Queued',                 cls: 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' },
+  'Needs Review':            { label: 'Needs Review',           cls: 'bg-amber-500/10 text-amber-400 border border-amber-500/20' },
   'Connection Request Sent': { label: 'Connection Sent',        cls: 'bg-blue-500/10 text-blue-400 border border-blue-500/20' },
   'Connection Accepted':     { label: 'Connected',              cls: 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20' },
   'Needs Personalization':   { label: 'Needs Personalization',  cls: 'bg-indigo-500/10 text-indigo-300 border border-indigo-500/20' },
